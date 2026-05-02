@@ -59,3 +59,60 @@ export async function insertArbAlerts(rows) {
   if (error) throw new Error(`arb_alerts insert: ${error.message}`);
   return { count: data?.length ?? 0 };
 }
+
+// ---------- posted_alerts (Phase 3) ----------
+//
+// Cross-scanner dedup. Engine + Edge Functions all write the same alert_keys,
+// so posted_alerts is the canonical "did we already alert on this in the last
+// N hours?" check. 24h cooldown for movers (matches the Edge Function it
+// replaces); 6h cooldown for commodity edges (matches the commodity-edge cron
+// cadence).
+//
+// On dedup-query failure we fall through to "post unfiltered" — a noisy
+// re-alert is less harmful than missing one entirely if posted_alerts itself
+// goes down.
+
+export async function filterAlreadyPostedKeys(alertKeys, { hoursWindow = 24 } = {}) {
+  if (!alertKeys || alertKeys.length === 0) return new Set();
+  const sb = getClient();
+  const cutoff = new Date(Date.now() - hoursWindow * 3600_000).toISOString();
+  const { data, error } = await sb
+    .from('posted_alerts')
+    .select('alert_key')
+    .in('alert_key', alertKeys)
+    .gte('posted_at', cutoff);
+  if (error) {
+    console.warn('[posted_alerts] dedup query failed, posting unfiltered:', error.message);
+    return new Set();
+  }
+  return new Set((data ?? []).map((r) => r.alert_key));
+}
+
+// Upsert posted-alert rows. onConflict on alert_key — same key + a fresh
+// posted_at extends the cooldown window, which is the desired behavior.
+export async function recordPostedAlerts(rows) {
+  if (!rows || rows.length === 0) return { count: 0 };
+  const sb = getClient();
+  const { error } = await sb
+    .from('posted_alerts')
+    .upsert(rows, { onConflict: 'alert_key' });
+  if (error) {
+    console.error('[posted_alerts] upsert failed:', error.message);
+    return { count: 0 };
+  }
+  return { count: rows.length };
+}
+
+// Write feed_performance rows for backtest scoring. feed_type chosen by caller
+// ('market_movers', 'commodity_edge'). Errors are logged but not thrown — a
+// missed performance row doesn't block the user-facing Discord post.
+export async function recordFeedPerformance(rows) {
+  if (!rows || rows.length === 0) return { count: 0 };
+  const sb = getClient();
+  const { error } = await sb.from('feed_performance').insert(rows);
+  if (error) {
+    console.error('[feed_performance] insert failed:', error.message);
+    return { count: 0 };
+  }
+  return { count: rows.length };
+}

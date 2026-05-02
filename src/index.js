@@ -2,7 +2,13 @@ import 'dotenv/config';
 import http from 'node:http';
 
 import { initSentry, Sentry } from './observability/sentry.js';
-import { snapshot, registerFeed, recordTick } from './observability/health.js';
+import {
+  snapshot,
+  registerFeed,
+  markFeedRequired,
+  recordTick,
+  evaluateLiveness,
+} from './observability/health.js';
 import { startKalshi, stopKalshi, getQuote as getKalshiQuote } from './feeds/kalshi.js';
 import { startPyth, stopAllPyth, FEED_IDS as PYTH_FEED_IDS } from './feeds/pyth.js';
 import { startMassivePoller, stopAllMassivePollers, isOptionsMarketOpen } from './feeds/massive.js';
@@ -64,12 +70,16 @@ let stopRequested = false;
 const enabledCommodities = listEnabledCommodities();
 for (const config of enabledCommodities) {
   engines.set(config.commodity, new EngineState(config));
-  registerFeed(`massive_${config.underlyingEtf.toLowerCase()}`);
-  registerFeed(`pyth_${config.pythSymbol.replace(/[/]/g, '_').toLowerCase()}`);
+  // Data feeds gate readiness — if Massive stops responding or Pyth Hermes
+  // goes down, /health returns 503. The engine markers below are descriptive
+  // only; they tick once per snapshot (~5min during market hours) which is
+  // looser than the 90s liveness window and would false-page if required.
+  markFeedRequired(`massive_${config.underlyingEtf.toLowerCase()}`);
+  markFeedRequired(`pyth_${config.pythSymbol.replace(/[/]/g, '_').toLowerCase()}`);
   registerFeed(`${config.commodity}_engine`);
 }
-registerFeed('kalshi');
-registerFeed('polymarket');
+markFeedRequired('kalshi');
+markFeedRequired('polymarket');
 registerFeed('arb_engine');
 registerFeed('movers_engine');
 
@@ -422,6 +432,15 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/health') {
     const snap = snapshot();
+    const liveness = evaluateLiveness();
+    snap.healthy = liveness.healthy;
+    snap.liveness = {
+      inMarketHours: liveness.inMarketHours,
+      thresholdMs: liveness.thresholdMs,
+      uptimeMs: liveness.uptimeMs,
+      grace: liveness.grace,
+      stale: liveness.stale,
+    };
     snap.engine = {
       env: ENGINE_ENV,
       commodities: {},
@@ -462,7 +481,8 @@ const server = http.createServer((req, res) => {
       lastRunAt: moversState.lastRunAt,
       lastErrorAt: moversState.lastErrorAt,
     };
-    res.writeHead(200, { 'content-type': 'application/json' });
+    const status = liveness.healthy ? 200 : 503;
+    res.writeHead(status, { 'content-type': 'application/json' });
     res.end(JSON.stringify(snap));
     return;
   }

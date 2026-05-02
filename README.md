@@ -10,7 +10,8 @@ Plan of record: `prediction-marketspicks/handoffs/PMP_INGESTION_ENGINE_BUILD_PLA
 - **Phase 1** — Silver Edge intraday MVP. ✅ shipped 2026-05-02.
 - **Phase 2A** — Multi-commodity expansion (gold/oil/copper engines, delta filter, parameterized Discord). ✅ this PR.
 - **Phase 2B** — Polymarket CLOB feed + cross-platform arb (`arb_alerts` + Pro `<ArbAlerts />`). Next session.
-- **Phase 3 → 4** — see plan.
+- **Phase 3** — Discord migration + posted_alerts dedup. ✅ shipped 2026-05-02.
+- **Phase 4** — Observability + resilience: per-feed liveness gates `/health`, cold-start REST seed for Kalshi, BetterStack/Sentry runbook. ✅ this PR.
 
 ## Local dev
 
@@ -57,7 +58,7 @@ SITE_BASE_URL             # https://predictionmarketspicks.com (default)
 ```
 flyctl deploy --ha=false -a pmp-ingestion
 flyctl logs -a pmp-ingestion
-curl https://pmp-ingestion.fly.dev/health | jq
+curl https://pmp-ingestion.fly.dev/health | jq '{healthy, liveness, feeds: .feeds | keys}'
 ```
 
 `--ha=false` is required — otherwise Fly auto-spawns a 2nd machine for HA on every deploy. Plan §12 mandates single-machine in `iad`.
@@ -67,6 +68,14 @@ If a second machine slips through:
 ```
 flyctl scale count 1 -a pmp-ingestion --yes
 ```
+
+### Deploy timing (Phase 4)
+
+Each `flyctl deploy` causes a ~10–15s gap as the new image rolls. The 60s boot grace inside `/health` suppresses false 503s on the new machine, so BetterStack won't page — but readers still see ~15s of stale data.
+
+**Rule of thumb**: deploy outside US market hours (4:00 PM ET → 9:30 AM ET on weekdays; anytime weekends). Intraday cadence is idle off-hours, so the gap is invisible. Live incidents override — fix the bug.
+
+Full incident playbook + BetterStack/Sentry setup: `prediction-marketspicks/docs/INGESTION_OPERATOR_RUNBOOK.md`. Threshold tuning: `prediction-marketspicks/docs/INGESTION_THRESHOLDS.md`.
 
 ## Bridge-week pattern (Phase 1, May 2 → Mon/Tue real-time provisioning)
 
@@ -79,14 +88,21 @@ Engine writes `snapshot_type='delayed_test'` rows during the bridge. The site-si
 ```
 {
   status, uptime_s, engine_env, writer_tag,
+  healthy: true,                       // 503 if false (Phase 4)
+  liveness: {
+    inMarketHours: true,               // 9:30am–4pm ET, M–F
+    thresholdMs: 90000,                // 90s in market hours, 300s off-hours
+    uptimeMs: 12345,
+    grace: false,                      // true during the first 60s of uptime
+    stale: []                          // [{name, reason, ageMs}] when 503
+  },
   feeds: {
-    kalshi:        { connected, lastTickAt, ageMs, lastError },
-    massive_slv:   { ... },
-    massive_gld:   { ... },
-    pyth_xag_usd:  { ... },
-    pyth_xau_usd:  { ... },
-    silver_engine: { ... },
-    gold_engine:   { ... }
+    kalshi:        { connected, lastTickAt, ageMs, lastError, required: true },
+    polymarket:    { ..., required: true },
+    massive_slv:   { ..., required: true },
+    pyth_xag_usd:  { ..., required: true },
+    silver_engine: { ..., required: false },
+    arb_engine:    { ..., required: false }
   },
   engine: {
     env,
@@ -99,10 +115,13 @@ Engine writes `snapshot_type='delayed_test'` rows during the bridge. The site-si
 }
 ```
 
+`required: true` feeds gate the 200/503 status. Engines (`*_engine`) are reported but never page — their cadence is minutes, and an upstream feed will go stale first if anything's wrong.
+
 ## Manual debug endpoints
 
 - `GET /dev/throw` — fires a test exception; should appear in Sentry within seconds
 - `GET /dev/snapshot?commodity=silver|gold` — runs one snapshot synchronously, returns the result
+- `GET /dev/movers?test=true` — fires one movers scan; `test=true` skips filters + dedup so it always posts
 
 ## Invariants
 

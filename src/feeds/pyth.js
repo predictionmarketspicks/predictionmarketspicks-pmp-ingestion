@@ -12,6 +12,11 @@ const POLL_INTERVAL_MS = 10_000;
 
 // Verified via https://hermes.pyth.network/v2/price_feeds — the IDs Kalshi
 // names in its series settlement_sources for the silver/gold weeklies.
+//
+// WTI and XCU/USD are intentionally omitted — Pyth Hermes serves WTI as
+// per-expiry futures (not continuous) and we have no validated copper feed.
+// The Phase 2A engines for oil/copper fail open when getPrice() returns null;
+// see docs/COMMODITY_FEEDS.md for the resolution path.
 export const FEED_IDS = {
   'XAG/USD': '0xf2fb02c32b055c805e7238d628e5e9dadef274376114eb1f012337cabe93871e',
   'XAU/USD': '0x765d2ba906dbc32ca17cc11f5310a89e9ee1f6420508c63861f2f8ba4ee34bb2',
@@ -20,6 +25,8 @@ export const FEED_IDS = {
 const SOURCE_TAGS = {
   'XAG/USD': 'pyth_xag_usd',
   'XAU/USD': 'pyth_xau_usd',
+  WTI: 'pyth_wti',
+  'XCU/USD': 'pyth_xcu_usd',
 };
 
 const priceMap = new Map(); // symbol → { symbol, price, confidence, publishTimeMs, feedId, source }
@@ -32,7 +39,12 @@ function feedKey(symbol) {
 
 async function fetchOnce(symbol) {
   const feedId = FEED_IDS[symbol];
-  if (!feedId) throw new Error(`unknown pyth symbol ${symbol}`);
+  if (!feedId) {
+    // Phase 2A: WTI / XCU/USD are registered symbols without verified feed IDs.
+    // Throwing here would crash the poller; instead skip silently so the engine
+    // sees getPrice(symbol) === null and fails open.
+    throw new Error(`pyth feed for ${symbol} not configured (see docs/COMMODITY_FEEDS.md)`);
+  }
   const url = `${HERMES_BASE}/v2/updates/price/latest?ids%5B%5D=0x${feedId.replace(/^0x/, '')}&parsed=true`;
   const res = await fetch(url, {
     headers: { 'User-Agent': 'pmp-ingestion/0.1', Accept: 'application/json' },
@@ -84,6 +96,14 @@ function schedule(symbol) {
 export function startPyth(symbols = ['XAG/USD']) {
   stopRequested = false;
   for (const s of symbols) {
+    if (!FEED_IDS[s]) {
+      console.warn(`[pyth] ${s} has no verified feed ID — poller skipped (engine will fail open)`);
+      setFeedStatus(`pyth_${feedKey(s)}`, {
+        connected: false,
+        lastError: 'feed_id_unverified',
+      });
+      continue;
+    }
     pollOnce(s).then(() => schedule(s));
     console.log(`[pyth] started poller for ${s}`);
   }

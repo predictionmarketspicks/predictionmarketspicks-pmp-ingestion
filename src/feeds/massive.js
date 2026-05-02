@@ -17,6 +17,7 @@
 // shows up in any URL log.
 
 import { setFeedStatus, recordTick } from '../observability/health.js';
+import { DELTA_FILTER_MIN, DELTA_FILTER_MAX } from '../engine/thresholds.js';
 
 const MASSIVE_BASE = process.env.MASSIVE_API_BASE || 'https://api.massive.com';
 
@@ -78,6 +79,17 @@ function normalizeContract(c) {
   };
 }
 
+// Plan §10 delta filter — `0.15 ≤ |Δ| ≤ 0.85` to keep the in-memory map
+// manageable across four ETFs. Missing-delta passthrough so the bridge-week
+// 15-min-delayed tier (which returns greeks: {}) still produces a chain.
+// After Mon/Tue real-time cutover, greeks populate live and the filter
+// activates — chain shrinks from ~250 contracts → ~50–80 per ETF.
+function passesDeltaFilter(c) {
+  if (c.delta == null) return true;
+  const abs = Math.abs(c.delta);
+  return abs >= DELTA_FILTER_MIN && abs <= DELTA_FILTER_MAX;
+}
+
 async function fetchChain(underlying, expirationDate) {
   const apiKey = process.env.MASSIVE_API_KEY;
   if (!apiKey) throw new Error('MASSIVE_API_KEY not set');
@@ -96,7 +108,10 @@ async function fetchChain(underlying, expirationDate) {
   }
   const json = await res.json();
   const results = Array.isArray(json?.results) ? json.results : [];
-  return results.map(normalizeContract).filter((c) => c.strike != null);
+  return results
+    .map(normalizeContract)
+    .filter((c) => c.strike != null)
+    .filter(passesDeltaFilter);
 }
 
 async function pollOnce(underlying, expirationDateRef) {
@@ -194,4 +209,4 @@ export async function fetchPrevClose(ticker) {
   return close;
 }
 
-export { isOptionsMarketOpen };
+export { isOptionsMarketOpen, passesDeltaFilter };

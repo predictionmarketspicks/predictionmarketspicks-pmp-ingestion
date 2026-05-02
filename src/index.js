@@ -4,150 +4,163 @@ import http from 'node:http';
 import { initSentry, Sentry } from './observability/sentry.js';
 import { snapshot, registerFeed, recordTick } from './observability/health.js';
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
-import { startPyth, stopAllPyth } from './feeds/pyth.js';
+import { startPyth, stopAllPyth, FEED_IDS as PYTH_FEED_IDS } from './feeds/pyth.js';
 import { startMassivePoller, stopAllMassivePollers, isOptionsMarketOpen } from './feeds/massive.js';
-import { discoverSilverEvent, computeSilverSnapshot, SILVER_UNDERLYING_ETF } from './engine/silver.js';
+import { computeSnapshot, discoverEvent } from './engine/commodity-base.js';
+import { listAllCommodities, listEnabledCommodities } from './engine/commodities.js';
 import { upsertCommodityEdgeRows } from './delivery/supabase.js';
-import { postSilverAlert } from './delivery/discord.js';
-import { revalidateSilverEdge } from './delivery/revalidate.js';
-import {
-  SILVER_SNAPSHOT_INTERVAL_MARKET_MS,
-  SILVER_SNAPSHOT_INTERVAL_OFF_MS,
-} from './engine/thresholds.js';
+import { postCommodityAlert } from './delivery/discord.js';
+import { revalidateCommodityEdge } from './delivery/revalidate.js';
 
 initSentry();
 
 const PORT = Number(process.env.PORT || 8080);
 const ENGINE_ENV = process.env.ENGINE_ENV || 'dev';
 
-// --- feed registration (drives /health) ---
-registerFeed('kalshi');
-registerFeed('massive_slv');
-registerFeed('pyth_xag_usd');
-registerFeed('silver_engine');
-
-// --- engine orchestration ---
+// --- engine state ---
 //
-// State machine:
-//   silver event = soonest-closing open KXSILVERW (refreshed every 30 min)
-//   massive poller = SLV chain scoped to that event's expiration_date
-//   snapshot loop = every 5 min market-hours / 30 min off-hours, computes
-//     edges, writes to commodity_edge_signals, fires Discord on tier cross,
-//     pings revalidate.
-//
-// The expirationDateRef indirection lets the Massive poller keep its closure
-// fresh as the event rolls week-over-week without restart.
+// Each enabled commodity gets its own EngineState row. Errors stay scoped to
+// the failing engine — one bad Kalshi event fetch on copper doesn't kill the
+// silver loop. ETF chains, Pyth feeds, and Kalshi events are independent.
 
-let currentEvent = null;
-const expirationDateRef = { value: null }; // mutated when event refreshes
-let snapshotTimer = null;
-let eventRefreshTimer = null;
+class EngineState {
+  constructor(config) {
+    this.config = config;
+    this.currentEvent = null;
+    this.expirationDateRef = { value: null };
+    this.snapshotTimer = null;
+    this.eventRefreshTimer = null;
+    this.lastSnapshotMeta = null;
+    this.lastSnapshotErrAt = null;
+    this.snapshotCount = 0;
+  }
+}
+
+const engines = new Map();
 let stopRequested = false;
 
-let lastSnapshotMeta = null;
-let lastSnapshotErrAt = null;
-let snapshotCount = 0;
+const enabledCommodities = listEnabledCommodities();
+for (const config of enabledCommodities) {
+  engines.set(config.commodity, new EngineState(config));
+  registerFeed(`massive_${config.underlyingEtf.toLowerCase()}`);
+  registerFeed(`pyth_${config.pythSymbol.replace(/[/]/g, '_').toLowerCase()}`);
+  registerFeed(`${config.commodity}_engine`);
+}
+registerFeed('kalshi');
 
-// Map a Kalshi event's close_time → SLV expiration date the chain should scope to.
-// Kalshi silver weeklies close Friday 5pm ET; SLV options expire Friday after-hours.
-// Both keys are YYYY-MM-DD; same Friday.
 function expirationDateFromCloseTime(closeIso) {
   return new Date(closeIso).toISOString().slice(0, 10);
 }
 
-async function refreshEvent() {
+async function refreshEvent(state) {
+  const { config } = state;
   try {
-    const ev = await discoverSilverEvent();
+    const ev = await discoverEvent(config);
     if (!ev) {
-      console.warn('[engine] no open KXSILVERW event — likely weekend; will retry');
-      currentEvent = null;
+      console.warn(`[${config.commodity}] no open ${config.seriesTicker} event — likely weekend; will retry`);
+      state.currentEvent = null;
       return;
     }
     const newExpiration = expirationDateFromCloseTime(ev.closeTime);
-    if (!currentEvent || currentEvent.eventTicker !== ev.eventTicker) {
-      console.log(`[engine] silver event → ${ev.eventTicker} closes ${ev.closeTime} (${ev.markets.length} strikes)`);
+    if (!state.currentEvent || state.currentEvent.eventTicker !== ev.eventTicker) {
+      console.log(`[${config.commodity}] event → ${ev.eventTicker} closes ${ev.closeTime} (${ev.markets.length} strikes)`);
     }
-    currentEvent = ev;
-    expirationDateRef.value = newExpiration;
+    state.currentEvent = ev;
+    state.expirationDateRef.value = newExpiration;
   } catch (err) {
-    console.error('[engine] event refresh failed', err?.message || err);
+    console.error(`[${config.commodity}] event refresh failed`, err?.message || err);
     Sentry.captureException(err);
   }
 }
 
-async function runSnapshotOnce() {
-  if (!currentEvent) {
-    console.warn('[engine] no event — skipping snapshot');
+async function runSnapshotOnce(state) {
+  const { config } = state;
+  if (!state.currentEvent) {
+    console.warn(`[${config.commodity}] no event — skipping snapshot`);
     return;
   }
   try {
-    const snap = await computeSilverSnapshot(currentEvent);
+    const snap = await computeSnapshot(config, state.currentEvent);
     if (!snap) {
-      console.warn('[engine] snapshot null (cold start: missing pyth/massive data)');
+      // commodity-base logs the specific reason (missing pyth, missing chain, etc.)
       return;
     }
-    snapshotCount += 1;
-    lastSnapshotMeta = snap.meta;
-    recordTick('silver_engine');
+    state.snapshotCount += 1;
+    state.lastSnapshotMeta = snap.meta;
+    recordTick(`${config.commodity}_engine`);
 
     const { count, tag } = await upsertCommodityEdgeRows(snap.rows);
     const top = snap.meta.topEdge;
     const topStr = top
       ? `top=${top.direction} $${top.strike.toFixed(2)} ${(top.edge_pp * 100).toFixed(1)}pp ${snap.meta.topTier}`
       : 'top=NO_EDGE';
-    console.log(`[engine] silver snapshot: ${count} rows tag=${tag} • ${topStr} • spot=$${snap.meta.spotPrice.toFixed(2)}`);
+    console.log(`[${config.commodity}] snapshot: ${count} rows tag=${tag} • ${topStr} • spot=$${snap.meta.spotPrice.toFixed(2)}`);
 
-    // Discord + revalidate are both gated on writer_tag — `delayed_test` rows
-    // are 15-min stale (Massive bridge-week tier), users shouldn't see them
-    // in #premium-alerts/#oracle-picks any more than they should see them on
-    // /tools/silver-edge. After Mon/Tue real-time provisioning the operator
-    // flips WRITER_TAG=intraday and both Discord and the page light up at once.
+    // Discord + revalidate are gated on writer_tag — `delayed_test` rows are
+    // 15-min stale (Massive bridge-week tier), users shouldn't see them in
+    // #premium-alerts/#oracle-picks any more than they should see them on the
+    // tool pages. After Mon/Tue real-time provisioning the operator flips
+    // WRITER_TAG=intraday and both Discord and the pages light up at once.
     if (top && snap.meta.topTier !== 'NO_EDGE' && (tag === 'intraday' || tag === 'daily')) {
       try {
-        const sent = await postSilverAlert(snap.meta);
-        if (sent) console.log(`[engine] discord posted ${snap.meta.topTier}`);
+        const sent = await postCommodityAlert(snap.meta);
+        if (sent) console.log(`[${config.commodity}] discord posted ${snap.meta.topTier}`);
       } catch (err) {
-        console.error('[engine] discord post failed', err?.message || err);
+        console.error(`[${config.commodity}] discord post failed`, err?.message || err);
         Sentry.captureException(err);
       }
     } else if (top && snap.meta.topTier !== 'NO_EDGE') {
-      console.log(`[engine] would post discord ${snap.meta.topTier} (gated by writer_tag=${tag})`);
+      console.log(`[${config.commodity}] would post discord ${snap.meta.topTier} (gated by writer_tag=${tag})`);
     }
 
     if (tag === 'intraday' || tag === 'daily') {
-      revalidateSilverEdge()
-        .then((r) => console.log(`[engine] revalidate strategy=${r.strategy} ok=${r.ok}`))
-        .catch((err) => console.warn('[engine] revalidate threw', err?.message || err));
+      revalidateCommodityEdge(config.commodity)
+        .then((r) => console.log(`[${config.commodity}] revalidate strategy=${r.strategy} ok=${r.ok}`))
+        .catch((err) => console.warn(`[${config.commodity}] revalidate threw`, err?.message || err));
     }
   } catch (err) {
-    lastSnapshotErrAt = new Date().toISOString();
-    console.error('[engine] snapshot failed', err?.message || err);
+    state.lastSnapshotErrAt = new Date().toISOString();
+    console.error(`[${config.commodity}] snapshot failed`, err?.message || err);
     Sentry.captureException(err);
   }
 }
 
-function scheduleSnapshot() {
+function scheduleSnapshot(state) {
   if (stopRequested) return;
-  const delay = isOptionsMarketOpen() ? SILVER_SNAPSHOT_INTERVAL_MARKET_MS : SILVER_SNAPSHOT_INTERVAL_OFF_MS;
-  snapshotTimer = setTimeout(async () => {
-    await runSnapshotOnce();
-    scheduleSnapshot();
+  const { config } = state;
+  const delay = isOptionsMarketOpen()
+    ? config.snapshotIntervalMarketMs
+    : config.snapshotIntervalOffMs;
+  state.snapshotTimer = setTimeout(async () => {
+    await runSnapshotOnce(state);
+    scheduleSnapshot(state);
   }, delay);
 }
 
-async function bootstrapEngine() {
-  await refreshEvent();
-  startMassivePoller(SILVER_UNDERLYING_ETF, expirationDateRef);
-  startPyth(['XAG/USD']);
-  // Wait briefly so feeds have data on the first snapshot. 8s is enough for
-  // Pyth (10s poll, but immediate on startup) and Massive (immediate poll).
+async function bootstrapEngine(state) {
+  await refreshEvent(state);
+  startMassivePoller(state.config.underlyingEtf, state.expirationDateRef);
+  // Wait briefly so feeds have data on the first snapshot.
   setTimeout(async () => {
-    await runSnapshotOnce();
-    scheduleSnapshot();
+    await runSnapshotOnce(state);
+    scheduleSnapshot(state);
   }, 8_000);
-  // Refresh the Kalshi event every 30 min — picks up new weekly when current
-  // one settles, no restart needed.
-  eventRefreshTimer = setInterval(refreshEvent, 30 * 60 * 1000);
+  state.eventRefreshTimer = setInterval(() => refreshEvent(state), 30 * 60 * 1000);
+}
+
+async function bootstrapAll() {
+  // Pyth: dedupe symbols across enabled commodities, skip those without a
+  // verified feed ID (the poller logs a warning and the engine fails open).
+  const pythSymbols = Array.from(
+    new Set(enabledCommodities.map((c) => c.pythSymbol).filter((s) => PYTH_FEED_IDS[s])),
+  );
+  startPyth(pythSymbols);
+  for (const state of engines.values()) {
+    bootstrapEngine(state).catch((err) => {
+      console.error(`[${state.config.commodity}] bootstrap failed`, err);
+      Sentry.captureException(err);
+    });
+  }
 }
 
 // --- HTTP server ---
@@ -159,20 +172,28 @@ const server = http.createServer((req, res) => {
     const snap = snapshot();
     snap.engine = {
       env: ENGINE_ENV,
-      snapshotCount,
-      lastSnapshotErrAt,
-      currentEvent: currentEvent?.eventTicker || null,
-      lastSnapshot: lastSnapshotMeta
-        ? {
-            generatedAt: lastSnapshotMeta.generatedAt,
-            spotPrice: lastSnapshotMeta.spotPrice,
-            etfPrice: lastSnapshotMeta.etfPrice,
-            topTier: lastSnapshotMeta.topTier,
-            topTierInt: lastSnapshotMeta.topTierInt,
-            strikeCount: lastSnapshotMeta.strikeCount,
-          }
-        : null,
+      commodities: {},
     };
+    for (const [name, state] of engines) {
+      snap.engine.commodities[name] = {
+        snapshotCount: state.snapshotCount,
+        lastSnapshotErrAt: state.lastSnapshotErrAt,
+        currentEvent: state.currentEvent?.eventTicker || null,
+        lastSnapshot: state.lastSnapshotMeta
+          ? {
+              generatedAt: state.lastSnapshotMeta.generatedAt,
+              spotPrice: state.lastSnapshotMeta.spotPrice,
+              etfPrice: state.lastSnapshotMeta.etfPrice,
+              topTier: state.lastSnapshotMeta.topTier,
+              topTierInt: state.lastSnapshotMeta.topTierInt,
+              strikeCount: state.lastSnapshotMeta.strikeCount,
+            }
+          : null,
+      };
+    }
+    snap.engine.disabledCommodities = listAllCommodities()
+      .filter((c) => !c.enabled)
+      .map((c) => c.commodity);
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(snap));
     return;
@@ -186,12 +207,20 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Manual trigger for ops debugging — fires one snapshot, returns the result.
+  // Manual trigger for ops debugging — fires one snapshot for the named
+  // commodity, returns the result.
   if (url.pathname === '/dev/snapshot') {
-    runSnapshotOnce()
+    const commodity = url.searchParams.get('commodity') || 'silver';
+    const state = engines.get(commodity);
+    if (!state) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: `unknown or disabled commodity: ${commodity}` }));
+      return;
+    }
+    runSnapshotOnce(state)
       .then(() => {
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, meta: lastSnapshotMeta }));
+        res.end(JSON.stringify({ ok: true, meta: state.lastSnapshotMeta }));
       })
       .catch((err) => {
         res.writeHead(500, { 'content-type': 'application/json' });
@@ -205,7 +234,9 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[http] listening on :${PORT} env=${ENGINE_ENV} writer_tag=${process.env.WRITER_TAG || 'delayed_test'}`);
+  console.log(
+    `[http] listening on :${PORT} env=${ENGINE_ENV} writer_tag=${process.env.WRITER_TAG || 'delayed_test'} commodities=${enabledCommodities.map((c) => c.commodity).join(',')}`,
+  );
 });
 
 startKalshi().catch((err) => {
@@ -213,7 +244,7 @@ startKalshi().catch((err) => {
   Sentry.captureException(err);
 });
 
-bootstrapEngine().catch((err) => {
+bootstrapAll().catch((err) => {
   console.error('[engine] bootstrap failed', err);
   Sentry.captureException(err);
 });
@@ -223,8 +254,10 @@ bootstrapEngine().catch((err) => {
 async function shutdown(signal) {
   console.log(`[shutdown] ${signal} received`);
   stopRequested = true;
-  if (snapshotTimer) clearTimeout(snapshotTimer);
-  if (eventRefreshTimer) clearInterval(eventRefreshTimer);
+  for (const state of engines.values()) {
+    if (state.snapshotTimer) clearTimeout(state.snapshotTimer);
+    if (state.eventRefreshTimer) clearInterval(state.eventRefreshTimer);
+  }
   stopKalshi();
   stopAllPyth();
   stopAllMassivePollers();

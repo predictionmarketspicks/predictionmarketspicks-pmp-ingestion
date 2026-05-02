@@ -2,7 +2,7 @@ import 'dotenv/config';
 import http from 'node:http';
 
 import { initSentry, Sentry } from './observability/sentry.js';
-import { snapshot, registerFeed } from './observability/health.js';
+import { snapshot, registerFeed, recordTick } from './observability/health.js';
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
 import { startPyth, stopAllPyth } from './feeds/pyth.js';
 import { startMassivePoller, stopAllMassivePollers, isOptionsMarketOpen } from './feeds/massive.js';
@@ -88,6 +88,7 @@ async function runSnapshotOnce() {
     }
     snapshotCount += 1;
     lastSnapshotMeta = snap.meta;
+    recordTick('silver_engine');
 
     const { count, tag } = await upsertCommodityEdgeRows(snap.rows);
     const top = snap.meta.topEdge;
@@ -96,8 +97,12 @@ async function runSnapshotOnce() {
       : 'top=NO_EDGE';
     console.log(`[engine] silver snapshot: ${count} rows tag=${tag} • ${topStr} • spot=$${snap.meta.spotPrice.toFixed(2)}`);
 
-    // Discord — only fire on STRONG/MODERATE/SPECULATIVE; webhook routing in delivery/discord.js
-    if (top && snap.meta.topTier !== 'NO_EDGE') {
+    // Discord + revalidate are both gated on writer_tag — `delayed_test` rows
+    // are 15-min stale (Massive bridge-week tier), users shouldn't see them
+    // in #premium-alerts/#oracle-picks any more than they should see them on
+    // /tools/silver-edge. After Mon/Tue real-time provisioning the operator
+    // flips WRITER_TAG=intraday and both Discord and the page light up at once.
+    if (top && snap.meta.topTier !== 'NO_EDGE' && (tag === 'intraday' || tag === 'daily')) {
       try {
         const sent = await postSilverAlert(snap.meta);
         if (sent) console.log(`[engine] discord posted ${snap.meta.topTier}`);
@@ -105,10 +110,10 @@ async function runSnapshotOnce() {
         console.error('[engine] discord post failed', err?.message || err);
         Sentry.captureException(err);
       }
+    } else if (top && snap.meta.topTier !== 'NO_EDGE') {
+      console.log(`[engine] would post discord ${snap.meta.topTier} (gated by writer_tag=${tag})`);
     }
 
-    // Revalidate the silver-edge ISR page if real-time tag is on. delayed_test
-    // rows shouldn't poke the cache because the page filters them out anyway.
     if (tag === 'intraday' || tag === 'daily') {
       revalidateSilverEdge()
         .then((r) => console.log(`[engine] revalidate strategy=${r.strategy} ok=${r.ok}`))

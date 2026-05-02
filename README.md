@@ -20,10 +20,12 @@ npm run dev
 ## Deploy
 
 ```
-flyctl deploy
+flyctl deploy --ha=false   # plan §12: single machine in iad, no HA
 flyctl logs -a pmp-ingestion
 curl https://pmp-ingestion.fly.dev/health
 ```
+
+`--ha=false` is required — otherwise Fly auto-spawns a 2nd machine for HA on every deploy.
 
 ## Invariants
 

@@ -7,8 +7,10 @@ Plan of record: `prediction-marketspicks/handoffs/PMP_INGESTION_ENGINE_BUILD_PLA
 ## Status
 
 - **Phase 0** — Fly machine, Kalshi RSA-PSS WS auth, `/health`, Sentry. ✅ shipped 2026-05-02.
-- **Phase 1** — Silver Edge intraday MVP (REST polling primary, BS/Brent IV fallback, `delayed_test` bridge-week tag). Ready to deploy.
-- **Phase 2 → 4** — see plan.
+- **Phase 1** — Silver Edge intraday MVP. ✅ shipped 2026-05-02.
+- **Phase 2A** — Multi-commodity expansion (gold/oil/copper engines, delta filter, parameterized Discord). ✅ this PR.
+- **Phase 2B** — Polymarket CLOB feed + cross-platform arb (`arb_alerts` + Pro `<ArbAlerts />`). Next session.
+- **Phase 3 → 4** — see plan.
 
 ## Local dev
 
@@ -80,13 +82,19 @@ Engine writes `snapshot_type='delayed_test'` rows during the bridge. The site-si
   feeds: {
     kalshi:        { connected, lastTickAt, ageMs, lastError },
     massive_slv:   { ... },
+    massive_gld:   { ... },
     pyth_xag_usd:  { ... },
-    silver_engine: { ... }
+    pyth_xau_usd:  { ... },
+    silver_engine: { ... },
+    gold_engine:   { ... }
   },
   engine: {
-    env, snapshotCount, lastSnapshotErrAt,
-    currentEvent: 'KXSILVERW-26MAY0817',
-    lastSnapshot: { generatedAt, spotPrice, etfPrice, topTier, topTierInt, strikeCount }
+    env,
+    commodities: {
+      silver: { snapshotCount, lastSnapshotErrAt, currentEvent, lastSnapshot: {...} },
+      gold:   { snapshotCount, lastSnapshotErrAt, currentEvent, lastSnapshot: {...} }
+    },
+    disabledCommodities: ['oil', 'copper']
   }
 }
 ```
@@ -94,7 +102,7 @@ Engine writes `snapshot_type='delayed_test'` rows during the bridge. The site-si
 ## Manual debug endpoints
 
 - `GET /dev/throw` — fires a test exception; should appear in Sentry within seconds
-- `GET /dev/snapshot` — runs one silver snapshot synchronously, returns the result
+- `GET /dev/snapshot?commodity=silver|gold` — runs one snapshot synchronously, returns the result
 
 ## Invariants
 
@@ -106,3 +114,9 @@ Engine writes `snapshot_type='delayed_test'` rows during the bridge. The site-si
 - All secrets via `flyctl secrets set`. Never commit `*.pem`, `.env`.
 - Discord embeds link to the Kalshi sign-up referral URL, NOT per-market deep-links (CLAUDE.md, locked May 2 2026).
 - Brand word-swap lint runs at `npm test` AND at runtime in `src/delivery/discord.js` — Discord delivery refuses payloads containing bet/wager/sportsbook/etc.
+
+## Phase 2A notes
+
+- **Commodity registry**: `src/engine/commodities.js` is the single source of truth. Adding a commodity = one entry there + one thin wrapper in `src/engine/`. The shared compute path lives in `src/engine/commodity-base.js`.
+- **Delta filter**: `0.15 ≤ |Δ| ≤ 0.85` applied in `src/feeds/massive.js`. Missing-delta passthrough means the bridge-week 15-min-delayed tier (greeks: {} on weekends and off-hours) still produces a chain. Post Mon/Tue real-time cutover, greeks populate live and the filter starts pruning to ~50–80 strikes per ETF.
+- **Disabled commodities (oil, copper)**: scaffolded but no verified spot feed yet. See `docs/COMMODITY_FEEDS.md` for the resolution path. Engines fail open — disabled commodities don't bootstrap, so Pyth poller doesn't waste calls on unverified IDs.

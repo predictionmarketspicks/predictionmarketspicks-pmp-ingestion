@@ -1,7 +1,9 @@
-// Vercel revalidation trigger for the silver-edge ISR page.
+// Vercel revalidation trigger for commodity-edge ISR pages.
 //
 // Preferred: POST to /api/revalidate with bearer VERCEL_REVALIDATE_TOKEN —
-// targets a single tag, no full deploy.
+// targets a single tag, no full deploy. The site-side handler accepts
+// { tag: 'silver-edge' | 'gold-edge' | 'oil-edge' | 'copper-edge' } and
+// runs revalidateTag + revalidatePath for the relevant tool page + JSON API.
 // Fallback: VERCEL_DEPLOY_HOOK_URL — fires a deploy. Heavier, but works if
 // the bearer endpoint is down.
 //
@@ -10,7 +12,13 @@
 
 const SITE_BASE = process.env.SITE_BASE_URL || 'https://predictionmarketspicks.com';
 
-export async function revalidateSilverEdge() {
+const VALID_COMMODITIES = new Set(['silver', 'gold', 'oil', 'copper']);
+
+export async function revalidateCommodityEdge(commodity) {
+  if (!VALID_COMMODITIES.has(commodity)) {
+    return { strategy: 'none', ok: false, note: `unknown commodity: ${commodity}` };
+  }
+  const tag = `${commodity}-edge`;
   const token = process.env.VERCEL_REVALIDATE_TOKEN;
   if (token) {
     try {
@@ -20,7 +28,7 @@ export async function revalidateSilverEdge() {
           'content-type': 'application/json',
           authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ tag: 'silver-edge' }),
+        body: JSON.stringify({ tag }),
         signal: AbortSignal.timeout(5000),
       });
       if (res.ok) return { strategy: 'tag', ok: true };
@@ -42,3 +50,6 @@ export async function revalidateSilverEdge() {
     return { strategy: 'deploy_hook', ok: false, note: err?.message || String(err) };
   }
 }
+
+// Phase 1 back-compat shim.
+export const revalidateSilverEdge = () => revalidateCommodityEdge('silver');

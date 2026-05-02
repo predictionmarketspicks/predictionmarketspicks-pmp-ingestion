@@ -2,7 +2,7 @@
 // Uses the existing PMP Discord bot (DISCORD_BOT_TOKEN — same secret the
 // Supabase Edge Function scanners use), POSTs to v10 channels/{id}/messages.
 //
-// Channel routing (Phase 1, silver-only, IDs from docs/discord-reference.md):
+// Channel routing (IDs from docs/discord-reference.md):
 //   STRONG  (≥12pp)    → #oracle-picks   1487857828084584528
 //   MODERATE (7-12pp)  → #premium-alerts 1487857830391451750
 //   SPECULATIVE (4-7pp) → #commodity-edge 1499364066706198542
@@ -19,13 +19,10 @@ import { assertBrandSafe } from '../lib/lint-strings.js';
 const KALSHI_REFERRAL_URL =
   'https://kalshi.com/sign-up/?referral=b07a96ab-4b91-4bdc-8285-5ae1927b7000';
 
-// Stable channel IDs — single source of truth is docs/discord-reference.md.
-// Hardcoding (vs env vars) matches the existing Edge Function pattern and
-// keeps deploy friction to one secret (DISCORD_BOT_TOKEN).
 const CHANNEL_ID = {
-  STRONG: '1487857828084584528', // #oracle-picks
-  MODERATE: '1487857830391451750', // #premium-alerts
-  SPECULATIVE: '1499364066706198542', // #commodity-edge
+  STRONG: '1487857828084584528',
+  MODERATE: '1487857830391451750',
+  SPECULATIVE: '1499364066706198542',
 };
 
 const COLOR_BY_TIER = {
@@ -34,13 +31,23 @@ const COLOR_BY_TIER = {
   SPECULATIVE: 0x7a6e5d, // khaki
 };
 
+// Per-commodity title prefix. spotLabel comes from meta (set by commodity-base
+// from COMMODITIES[commodity].spotLabel) so adding a commodity needs no edit
+// here.
+const TITLE_PREFIX = {
+  silver: 'Silver Edge',
+  gold: 'Gold Edge',
+  oil: 'Oil Edge',
+  copper: 'Copper Edge',
+};
+
 function probToAmericanOdds(prob) {
   if (!Number.isFinite(prob) || prob <= 0 || prob >= 1) return null;
   if (prob >= 0.5) return -Math.round((prob / (1 - prob)) * 100);
   return Math.round(100 / prob - 100);
 }
 
-function buildSilverEmbed(meta, topEdge) {
+export function buildCommodityEmbed(meta, topEdge) {
   const tier = meta.topTier;
   const direction = topEdge.direction;
   const edgePct = (topEdge.edge_pp * 100).toFixed(1);
@@ -50,8 +57,9 @@ function buildSilverEmbed(meta, topEdge) {
   );
   const oddsStr = oddsRaw == null ? '' : oddsRaw > 0 ? `+${oddsRaw}` : `${oddsRaw}`;
 
+  const prefix = TITLE_PREFIX[meta.commodity] || `${meta.commodity} Edge`;
   const titleParts = [
-    'Silver Edge',
+    prefix,
     `${direction} $${topEdge.strike.toFixed(2)}`,
     `${sign}${Math.abs(Number(edgePct))}pp`,
     tier,
@@ -69,7 +77,7 @@ function buildSilverEmbed(meta, topEdge) {
       inline: true,
     },
     {
-      name: 'Spot (Pyth XAG/USD)',
+      name: `Spot (${meta.spotLabel})`,
       value: sanitize(`$${meta.spotPrice.toFixed(2)}`, 80),
       inline: true,
     },
@@ -118,9 +126,7 @@ async function postToChannel(channelId, payload) {
   return true;
 }
 
-// Returns true on successful delivery, false on skip (no token / NO_EDGE),
-// throws on HTTP failure or brand-safety violation.
-export async function postSilverAlert(meta) {
+export async function postCommodityAlert(meta) {
   const top = meta.topEdge;
   if (!top) return false;
   const tier = meta.topTier;
@@ -128,10 +134,14 @@ export async function postSilverAlert(meta) {
   const channelId = CHANNEL_ID[tier];
   if (!channelId) return false;
 
-  const payload = buildSilverEmbed(meta, top);
-  // Hard-stop if any banned word slipped through.
+  const payload = buildCommodityEmbed(meta, top);
   assertBrandSafe(payload);
   return postToChannel(channelId, payload);
 }
 
-export { buildSilverEmbed, KALSHI_REFERRAL_URL, CHANNEL_ID };
+// Phase 1 back-compat shims so any caller still importing the silver-named
+// helpers keeps working. Delete once nothing references them.
+export const postSilverAlert = postCommodityAlert;
+export const buildSilverEmbed = buildCommodityEmbed;
+
+export { KALSHI_REFERRAL_URL, CHANNEL_ID };

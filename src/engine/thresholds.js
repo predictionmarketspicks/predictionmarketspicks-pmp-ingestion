@@ -40,6 +40,19 @@ export function confidenceTierInt(tier) {
   return tier === 'STRONG' ? 3 : tier === 'MODERATE' ? 2 : tier === 'SPECULATIVE' ? 1 : 0;
 }
 
-// Phase 1 cadence — engine writes this often during market hours.
-export const SILVER_SNAPSHOT_INTERVAL_MARKET_MS = 5 * 60 * 1000; // 5 min
-export const SILVER_SNAPSHOT_INTERVAL_OFF_MS = 30 * 60 * 1000; // 30 min
+// Snapshot cadence — engine writes this often during market hours, less when
+// the options market is closed. Phase 2A renamed from SILVER_* to commodity-
+// agnostic; back-compat aliases kept for any external imports.
+export const SNAPSHOT_INTERVAL_MARKET_MS = 5 * 60 * 1000; // 5 min
+export const SNAPSHOT_INTERVAL_OFF_MS = 30 * 60 * 1000; // 30 min
+
+export const SILVER_SNAPSHOT_INTERVAL_MARKET_MS = SNAPSHOT_INTERVAL_MARKET_MS;
+export const SILVER_SNAPSHOT_INTERVAL_OFF_MS = SNAPSHOT_INTERVAL_OFF_MS;
+
+// Massive chain delta filter (plan §10) — keeps the in-memory map under control
+// across four ETFs. `null` delta passes through, so Phase 1 bridge-week traffic
+// (15-min delayed tier returns greeks: {} on weekends and off-hours) still
+// produces snapshots. After the Mon May 4 / Tue May 5 real-time cutover greeks
+// populate live and the filter starts pruning to ~0.15 ≤ |Δ| ≤ 0.85.
+export const DELTA_FILTER_MIN = 0.15;
+export const DELTA_FILTER_MAX = 0.85;

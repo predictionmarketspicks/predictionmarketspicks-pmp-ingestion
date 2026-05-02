@@ -98,15 +98,37 @@ export function toEventTicker(marketTicker) {
   return parts.length >= 3 ? parts.slice(0, -1).join('-') : marketTicker;
 }
 
+// Phase 4 cold-start seed. The WS subscribe only emits ticker frames when a
+// quote actually changes, so on a fresh connect (boot or reconnect) the
+// quoteMap can stay empty for tens of seconds while a quiet market sits there.
+// /markets already gives us price + bid/ask + volume in dollar/fp form, so we
+// seed once per series before WS takes over. WS frames overwrite as they
+// arrive — they're authoritative.
+function seedFromMarket(m) {
+  if (!m?.ticker) return;
+  applyTickerMsg({
+    market_ticker: m.ticker,
+    price_dollars: m.last_price_dollars ?? null,
+    yes_bid_dollars: m.yes_bid_dollars ?? null,
+    yes_ask_dollars: m.yes_ask_dollars ?? null,
+    volume_fp: m.volume_24h_fp ?? m.volume_fp ?? null,
+    open_interest_fp: m.open_interest_fp ?? null,
+    ts_ms: Date.now(),
+  });
+}
+
 async function discoverMarkets() {
   const all = [];
+  let seeded = 0;
   for (const series of PHASE_1_SERIES) {
     try {
       const markets = await fetchMarketsForSeries(series);
-      const tickers = markets
+      const sliced = markets.slice(0, MAX_MARKETS_PER_SERIES);
+      const tickers = sliced
         .map((m) => ({ ticker: m.ticker, eventTicker: m.event_ticker || toEventTicker(m.ticker) }))
-        .filter((m) => m.ticker)
-        .slice(0, MAX_MARKETS_PER_SERIES);
+        .filter((m) => m.ticker);
+      for (const m of sliced) seedFromMarket(m);
+      seeded += sliced.length;
       seriesIndex.set(series, tickers);
       all.push(...tickers);
       console.log(`[kalshi] discovered ${tickers.length} markets for ${series}`);
@@ -125,6 +147,13 @@ async function discoverMarkets() {
     seen.add(ticker);
   }
   console.log(`[kalshi] arb mappings appended (${getArbKalshiTickers().length} tickers)`);
+
+  if (seeded > 0) {
+    // Mark the kalshi feed alive immediately on cold-start so /health doesn't
+    // 503 in the gap between connect() and the first ticker frame.
+    recordTick('kalshi');
+    console.log(`[kalshi] cold-start REST seed populated ${seeded} markets`);
+  }
 
   return all;
 }

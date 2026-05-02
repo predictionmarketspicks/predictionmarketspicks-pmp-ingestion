@@ -17,6 +17,12 @@
 // We expose getYesPrice(tokenId) for the comparator. Mid is computed from the
 // best bid/ask of the YES token's order book; if no L2 is available, last trade
 // price is used as a fallback. Both update the in-memory `quoteMap`.
+//
+// Cold-start handling (Phase 4): the CLOB WS auto-sends a `book` frame for
+// every subscribed asset within ~100ms of subscribe — that IS the cold-start
+// snapshot. Kalshi has no equivalent (ticker only on price changes), which is
+// why feeds/kalshi.js seeds quoteMap from REST in discoverMarkets() before
+// WS takes over. We don't duplicate that work here.
 
 import WebSocket from 'ws';
 

@@ -3,12 +3,21 @@ import http from 'node:http';
 
 import { initSentry, Sentry } from './observability/sentry.js';
 import { snapshot, registerFeed, recordTick } from './observability/health.js';
-import { startKalshi, stopKalshi } from './feeds/kalshi.js';
+import { startKalshi, stopKalshi, getQuote as getKalshiQuote } from './feeds/kalshi.js';
 import { startPyth, stopAllPyth, FEED_IDS as PYTH_FEED_IDS } from './feeds/pyth.js';
 import { startMassivePoller, stopAllMassivePollers, isOptionsMarketOpen } from './feeds/massive.js';
+import {
+  startPolymarket,
+  stopPolymarket,
+  getYesQuote as getPolymarketYesQuote,
+  getQuoteCount as getPolymarketQuoteCount,
+} from './feeds/polymarket.js';
 import { computeSnapshot, discoverEvent } from './engine/commodity-base.js';
 import { listAllCommodities, listEnabledCommodities } from './engine/commodities.js';
-import { upsertCommodityEdgeRows } from './delivery/supabase.js';
+import { ARB_MAPPINGS, getPolymarketYesTokenIds } from './engine/arb-mappings.js';
+import { evaluateAll as evaluateArbAll } from './engine/comparator.js';
+import { ARB_COMPARE_INTERVAL_MS } from './engine/arb-thresholds.js';
+import { upsertCommodityEdgeRows, insertArbAlerts } from './delivery/supabase.js';
 import { postCommodityAlert } from './delivery/discord.js';
 import { revalidateCommodityEdge } from './delivery/revalidate.js';
 
@@ -47,6 +56,17 @@ for (const config of enabledCommodities) {
   registerFeed(`${config.commodity}_engine`);
 }
 registerFeed('kalshi');
+registerFeed('polymarket');
+registerFeed('arb_engine');
+
+// Phase 2B arb engine state (separate from per-commodity engines).
+const arbState = {
+  evaluations: 0,
+  alertsWritten: 0,
+  lastRunAt: null,
+  lastErrorAt: null,
+  compareTimer: null,
+};
 
 function expirationDateFromCloseTime(closeIso) {
   return new Date(closeIso).toISOString().slice(0, 10);
@@ -163,6 +183,65 @@ async function bootstrapAll() {
   }
 }
 
+// --- arb engine (Phase 2B) ---
+//
+// Polymarket WS feeds the YES-token quotes; Kalshi WS already feeds the matched
+// market YES. The comparator runs on a timer (every ARB_COMPARE_INTERVAL_MS),
+// pulls both maps, and writes any rows that crossed thresholds and survived
+// dedup into arb_alerts. The Pro dashboard subscribes via Realtime — there is
+// no Discord delivery for arb in v1 (the Pro component is the surface).
+
+async function runArbCompareOnce() {
+  try {
+    const writes = evaluateArbAll({
+      getKalshiQuote,
+      getPolymarketYesQuote,
+      now: Date.now(),
+    });
+    arbState.evaluations += 1;
+    arbState.lastRunAt = new Date().toISOString();
+    if (writes.length === 0) return;
+    const { count } = await insertArbAlerts(writes);
+    arbState.alertsWritten += count;
+    recordTick('arb_engine');
+    const summary = writes
+      .map((w) => `${w.pair_slug}=${w.spread_pp}pp/${w.confidence}`)
+      .join(', ');
+    console.log(`[arb] wrote ${count} alert(s): ${summary}`);
+  } catch (err) {
+    arbState.lastErrorAt = new Date().toISOString();
+    console.error('[arb] comparator run failed', err?.message || err);
+    Sentry.captureException(err);
+  }
+}
+
+function scheduleArbCompare() {
+  if (stopRequested) return;
+  arbState.compareTimer = setTimeout(async () => {
+    await runArbCompareOnce();
+    scheduleArbCompare();
+  }, ARB_COMPARE_INTERVAL_MS);
+}
+
+function bootstrapArb() {
+  const tokenIds = getPolymarketYesTokenIds();
+  if (tokenIds.length === 0) {
+    console.warn('[arb] no mappings registered — comparator skipped');
+    return;
+  }
+  startPolymarket(tokenIds).catch((err) => {
+    console.error('[polymarket] startup failed', err);
+    Sentry.captureException(err);
+  });
+  // Wait briefly so both feeds populate quote maps before the first compare.
+  setTimeout(() => {
+    runArbCompareOnce().catch(() => {
+      /* runArbCompareOnce already logs and reports */
+    });
+    scheduleArbCompare();
+  }, 10_000);
+}
+
 // --- HTTP server ---
 
 const server = http.createServer((req, res) => {
@@ -194,6 +273,14 @@ const server = http.createServer((req, res) => {
     snap.engine.disabledCommodities = listAllCommodities()
       .filter((c) => !c.enabled)
       .map((c) => c.commodity);
+    snap.engine.arb = {
+      mappingCount: ARB_MAPPINGS.length,
+      polymarketQuotes: getPolymarketQuoteCount(),
+      evaluations: arbState.evaluations,
+      alertsWritten: arbState.alertsWritten,
+      lastRunAt: arbState.lastRunAt,
+      lastErrorAt: arbState.lastErrorAt,
+    };
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(snap));
     return;
@@ -249,6 +336,8 @@ bootstrapAll().catch((err) => {
   Sentry.captureException(err);
 });
 
+bootstrapArb();
+
 // --- shutdown ---
 
 async function shutdown(signal) {
@@ -258,7 +347,9 @@ async function shutdown(signal) {
     if (state.snapshotTimer) clearTimeout(state.snapshotTimer);
     if (state.eventRefreshTimer) clearInterval(state.eventRefreshTimer);
   }
+  if (arbState.compareTimer) clearTimeout(arbState.compareTimer);
   stopKalshi();
+  stopPolymarket();
   stopAllPyth();
   stopAllMassivePollers();
   server.close(() => {

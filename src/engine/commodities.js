@@ -26,6 +26,7 @@
 import {
   SNAPSHOT_INTERVAL_MARKET_MS,
   SNAPSHOT_INTERVAL_OFF_MS,
+  SNAPSHOT_INTERVAL_EXPIRATION_MS,
 } from './thresholds.js';
 
 export const COMMODITIES = {
@@ -39,6 +40,7 @@ export const COMMODITIES = {
     enabled: true,
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
+    snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
   },
   gold: {
     commodity: 'gold',
@@ -50,6 +52,7 @@ export const COMMODITIES = {
     enabled: true,
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
+    snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
   },
   oil: {
     commodity: 'oil',
@@ -61,6 +64,7 @@ export const COMMODITIES = {
     enabled: false, // flip true once Pyth WTI feed ID is verified
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
+    snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
   },
   copper: {
     commodity: 'copper',
@@ -72,6 +76,7 @@ export const COMMODITIES = {
     enabled: false, // flip true once a copper spot feed is wired
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
+    snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
   },
 };
 

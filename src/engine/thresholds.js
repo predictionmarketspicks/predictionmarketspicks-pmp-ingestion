@@ -46,6 +46,13 @@ export function confidenceTierInt(tier) {
 export const SNAPSHOT_INTERVAL_MARKET_MS = 5 * 60 * 1000; // 5 min
 export const SNAPSHOT_INTERVAL_OFF_MS = 30 * 60 * 1000; // 30 min
 
+// Expiration-day burst — last 60 min before a commodity event closes is when
+// implied probability and Kalshi's quoted price diverge fastest as time decay
+// accelerates. 5-min cadence misses 10pp edges that open at 4:32 ET and close
+// by 4:45 ET. Burst overrides both market and off-hours cadences when active.
+export const SNAPSHOT_INTERVAL_EXPIRATION_MS = 60 * 1000; // 1 min
+export const EXPIRATION_BURST_WINDOW_MS = 60 * 60 * 1000; // 60 min before close
+
 export const SILVER_SNAPSHOT_INTERVAL_MARKET_MS = SNAPSHOT_INTERVAL_MARKET_MS;
 export const SILVER_SNAPSHOT_INTERVAL_OFF_MS = SNAPSHOT_INTERVAL_OFF_MS;
 

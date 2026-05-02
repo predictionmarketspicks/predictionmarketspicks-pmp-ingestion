@@ -23,6 +23,7 @@ import { listAllCommodities, listEnabledCommodities } from './engine/commodities
 import { ARB_MAPPINGS, getPolymarketYesTokenIds } from './engine/arb-mappings.js';
 import { evaluateAll as evaluateArbAll } from './engine/comparator.js';
 import { ARB_COMPARE_INTERVAL_MS } from './engine/arb-thresholds.js';
+import { EXPIRATION_BURST_WINDOW_MS } from './engine/thresholds.js';
 import {
   upsertCommodityEdgeRows,
   insertArbAlerts,
@@ -211,12 +212,35 @@ async function runSnapshotOnce(state) {
   }
 }
 
+function isInExpirationWindow(ev) {
+  if (!ev?.closeTime) return false;
+  const msToClose = new Date(ev.closeTime).getTime() - Date.now();
+  return msToClose > 0 && msToClose <= EXPIRATION_BURST_WINDOW_MS;
+}
+
 function scheduleSnapshot(state) {
   if (stopRequested) return;
   const { config } = state;
-  const delay = isOptionsMarketOpen()
-    ? config.snapshotIntervalMarketMs
-    : config.snapshotIntervalOffMs;
+  const inBurst = isInExpirationWindow(state.currentEvent);
+  let delay;
+  let cadence;
+  if (inBurst) {
+    delay = config.snapshotIntervalExpirationMs;
+    cadence = 'expiration_burst';
+  } else if (isOptionsMarketOpen()) {
+    delay = config.snapshotIntervalMarketMs;
+    cadence = 'market';
+  } else {
+    delay = config.snapshotIntervalOffMs;
+    cadence = 'off';
+  }
+  // Log only on cadence transitions so the Friday burst is visible without
+  // 60 lines/min of "still in burst" noise. Acceptance test (handoff #3) reads
+  // these transitions to confirm the 60s delay activates pre-close.
+  if (state.lastCadence !== cadence) {
+    console.log(`[${config.commodity}] cadence → ${cadence} (delay=${delay}ms)`);
+    state.lastCadence = cadence;
+  }
   state.snapshotTimer = setTimeout(async () => {
     await runSnapshotOnce(state);
     scheduleSnapshot(state);

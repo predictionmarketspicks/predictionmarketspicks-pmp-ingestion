@@ -1,4 +1,4 @@
-// Discord bot delivery for commodity edge alerts.
+// Discord bot delivery for engine-fired alerts.
 // Uses the existing PMP Discord bot (DISCORD_BOT_TOKEN — same secret the
 // Supabase Edge Function scanners use), POSTs to v10 channels/{id}/messages.
 //
@@ -6,6 +6,7 @@
 //   STRONG  (≥12pp)    → #oracle-picks   1487857828084584528
 //   MODERATE (7-12pp)  → #premium-alerts 1487857830391451750
 //   SPECULATIVE (4-7pp) → #commodity-edge 1499364066706198542
+//   Movers (gain/loss)  → #market-movers  1487857819482063049
 //
 // Embed link convention (CLAUDE.md, locked May 2 2026): title clicks go to the
 // Kalshi sign-up referral URL, NOT a per-market deep-link.
@@ -23,7 +24,11 @@ const CHANNEL_ID = {
   STRONG: '1487857828084584528',
   MODERATE: '1487857830391451750',
   SPECULATIVE: '1499364066706198542',
+  MOVERS: '1487857819482063049',
 };
+
+const GAIN_GREEN = 0x2d5a3d; // brand --gain
+const LOSS_RED = 0x8b2e2e; // brand --loss
 
 const COLOR_BY_TIER = {
   STRONG: 0xc9a243, // oracle-gold
@@ -143,5 +148,47 @@ export async function postCommodityAlert(meta) {
 // helpers keeps working. Delete once nothing references them.
 export const postSilverAlert = postCommodityAlert;
 export const buildSilverEmbed = buildCommodityEmbed;
+
+// ---------- market movers (Phase 3) ----------
+//
+// Gainers + losers post: a single Discord message with up to 10 embeds, posted
+// to #market-movers. Mirrors the discord-market-movers Edge Function output
+// during the soak window so readers see no diff at handoff.
+
+export function buildMoverEmbed(c, isGainer) {
+  const arrow = isGainer ? '🟢▲' : '🔴▼';
+  const color = isGainer ? GAIN_GREEN : LOSS_RED;
+  const absDelta = Math.abs(c.price_change_24h);
+  return {
+    title: sanitize(c.title, 240),
+    url: KALSHI_REFERRAL_URL,
+    color,
+    fields: [
+      { name: 'Series', value: sanitize(c.seriesOrSlug, 80), inline: true },
+      { name: 'Yes Price', value: `${c.yes_price}¢`, inline: true },
+      { name: 'Δ 24h', value: `${arrow} ${absDelta}pp`, inline: true },
+      {
+        name: 'Volume 24h',
+        value: Math.round(c.volume_24h).toLocaleString('en-US'),
+        inline: true,
+      },
+      { name: 'Ticker', value: `\`${sanitize(c.ticker, 60)}\``, inline: true },
+      { name: 'Category', value: sanitize(c.category, 40), inline: true },
+    ],
+    footer: { text: 'Market Movers · The 7 Oracles' },
+    timestamp: new Date().toISOString(),
+  };
+}
+
+export async function postMoversAlert({ gainers, losers }) {
+  const embeds = [
+    ...gainers.map((c) => buildMoverEmbed(c, true)),
+    ...losers.map((c) => buildMoverEmbed(c, false)),
+  ].slice(0, 10);
+  if (embeds.length === 0) return false;
+  const payload = { embeds, allowed_mentions: { parse: [] } };
+  assertBrandSafe(payload);
+  return postToChannel(CHANNEL_ID.MOVERS, payload);
+}
 
 export { KALSHI_REFERRAL_URL, CHANNEL_ID };

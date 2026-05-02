@@ -17,9 +17,22 @@ import { listAllCommodities, listEnabledCommodities } from './engine/commodities
 import { ARB_MAPPINGS, getPolymarketYesTokenIds } from './engine/arb-mappings.js';
 import { evaluateAll as evaluateArbAll } from './engine/comparator.js';
 import { ARB_COMPARE_INTERVAL_MS } from './engine/arb-thresholds.js';
-import { upsertCommodityEdgeRows, insertArbAlerts } from './delivery/supabase.js';
-import { postCommodityAlert } from './delivery/discord.js';
+import {
+  upsertCommodityEdgeRows,
+  insertArbAlerts,
+  filterAlreadyPostedKeys,
+  recordPostedAlerts,
+  recordFeedPerformance,
+} from './delivery/supabase.js';
+import { postCommodityAlert, postMoversAlert } from './delivery/discord.js';
 import { revalidateCommodityEdge } from './delivery/revalidate.js';
+import { fetchKalshiCandidates } from './feeds/movers.js';
+import {
+  applyFilters as applyMoverFilters,
+  selectTop as selectTopMovers,
+  alertKey as moverAlertKey,
+  moverTier,
+} from './engine/movers.js';
 
 initSentry();
 
@@ -58,6 +71,7 @@ for (const config of enabledCommodities) {
 registerFeed('kalshi');
 registerFeed('polymarket');
 registerFeed('arb_engine');
+registerFeed('movers_engine');
 
 // Phase 2B arb engine state (separate from per-commodity engines).
 const arbState = {
@@ -67,6 +81,25 @@ const arbState = {
   lastErrorAt: null,
   compareTimer: null,
 };
+
+// Phase 3 movers state. Cadence: every 4 hours, matches the discord-market-
+// movers Edge Function it replaces. Test bypass: GET /dev/movers?test=true.
+const MOVERS_INTERVAL_MS = Number(process.env.MOVERS_INTERVAL_MS || 4 * 3600 * 1000);
+const moversState = {
+  scans: 0,
+  candidates: 0,
+  posted: 0,
+  suppressed: 0,
+  lastRunAt: null,
+  lastErrorAt: null,
+  scanTimer: null,
+};
+
+function commodityAlertKey(commodity, tier, edge) {
+  // Tier in the key so a tier upgrade re-fires; strike + direction so a
+  // different strike crossing threshold fires independently.
+  return `commodity_edge:${commodity}:${tier}:${edge.direction}:${edge.strike.toFixed(2)}`;
+}
 
 function expirationDateFromCloseTime(closeIso) {
   return new Date(closeIso).toISOString().slice(0, 10);
@@ -121,13 +154,36 @@ async function runSnapshotOnce(state) {
     // #premium-alerts/#oracle-picks any more than they should see them on the
     // tool pages. After Mon/Tue real-time provisioning the operator flips
     // WRITER_TAG=intraday and both Discord and the pages light up at once.
+    //
+    // posted_alerts dedup (Phase 3): the engine fires a snapshot every
+    // ~5 minutes during market hours. Without dedup, the same edge would
+    // re-post 12×/hour. Cooldown is 6h, keyed by (commodity, tier, direction,
+    // strike) — a tier upgrade (MODERATE → STRONG) re-fires (different key);
+    // the same tier inside the cooldown does not.
     if (top && snap.meta.topTier !== 'NO_EDGE' && (tag === 'intraday' || tag === 'daily')) {
-      try {
-        const sent = await postCommodityAlert(snap.meta);
-        if (sent) console.log(`[${config.commodity}] discord posted ${snap.meta.topTier}`);
-      } catch (err) {
-        console.error(`[${config.commodity}] discord post failed`, err?.message || err);
-        Sentry.captureException(err);
+      const key = commodityAlertKey(config.commodity, snap.meta.topTier, top);
+      const suppressed = await filterAlreadyPostedKeys([key], { hoursWindow: 6 });
+      if (suppressed.has(key)) {
+        console.log(`[${config.commodity}] discord suppressed (6h cooldown) ${snap.meta.topTier}`);
+      } else {
+        try {
+          const sent = await postCommodityAlert(snap.meta);
+          if (sent) {
+            console.log(`[${config.commodity}] discord posted ${snap.meta.topTier}`);
+            await recordPostedAlerts([
+              {
+                alert_key: key,
+                title: `${config.commodity} ${top.direction} $${top.strike.toFixed(2)} ${snap.meta.topTier}`.slice(0, 200),
+                alert_type: 'commodity_edge',
+                platform: 'kalshi',
+                posted_at: new Date().toISOString(),
+              },
+            ]);
+          }
+        } catch (err) {
+          console.error(`[${config.commodity}] discord post failed`, err?.message || err);
+          Sentry.captureException(err);
+        }
       }
     } else if (top && snap.meta.topTier !== 'NO_EDGE') {
       console.log(`[${config.commodity}] would post discord ${snap.meta.topTier} (gated by writer_tag=${tag})`);
@@ -223,6 +279,123 @@ function scheduleArbCompare() {
   }, ARB_COMPARE_INTERVAL_MS);
 }
 
+// --- movers engine (Phase 3) ---
+//
+// Replaces supabase/functions/discord-market-movers. Fetches the 22-series
+// Kalshi watchlist, applies vol/delta/price filters, dedupes against
+// posted_alerts (24h cooldown — same window as the Edge Fn), posts top N
+// gainers + losers to #market-movers, and writes feed_performance rows.
+//
+// Discord posting is gated on WRITER_TAG (the engine's bridge-week safety
+// switch) so the soak window starts fully under operator control.
+
+async function runMoversOnce({ isTest = false } = {}) {
+  const tag = process.env.WRITER_TAG || 'delayed_test';
+  try {
+    moversState.scans += 1;
+    moversState.lastRunAt = new Date().toISOString();
+    recordTick('movers_engine');
+    const all = await fetchKalshiCandidates();
+    const sportsRestricted = process.env.NEXT_PUBLIC_SPORTS_RESTRICTION === '1';
+    let filtered = applyMoverFilters(all, { sportsRestricted, isTest });
+    moversState.candidates += filtered.length;
+
+    if (!isTest && filtered.length > 0) {
+      const keys = filtered.map(moverAlertKey);
+      const suppressed = await filterAlreadyPostedKeys(keys, { hoursWindow: 24 });
+      const before = filtered.length;
+      filtered = filtered.filter((c) => !suppressed.has(moverAlertKey(c)));
+      moversState.suppressed += before - filtered.length;
+    }
+
+    const { gainers, losers } = selectTopMovers(filtered, { isTest });
+    const toPost = [...gainers, ...losers];
+
+    if (toPost.length === 0) {
+      console.log(
+        `[movers] scanned=${all.length} candidates=${filtered.length} posted=0 test=${isTest}`,
+      );
+      return { scanned: all.length, candidates: filtered.length, posted: 0 };
+    }
+
+    if (!isTest && tag === 'delayed_test') {
+      console.log(
+        `[movers] would post ${toPost.length} (gated by writer_tag=${tag}) — gainers=${gainers.length} losers=${losers.length}`,
+      );
+      return { scanned: all.length, candidates: filtered.length, posted: 0, gated: true };
+    }
+
+    const sent = await postMoversAlert({ gainers, losers });
+    if (!sent) {
+      console.warn('[movers] postMoversAlert returned false (no token?) — skipping dedup write');
+      return { scanned: all.length, candidates: filtered.length, posted: 0 };
+    }
+    moversState.posted += toPost.length;
+
+    if (!isTest) {
+      const now = new Date().toISOString();
+      await recordPostedAlerts(
+        toPost.map((c) => ({
+          alert_key: moverAlertKey(c),
+          title: c.title.slice(0, 200),
+          alert_type: 'market_movers',
+          platform: 'kalshi',
+          posted_at: now,
+        })),
+      );
+      await recordFeedPerformance(
+        toPost.map((c) => ({
+          feed_type: 'market_movers',
+          alert_id: moverAlertKey(c),
+          platform: 'kalshi',
+          market_id: c.ticker,
+          confidence_tier: moverTier(Math.abs(c.price_change_24h)),
+          direction: c.yes_price <= 50 ? 'no' : 'yes',
+          alert_price: c.yes_price,
+          alert_edge_pp: Math.abs(c.price_change_24h),
+        })),
+      );
+    }
+
+    console.log(
+      `[movers] posted ${toPost.length} (gainers=${gainers.length} losers=${losers.length}) scanned=${all.length}`,
+    );
+    return {
+      scanned: all.length,
+      candidates: filtered.length,
+      gainers: gainers.length,
+      losers: losers.length,
+      posted: toPost.length,
+    };
+  } catch (err) {
+    moversState.lastErrorAt = new Date().toISOString();
+    console.error('[movers] run failed', err?.message || err);
+    Sentry.captureException(err);
+    throw err;
+  }
+}
+
+function scheduleMovers() {
+  if (stopRequested) return;
+  moversState.scanTimer = setTimeout(async () => {
+    try {
+      await runMoversOnce();
+    } catch {
+      /* runMoversOnce already logged + reported */
+    }
+    scheduleMovers();
+  }, MOVERS_INTERVAL_MS);
+}
+
+function bootstrapMovers() {
+  // Wait briefly so Kalshi WS + commodity engines have settled before the
+  // first REST burst. 30s also avoids racing the engine's first snapshot log.
+  setTimeout(() => {
+    runMoversOnce().catch(() => {});
+    scheduleMovers();
+  }, 30_000);
+}
+
 function bootstrapArb() {
   const tokenIds = getPolymarketYesTokenIds();
   if (tokenIds.length === 0) {
@@ -281,6 +454,14 @@ const server = http.createServer((req, res) => {
       lastRunAt: arbState.lastRunAt,
       lastErrorAt: arbState.lastErrorAt,
     };
+    snap.engine.movers = {
+      scans: moversState.scans,
+      candidates: moversState.candidates,
+      posted: moversState.posted,
+      suppressed: moversState.suppressed,
+      lastRunAt: moversState.lastRunAt,
+      lastErrorAt: moversState.lastErrorAt,
+    };
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(snap));
     return;
@@ -291,6 +472,22 @@ const server = http.createServer((req, res) => {
     Sentry.captureException(err);
     res.writeHead(500, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ status: 'captured', message: err.message }));
+    return;
+  }
+
+  // Manual trigger for ops debugging — fires one movers scan, returns the
+  // result. ?test=true skips filters + dedup so it always posts something.
+  if (url.pathname === '/dev/movers') {
+    const isTest = url.searchParams.get('test') === 'true';
+    runMoversOnce({ isTest })
+      .then((result) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ...result }));
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err?.message || String(err) }));
+      });
     return;
   }
 
@@ -338,6 +535,8 @@ bootstrapAll().catch((err) => {
 
 bootstrapArb();
 
+bootstrapMovers();
+
 // --- shutdown ---
 
 async function shutdown(signal) {
@@ -348,6 +547,7 @@ async function shutdown(signal) {
     if (state.eventRefreshTimer) clearInterval(state.eventRefreshTimer);
   }
   if (arbState.compareTimer) clearTimeout(arbState.compareTimer);
+  if (moversState.scanTimer) clearTimeout(moversState.scanTimer);
   stopKalshi();
   stopPolymarket();
   stopAllPyth();

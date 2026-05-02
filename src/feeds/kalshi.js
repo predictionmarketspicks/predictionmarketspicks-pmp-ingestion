@@ -121,12 +121,12 @@ async function connect() {
       id: 1,
       cmd: 'subscribe',
       params: {
-        channels: ['ticker_v2'],
+        channels: ['ticker'],
         market_tickers: tickers,
       },
     };
     ws.send(JSON.stringify(sub));
-    console.log(`[kalshi] subscribed to ticker_v2 on ${tickers.length} markets`);
+    console.log(`[kalshi] subscribed to ticker on ${tickers.length} markets`);
   });
 
   ws.on('message', (raw) => {
@@ -141,7 +141,7 @@ async function connect() {
       setFeedStatus('kalshi', { lastError: JSON.stringify(msg).slice(0, 240) });
       return;
     }
-    if (msg.type === 'ticker_v2' || msg.msg?.market_ticker) {
+    if (msg.type === 'ticker' || msg.msg?.market_ticker) {
       recordTick('kalshi');
       const t = msg.msg?.market_ticker || msg.market_ticker || '?';
       const price = msg.msg?.price ?? msg.msg?.yes_bid ?? null;

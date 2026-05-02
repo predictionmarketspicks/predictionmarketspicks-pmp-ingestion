@@ -92,7 +92,16 @@ function deriveQuoteFromBook(book) {
   return { bid, ask, mid };
 }
 
-function applyMessage(parsed) {
+// Update the in-memory quote for one asset_id. Pure write — no shape detection.
+function writeQuote(tokenId, patch, ts) {
+  if (!tokenId) return;
+  const prev = quoteMap.get(tokenId) || { yesTokenId: tokenId };
+  const next = { ...prev, ...patch };
+  if (Number.isFinite(ts)) next.ts = ts;
+  quoteMap.set(tokenId, next);
+}
+
+export function applyMessage(parsed) {
   if (!parsed) return;
   const eventType = parsed.event_type || parsed.type;
   if (rawShapeLogged < RAW_SHAPE_LOG_LIMIT) {
@@ -103,48 +112,62 @@ function applyMessage(parsed) {
     );
   }
 
-  const tokenId = parsed.asset_id || parsed.market;
-  if (!tokenId) return;
-  const prev = quoteMap.get(tokenId) || { yesTokenId: tokenId };
-  const next = { ...prev };
   const ts =
     typeof parsed.timestamp === 'number'
       ? parsed.timestamp
       : typeof parsed.timestamp === 'string'
       ? Number.parseInt(parsed.timestamp, 10)
       : null;
-  if (Number.isFinite(ts)) next.ts = ts;
 
+  // Book snapshot — sent once per asset on subscribe (Polymarket batches all
+  // initial books into a single array frame; the array unwrap happens upstream
+  // in the message handler). Has top-level `asset_id`.
   if (eventType === 'book' || (parsed.bids && parsed.asks)) {
+    const tokenId = parsed.asset_id;
     const { bid, ask, mid } = deriveQuoteFromBook(parsed);
-    if (bid != null) next.bid = bid;
-    if (ask != null) next.ask = ask;
-    if (mid != null) next.mid = mid;
-  } else if (eventType === 'price_change' && Array.isArray(parsed.changes)) {
-    // Apply each level change. We don't keep the full book in memory — just the
-    // best bid / ask we see. A full L2 walk on every tick would be expensive
-    // for marginal gain in v1; the periodic comparator reads `mid` directly.
-    for (const ch of parsed.changes) {
-      const p = num(ch?.price);
-      const s = num(ch?.size);
-      const side = ch?.side; // 'BUY' or 'SELL'
-      if (p == null || s == null) continue;
-      if (s <= 0) continue;
-      if (side === 'BUY' && (next.bid == null || p > next.bid)) next.bid = p;
-      if (side === 'SELL' && (next.ask == null || p < next.ask)) next.ask = p;
-    }
-    if (next.bid != null && next.ask != null) next.mid = (next.bid + next.ask) / 2;
-  } else if (eventType === 'last_trade_price') {
-    const p = num(parsed.price);
-    if (p != null) next.last = p;
-    // Use last as mid only when we have no two-sided book.
-    if (next.mid == null && p != null) next.mid = p;
-  } else {
-    return; // unknown shape — already logged by rawShape capture
+    const patch = {};
+    if (bid != null) patch.bid = bid;
+    if (ask != null) patch.ask = ask;
+    if (mid != null) patch.mid = mid;
+    writeQuote(tokenId, patch, ts);
+    recordTick('polymarket');
+    return;
   }
 
-  quoteMap.set(tokenId, next);
-  recordTick('polymarket');
+  // Live diff frame. NO top-level asset_id — each price_changes[] entry has
+  // its own asset_id and authoritative best_bid / best_ask. YES + NO of the
+  // same condition typically arrive in the same frame (one BUY, one SELL).
+  if (eventType === 'price_change' && Array.isArray(parsed.price_changes)) {
+    for (const ch of parsed.price_changes) {
+      const tokenId = ch?.asset_id;
+      if (!tokenId) continue;
+      const bid = num(ch.best_bid);
+      const ask = num(ch.best_ask);
+      const patch = {};
+      if (bid != null) patch.bid = bid;
+      if (ask != null) patch.ask = ask;
+      if (bid != null && ask != null) patch.mid = (bid + ask) / 2;
+      else if (bid != null) patch.mid = bid;
+      else if (ask != null) patch.mid = ask;
+      writeQuote(tokenId, patch, ts);
+    }
+    recordTick('polymarket');
+    return;
+  }
+
+  // Per-print event — fallback mid only when no two-sided book is available.
+  if (eventType === 'last_trade_price') {
+    const tokenId = parsed.asset_id;
+    const p = num(parsed.price);
+    const prev = quoteMap.get(tokenId);
+    const patch = {};
+    if (p != null) patch.last = p;
+    if (p != null && (!prev || prev.mid == null)) patch.mid = p;
+    writeQuote(tokenId, patch, ts);
+    recordTick('polymarket');
+    return;
+  }
+  // Unknown shape — already logged via shape capture above.
 }
 
 async function connect() {

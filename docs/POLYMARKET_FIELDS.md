@@ -1,6 +1,7 @@
 # Polymarket CLOB WS — Observed Field Shapes
 
-Last verified: 2026-05-02 (Phase 2B).
+Last verified: 2026-05-02 (Phase 2B + Phase 2B hot-fix). Captured against live
+production traffic via `scripts/poly-probe.mjs`.
 
 Polymarket has historically renamed schema fields without notice (build plan §10).
 The Polymarket feed (`src/feeds/polymarket.js`) logs the first 5 raw frames per
@@ -47,43 +48,69 @@ The arb mapping registry stores both `conditionId` (for the arb_alerts row) and
 Polymarket sometimes batches multiple events into one frame as a JSON array.
 Single-message frames are one object. Both are handled in `applyMessage`.
 
-### `book` — full L2 snapshot (sent on subscribe and after a bookkeeping reset)
+### `book` — full L2 snapshot (sent on subscribe)
+
+On first subscribe, all books arrive in a **single array frame** — the message
+handler iterates the array and dispatches per item. Each book has a top-level
+`asset_id`.
 
 ```json
 {
   "event_type": "book",
   "asset_id": "30767812841387255642...",
   "market": "0xde04...",
-  "buys":  [{"price": "0.94", "size": "120.0"}, {"price": "0.93", "size": "80.0"}],
-  "sells": [{"price": "0.96", "size": "200.0"}, {"price": "0.97", "size": "150.0"}],
-  "timestamp": "1746201230000",
+  "bids":  [{"price": "0.94", "size": "120.0"}, {"price": "0.93", "size": "80.0"}],
+  "asks":  [{"price": "0.96", "size": "200.0"}, {"price": "0.97", "size": "150.0"}],
+  "tick_size": "0.01",
+  "last_trade_price": "0.945",
+  "timestamp": "1777756325449",
   "hash": "..."
 }
 ```
 
-Some servers emit `bids`/`asks` instead of `buys`/`sells`. The feed accepts both.
 We compute mid as `(best_bid + best_ask) / 2`. If only one side exists, mid
 falls back to that side.
 
-### `price_change` — order-level diff
+### `price_change` — order-level diff (LIVE shape, locked 2026-05-02)
+
+**Critical drift from earlier docs**: Polymarket uses `price_changes` (plural),
+NOT `changes`. There is **NO top-level `asset_id`** — each entry inside the
+`price_changes[]` array has its own. YES + NO of the same condition typically
+arrive in one frame (one `BUY`, one `SELL`).
 
 ```json
 {
   "event_type": "price_change",
-  "asset_id": "30767812841387255642...",
   "market": "0xde04...",
-  "changes": [
-    {"price": "0.95", "side": "BUY",  "size": "300.0"},
-    {"price": "0.97", "side": "SELL", "size": "0.0"}
+  "price_changes": [
+    {
+      "asset_id": "30767812841387255642...",   // YES token
+      "price": "0.94",
+      "size": "125994.25",
+      "side": "BUY",
+      "hash": "...",
+      "best_bid": "0.95",
+      "best_ask": "0.96"
+    },
+    {
+      "asset_id": "40302938956091099752...",   // NO token (mirror)
+      "price": "0.06",
+      "size": "125994.25",
+      "side": "SELL",
+      "hash": "...",
+      "best_bid": "0.04",
+      "best_ask": "0.05"
+    }
   ],
-  "timestamp": "1746201240000"
+  "timestamp": "1777756330593"
 }
 ```
 
-The feed updates the best bid/ask in place when a level beats the current best.
-A `size: "0"` cancels at that price level — the in-memory map ignores cancels
-in v1 (the periodic comparator tolerates one stale tick; the next live print
-corrects it). If staleness becomes a problem, swap in an L2 walker.
+`best_bid` / `best_ask` per change are the authoritative top-of-book values —
+the feed parser reads those directly rather than walking levels. `size: "0"`
+indicates a cancel at the named `price` level; `best_bid`/`best_ask` still
+reflect the post-cancel top correctly, so the engine doesn't need cancel-aware
+bookkeeping.
 
 ### `last_trade_price` — print
 

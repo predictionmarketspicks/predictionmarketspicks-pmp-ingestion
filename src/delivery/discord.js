@@ -1,15 +1,16 @@
-// Discord webhook delivery for commodity edge alerts.
+// Discord bot delivery for commodity edge alerts.
+// Uses the existing PMP Discord bot (DISCORD_BOT_TOKEN — same secret the
+// Supabase Edge Function scanners use), POSTs to v10 channels/{id}/messages.
 //
-// Routing (Phase 1, silver-only):
-//   STRONG  (≥12pp) → DISCORD_WEBHOOK_ORACLE_PICKS
-//   MODERATE (7-12) → DISCORD_WEBHOOK_PREMIUM_ALERTS
-//   SPECULATIVE (4-7) → DISCORD_WEBHOOK_CMDTY_EDGE
+// Channel routing (Phase 1, silver-only, IDs from docs/discord-reference.md):
+//   STRONG  (≥12pp)    → #oracle-picks   1487857828084584528
+//   MODERATE (7-12pp)  → #premium-alerts 1487857830391451750
+//   SPECULATIVE (4-7pp) → #commodity-edge 1499364066706198542
 //
 // Embed link convention (CLAUDE.md, locked May 2 2026): title clicks go to the
-// Kalshi sign-up referral URL, NOT a per-market deep-link. Per-market links are
-// for our own widgets only.
+// Kalshi sign-up referral URL, NOT a per-market deep-link.
 //
-// Brand-safety guard: every outbound payload is run through assertBrandSafe().
+// Brand-safety guard: every outbound payload runs through assertBrandSafe().
 // A banned-word match throws BannedWordError before any HTTP fire.
 
 import { sanitize } from '../lib/sanitize.js';
@@ -18,24 +19,25 @@ import { assertBrandSafe } from '../lib/lint-strings.js';
 const KALSHI_REFERRAL_URL =
   'https://kalshi.com/sign-up/?referral=b07a96ab-4b91-4bdc-8285-5ae1927b7000';
 
+// Stable channel IDs — single source of truth is docs/discord-reference.md.
+// Hardcoding (vs env vars) matches the existing Edge Function pattern and
+// keeps deploy friction to one secret (DISCORD_BOT_TOKEN).
+const CHANNEL_ID = {
+  STRONG: '1487857828084584528', // #oracle-picks
+  MODERATE: '1487857830391451750', // #premium-alerts
+  SPECULATIVE: '1499364066706198542', // #commodity-edge
+};
+
 const COLOR_BY_TIER = {
   STRONG: 0xc9a243, // oracle-gold
   MODERATE: 0x1b1340, // indigo
   SPECULATIVE: 0x7a6e5d, // khaki
 };
 
-function pickWebhook(tier) {
-  if (tier === 'STRONG') return process.env.DISCORD_WEBHOOK_ORACLE_PICKS;
-  if (tier === 'MODERATE') return process.env.DISCORD_WEBHOOK_PREMIUM_ALERTS;
-  if (tier === 'SPECULATIVE') return process.env.DISCORD_WEBHOOK_CMDTY_EDGE;
-  return null;
-}
-
-// American odds from a probability fraction. No commas — see CLAUDE.md.
 function probToAmericanOdds(prob) {
   if (!Number.isFinite(prob) || prob <= 0 || prob >= 1) return null;
   if (prob >= 0.5) return -Math.round((prob / (1 - prob)) * 100);
-  return Math.round((100 / prob) - 100);
+  return Math.round(100 / prob - 100);
 }
 
 function buildSilverEmbed(meta, topEdge) {
@@ -94,26 +96,18 @@ function buildSilverEmbed(meta, topEdge) {
   };
 }
 
-// Returns true on successful delivery, false on skip (no webhook configured),
-// throws on HTTP failure or brand-safety violation.
-export async function postSilverAlert(meta) {
-  const top = meta.topEdge;
-  if (!top) return false;
-  const tier = meta.topTier;
-  if (tier === 'NO_EDGE') return false;
-  const webhook = pickWebhook(tier);
-  if (!webhook) {
-    console.warn(`[discord] no webhook configured for tier=${tier} — skipping`);
+async function postToChannel(channelId, payload) {
+  const token = process.env.DISCORD_BOT_TOKEN;
+  if (!token) {
+    console.warn('[discord] DISCORD_BOT_TOKEN not set — skipping post');
     return false;
   }
-
-  const payload = buildSilverEmbed(meta, top);
-  // Hard-stop if any banned word slipped through.
-  assertBrandSafe(payload);
-
-  const res = await fetch(webhook, {
+  const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      Authorization: `Bot ${token}`,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(8000),
   });
@@ -124,5 +118,20 @@ export async function postSilverAlert(meta) {
   return true;
 }
 
-// Exported for tests so we can run the lint over a synthetic payload.
-export { buildSilverEmbed, KALSHI_REFERRAL_URL };
+// Returns true on successful delivery, false on skip (no token / NO_EDGE),
+// throws on HTTP failure or brand-safety violation.
+export async function postSilverAlert(meta) {
+  const top = meta.topEdge;
+  if (!top) return false;
+  const tier = meta.topTier;
+  if (tier === 'NO_EDGE') return false;
+  const channelId = CHANNEL_ID[tier];
+  if (!channelId) return false;
+
+  const payload = buildSilverEmbed(meta, top);
+  // Hard-stop if any banned word slipped through.
+  assertBrandSafe(payload);
+  return postToChannel(channelId, payload);
+}
+
+export { buildSilverEmbed, KALSHI_REFERRAL_URL, CHANNEL_ID };

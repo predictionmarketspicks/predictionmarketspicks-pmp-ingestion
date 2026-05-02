@@ -41,9 +41,10 @@ Phase 1 adds:
 MASSIVE_API_KEY           # Options Advanced; rotated 2026-05-02
 SUPABASE_URL              # https://svxqipncfupabpvxtlro.supabase.co
 SUPABASE_SERVICE_KEY      # service role — bypasses RLS for engine writes
-DISCORD_WEBHOOK_CMDTY_EDGE          # SPECULATIVE tier (4-7pp)
-DISCORD_WEBHOOK_PREMIUM_ALERTS      # MODERATE tier (7-12pp)
-DISCORD_WEBHOOK_ORACLE_PICKS        # STRONG tier (≥12pp)
+DISCORD_BOT_TOKEN         # Same secret the existing PMP Edge Function scanners use.
+                          # Bot already in the guild; channel routing in src/delivery/discord.js
+                          # (STRONG → #oracle-picks, MODERATE → #premium-alerts,
+                          #  SPECULATIVE → #commodity-edge — IDs from docs/discord-reference.md)
 VERCEL_REVALIDATE_TOKEN   # bearer; site-side /api/revalidate accepts this
 VERCEL_DEPLOY_HOOK_URL    # optional — fallback if /api/revalidate is down
 SITE_BASE_URL             # https://predictionmarketspicks.com (default)

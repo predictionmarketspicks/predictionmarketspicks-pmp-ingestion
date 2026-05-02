@@ -1,0 +1,22 @@
+{
+  "name": "pmp-ingestion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PredictionMarketsPicks ingestion engine — always-on Kalshi/Polymarket/Massive/Pyth heartbeat.",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "lint:no-axios": "node -e \"const lock=require('fs').existsSync('package-lock.json')?require('fs').readFileSync('package-lock.json','utf8'):'';if(/\\\"axios\\\"/.test(lock)||/plain-crypto-js/.test(lock)){console.error('axios or plain-crypto-js detected — security incident');process.exit(1)}console.log('no axios')\""
+  },
+  "dependencies": {
+    "@sentry/node": "^8.45.0",
+    "@supabase/supabase-js": "^2.46.1",
+    "@upstash/redis": "^1.34.3",
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.0"
+  }
+}

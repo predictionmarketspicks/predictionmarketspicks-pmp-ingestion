@@ -7,10 +7,10 @@
 // take their IV". Brent's-method solver in src/engine/options.js stays as a
 // fallback for null-IV strikes (deep ITM with no live two-sided quote).
 //
-// Bridge week (now → Mon May 4 / Tue May 5): paid 15-min delayed tier.
-// Same URL, same response shape — Massive flips real-time server-side based
-// on the API key. WRITER_TAG=delayed_test gates these rows out of production
-// reads in the meantime.
+// Tier: real-time as of 2026-05-04 (Options Advanced). Same URL, same response
+// shape — Massive flipped server-side on the existing API key, no code change
+// in this file. WRITER_TAG=intraday in production; the delayed_test branch is
+// preserved for any future bridge scenario.
 //
 // Auth: Bearer header, NOT query param. Plan §6 spec. Some Massive endpoints
 // also accept ?apiKey= as a fallback; we use the header form so the key never

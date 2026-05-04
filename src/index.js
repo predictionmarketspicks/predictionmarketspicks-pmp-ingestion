@@ -160,11 +160,10 @@ async function runSnapshotOnce(state) {
       : 'top=NO_EDGE';
     console.log(`[${config.commodity}] snapshot: ${count} rows tag=${tag} • ${topStr} • spot=$${snap.meta.spotPrice.toFixed(2)}`);
 
-    // Discord + revalidate are gated on writer_tag — `delayed_test` rows are
-    // 15-min stale (Massive bridge-week tier), users shouldn't see them in
-    // #premium-alerts/#oracle-picks any more than they should see them on the
-    // tool pages. After Mon/Tue real-time provisioning the operator flips
-    // WRITER_TAG=intraday and both Discord and the pages light up at once.
+    // Discord + revalidate are gated on writer_tag — Massive flipped to
+    // real-time on 2026-05-04 and operator set WRITER_TAG=intraday. The
+    // `delayed_test` branch is kept for any future bridge-week scenario
+    // (paid tier rollback, second underlying still on delayed tier, etc.).
     //
     // posted_alerts dedup (Phase 3): the engine fires a snapshot every
     // ~5 minutes during market hours. Without dedup, the same edge would

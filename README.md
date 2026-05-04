@@ -77,11 +77,11 @@ Each `flyctl deploy` causes a ~10–15s gap as the new image rolls. The 60s boot
 
 Full incident playbook + BetterStack/Sentry setup: `prediction-marketspicks/docs/INGESTION_OPERATOR_RUNBOOK.md`. Threshold tuning: `prediction-marketspicks/docs/INGESTION_THRESHOLDS.md`.
 
-## Bridge-week pattern (Phase 1, May 2 → Mon/Tue real-time provisioning)
+## Bridge-week pattern (historical — completed 2026-05-04)
 
-Massive is on the paid 15-min delayed Options tier this week. Sales meeting Mon May 4 / Tue May 5 provisions Options Advanced (real-time). Same URL, same response shape, server-side tier flip.
+Massive flipped from the paid 15-min delayed Options tier to Options Advanced (real-time) server-side on the existing API key. Operator set `flyctl secrets set WRITER_TAG=intraday -a pmp-ingestion` and the engine started writing `snapshot_type='intraday'` (or `'daily'`). Zero code change.
 
-Engine writes `snapshot_type='delayed_test'` rows during the bridge. The site-side reader filters `WHERE snapshot_type IN ('daily','intraday')`, so users never see delayed data. Cutover = `flyctl secrets set WRITER_TAG=intraday -a pmp-ingestion`. Zero code change.
+The `delayed_test` writer-tag branch is kept in `src/index.js` for any future bridge scenario (tier rollback, second underlying still on delayed tier).
 
 ## Health endpoint shape
 

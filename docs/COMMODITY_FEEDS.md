@@ -19,9 +19,10 @@ not a continuous front-month feed. The placeholder ID inherited from
 `commodity_edge/src/pyth.py` is unverified and will likely 404 against the live
 Hermes API.
 
-The Python pipeline (`commodity_edge/scripts/run_oil_edge.py`) punts and uses
-`yfinance CL=F` (NYMEX continuous front-month). That's not portable to a Node
-service on Fly without Python.
+The retired Python pipeline (`commodity_edge/scripts/run_oil_edge.py`, removed
+2026-05-04) used `yfinance CL=F` (NYMEX continuous front-month) as a workaround.
+That's not portable to a Node service on Fly without Python, so the Node engine
+keeps oil disabled until one of the resolutions below ships.
 
 **Resolution options** (pick one before flipping `oil.enabled = true`):
 

@@ -8,12 +8,10 @@
 // Pyth feed verification status (May 2 2026):
 //   silver  XAG/USD  — verified (Kalshi settlement source)
 //   gold    XAU/USD  — verified (Kalshi settlement source)
-//   oil     WTI      — UNVERIFIED placeholder ID, copied from
-//                      commodity_edge/src/pyth.py. Pyth Hermes serves per-expiry
+//   oil     WTI      — UNVERIFIED placeholder ID. Pyth Hermes serves per-expiry
 //                      WTI futures (WTIM6, WTIN6, …), not a continuous feed.
-//                      The Python pipeline punts to yfinance CL=F. The engine
-//                      fails open: when Pyth WTI returns null, oil snapshot is
-//                      skipped (logged warn, no DB write). Cutover-week TODO:
+//                      Engine fails open: when Pyth WTI returns null, oil
+//                      snapshot is skipped (logged warn, no DB write). TODO:
 //                      validate the ID via /v2/price_feeds, or add a Massive
 //                      futures path. See docs/COMMODITY_FEEDS.md.
 //   copper  XCU/USD  — UNVERIFIED, no Pyth feed ID configured. Same fail-open

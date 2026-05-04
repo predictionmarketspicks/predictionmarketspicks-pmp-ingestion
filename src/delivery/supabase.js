@@ -103,6 +103,28 @@ export async function recordPostedAlerts(rows) {
   return { count: rows.length };
 }
 
+// ---------- macro_market_snapshots (Session 2) ----------
+//
+// Append-only time series of Kalshi macro markets. One row per (ticker,
+// snapshot_at). The table's UNIQUE index on (ticker, snapshot_at) collapses
+// retries that land on the same instant, so we use upsert + ignoreDuplicates
+// to make the write idempotent at the millisecond.
+//
+// Failures throw — the engine logs and moves on. Loss of a single 5min
+// snapshot is acceptable; the next tick fills in.
+export async function insertMacroSnapshots(rows, { snapshotAt } = {}) {
+  if (!rows || rows.length === 0) return { count: 0 };
+  const stamp = snapshotAt || new Date().toISOString();
+  const stamped = rows.map((r) => ({ ...r, snapshot_at: stamp }));
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('macro_market_snapshots')
+    .upsert(stamped, { onConflict: 'ticker,snapshot_at', ignoreDuplicates: true })
+    .select('id');
+  if (error) throw new Error(`macro_market_snapshots upsert: ${error.message}`);
+  return { count: data?.length ?? 0 };
+}
+
 // Write feed_performance rows for backtest scoring. feed_type chosen by caller
 // ('market_movers', 'commodity_edge'). Errors are logged but not thrown — a
 // missed performance row doesn't block the user-facing Discord post.

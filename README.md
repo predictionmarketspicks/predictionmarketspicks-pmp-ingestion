@@ -122,6 +122,7 @@ The `delayed_test` writer-tag branch is kept in `src/index.js` for any future br
 - `GET /dev/throw` — fires a test exception; should appear in Sentry within seconds
 - `GET /dev/snapshot?commodity=silver|gold` — runs one snapshot synchronously, returns the result
 - `GET /dev/movers?test=true` — fires one movers scan; `test=true` skips filters + dedup so it always posts
+- `GET /dev/macro` — fires one Kalshi macro snapshot pass; returns rows fetched + rows written to `macro_market_snapshots`
 
 ## Invariants
 
@@ -139,3 +140,8 @@ The `delayed_test` writer-tag branch is kept in `src/index.js` for any future br
 - **Commodity registry**: `src/engine/commodities.js` is the single source of truth. Adding a commodity = one entry there + one thin wrapper in `src/engine/`. The shared compute path lives in `src/engine/commodity-base.js`.
 - **Delta filter**: `0.15 ≤ |Δ| ≤ 0.85` applied in `src/feeds/massive.js`. Missing-delta passthrough means the bridge-week 15-min-delayed tier (greeks: {} on weekends and off-hours) still produces a chain. Post Mon/Tue real-time cutover, greeks populate live and the filter starts pruning to ~50–80 strikes per ETF.
 - **Disabled commodities (oil, copper)**: scaffolded but no verified spot feed yet. See `docs/COMMODITY_FEEDS.md` for the resolution path. Engines fail open — disabled commodities don't bootstrap, so Pyth poller doesn't waste calls on unverified IDs.
+
+## Session 2 notes (2026-05-04)
+
+- **Options quality filters** (`src/feeds/massive.js`): drop strikes with bid ≤ 0, 24h volume < 50, spread/mid > 25%, or open interest < 100. Strikes that pass with volume ≤ 150 are tagged `speculative`; the smile builder propagates the tag to the resulting `commodity_edge_signals` row, capping confidence at `low` regardless of edge magnitude. Kills the "options imply 0%" phantom rows in the silver-edge widget.
+- **Macro market snapshots** (`src/engine/macro.js` + `src/feeds/kalshi-macro.js`): every 5 min in market hours, 15 min off-hours, the engine pulls the 22-series Kalshi watchlist (shared with `feeds/movers.js`) and writes per-market rows to `macro_market_snapshots` (UNIQUE on `(ticker, snapshot_at)`, 30-day TTL via pg_cron jobid 78). Append-only — readers query latest via `(ticker, snapshot_at DESC)` index. Site-side migration off direct Kalshi REST is Session 3.

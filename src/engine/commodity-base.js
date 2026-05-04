@@ -72,17 +72,21 @@ function classifyKalshiView(market) {
 function buildIvSmile(contracts, etfSpot) {
   const lo = etfSpot * 0.75;
   const hi = etfSpot * 1.25;
+  // Each entry is [strike, iv, speculative] so ivAt can flag interpolations
+  // that lean on thin-volume contracts (handoff §2.3). The row's confidence is
+  // capped to 'low' downstream when smile contributors are speculative.
   const clean = [];
   for (const c of contracts) {
     if (c.iv == null || c.strike == null) continue;
     if (c.strike < lo || c.strike > hi) continue;
     if (c.iv < 0.1 || c.iv > 1.5) continue;
-    if (c.strike >= etfSpot && c.contractType === 'call') clean.push([c.strike, c.iv]);
-    else if (c.strike < etfSpot && c.contractType === 'put') clean.push([c.strike, c.iv]);
+    if (c.strike >= etfSpot && c.contractType === 'call') clean.push([c.strike, c.iv, !!c.speculative]);
+    else if (c.strike < etfSpot && c.contractType === 'put') clean.push([c.strike, c.iv, !!c.speculative]);
   }
   clean.sort((a, b) => a[0] - b[0]);
 
   let atmIv = null;
+  let atmSpeculative = false;
   if (contracts.length > 0) {
     let best = null;
     let bestDist = Infinity;
@@ -94,22 +98,30 @@ function buildIvSmile(contracts, etfSpot) {
         best = c;
       }
     }
-    if (best) atmIv = best.iv;
+    if (best) {
+      atmIv = best.iv;
+      atmSpeculative = !!best.speculative;
+    }
   }
 
+  // ivAt returns { iv, speculative } — speculative=true when any of the
+  // contracts feeding the interpolation (or extrapolation) was thin-volume.
   function ivAt(targetStrikeEtf) {
-    if (clean.length === 0) return atmIv;
-    if (targetStrikeEtf <= clean[0][0]) return clean[0][1];
-    if (targetStrikeEtf >= clean[clean.length - 1][0]) return clean[clean.length - 1][1];
+    if (clean.length === 0) return { iv: atmIv, speculative: atmSpeculative };
+    if (targetStrikeEtf <= clean[0][0]) return { iv: clean[0][1], speculative: clean[0][2] };
+    if (targetStrikeEtf >= clean[clean.length - 1][0]) {
+      const last = clean[clean.length - 1];
+      return { iv: last[1], speculative: last[2] };
+    }
     for (let i = 1; i < clean.length; i++) {
       if (clean[i][0] >= targetStrikeEtf) {
-        const [x0, y0] = clean[i - 1];
-        const [x1, y1] = clean[i];
+        const [x0, y0, s0] = clean[i - 1];
+        const [x1, y1, s1] = clean[i];
         const t = (targetStrikeEtf - x0) / (x1 - x0);
-        return y0 + (y1 - y0) * t;
+        return { iv: y0 + (y1 - y0) * t, speculative: s0 || s1 };
       }
     }
-    return atmIv;
+    return { iv: atmIv, speculative: atmSpeculative };
   }
 
   return { atmIv, ivAt };
@@ -177,7 +189,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     const market = mergeLiveQuote(rawMarket);
     const kSpot = market.floorStrike;
     const kEtf = kSpot * ratio;
-    const iv = smile.ivAt(kEtf);
+    const ivResult = smile.ivAt(kEtf);
+    const iv = ivResult?.iv ?? null;
+    const ivSpeculative = !!ivResult?.speculative;
 
     let optProb = null;
     if (iv != null && iv > 0 && T > 0) {
@@ -222,6 +236,13 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       } else if (kalshiView === 'wide_spread') {
         rationale += ` (caveat: wide bid-ask $${(market.yesBid ?? 0).toFixed(2)}-$${(market.yesAsk ?? 0).toFixed(2)}; verify book depth before sizing)`;
         if (confidence === 'high') confidence = 'medium';
+      }
+      // Speculative IV cap (handoff §2.3): if the smile leaned on thin-volume
+      // contracts (vol ≤ 150), demote actionable rows to 'low' so the site
+      // renders advisory rather than tradeable.
+      if (ivSpeculative && (confidence === 'high' || confidence === 'medium')) {
+        confidence = 'low';
+        rationale += ' (caveat: thin options volume on contributing strikes — IV may be unreliable)';
       }
     }
 

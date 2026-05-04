@@ -63,3 +63,21 @@ export const SILVER_SNAPSHOT_INTERVAL_OFF_MS = SNAPSHOT_INTERVAL_OFF_MS;
 // populate live and the filter starts pruning to ~0.15 ≤ |Δ| ≤ 0.85.
 export const DELTA_FILTER_MIN = 0.15;
 export const DELTA_FILTER_MAX = 0.85;
+
+// Options chain quality filters (handoff §2.3, May 4 2026). Applied at the
+// Massive feed layer so consumers (silver/gold/oil/copper engines, future IV
+// HTTP endpoint) all see the same clean chain. Kills the "options imply 0%"
+// phantom-edge rows that show up when an illiquid strike with $0 bid feeds the
+// smile interpolation.
+//
+// Null-field passthrough mirrors the delta filter — off-hours / cold-start the
+// fields are missing, not zero, and we don't want to zero out the whole chain.
+export const OPTION_QUALITY_MIN_VOLUME = 50;        // drop strike if 24h vol < 50
+export const OPTION_QUALITY_MIN_OI = 100;            // drop strike if OI < 100
+export const OPTION_QUALITY_MAX_SPREAD_RATIO = 0.25; // drop strike if (ask-bid)/mid > 25%
+
+// Speculative band: passes the min-volume filter but thin enough that the
+// engine should demote the resulting commodity_edge row to 'low' confidence
+// even if the edge magnitude would normally qualify higher. Site can render
+// these as advisory rather than actionable.
+export const OPTION_VOLUME_SPECULATIVE_MAX = 150;

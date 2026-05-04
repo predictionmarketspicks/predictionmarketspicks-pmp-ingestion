@@ -17,7 +17,14 @@
 // shows up in any URL log.
 
 import { setFeedStatus, recordTick } from '../observability/health.js';
-import { DELTA_FILTER_MIN, DELTA_FILTER_MAX } from '../engine/thresholds.js';
+import {
+  DELTA_FILTER_MIN,
+  DELTA_FILTER_MAX,
+  OPTION_QUALITY_MIN_VOLUME,
+  OPTION_QUALITY_MIN_OI,
+  OPTION_QUALITY_MAX_SPREAD_RATIO,
+  OPTION_VOLUME_SPECULATIVE_MAX,
+} from '../engine/thresholds.js';
 
 const MASSIVE_BASE = process.env.MASSIVE_API_BASE || 'https://api.massive.com';
 
@@ -60,6 +67,7 @@ function normalizeContract(c) {
   const greeks = c?.greeks || {};
   const lastQuote = c?.last_quote || {};
   const lastTrade = c?.last_trade || {};
+  const day = c?.day || {};
   return {
     ticker: details.ticker || c.ticker || null,
     contractType: details.contract_type || null, // 'call' | 'put'
@@ -73,6 +81,7 @@ function normalizeContract(c) {
     bid: num(lastQuote.bid),
     ask: num(lastQuote.ask),
     last: num(lastTrade.price),
+    volume24h: num(day.volume),
     openInterest: num(c.open_interest),
     breakEven: num(c.break_even_price),
     underlyingPrice: num(c.underlying_asset?.price),
@@ -88,6 +97,43 @@ function passesDeltaFilter(c) {
   if (c.delta == null) return true;
   const abs = Math.abs(c.delta);
   return abs >= DELTA_FILTER_MIN && abs <= DELTA_FILTER_MAX;
+}
+
+// Quality filters per handoff §2.3 — drop dust strikes that produce phantom
+// "options imply 0%" rows when their garbage IV gets pulled into smile
+// interpolation. Each predicate uses null-passthrough so cold-start / off-hours
+// (no quote, no day-volume yet) doesn't zero out the chain.
+function passesQualityFilters(c) {
+  // (1) Bid > $0. A $0 bid means the market thinks the option is worthless;
+  // any IV computed against it is unreliable.
+  if (c.bid != null && c.bid <= 0) return false;
+
+  // (2) 24h volume ≥ MIN. Strikes with no trading activity have stale prints
+  // and noisy IV. Null volume passes — Massive sometimes omits day.volume on
+  // weekend snapshots.
+  if (c.volume24h != null && c.volume24h < OPTION_QUALITY_MIN_VOLUME) return false;
+
+  // (3) Spread/mid ≤ 25%. Wide quotes mean the mid (and any IV solved against
+  // it) is a fiction — the true price could be anywhere across the spread.
+  if (c.bid != null && c.ask != null && c.bid > 0 && c.ask > 0) {
+    const mid = (c.bid + c.ask) / 2;
+    const spread = c.ask - c.bid;
+    if (mid > 0 && spread / mid > OPTION_QUALITY_MAX_SPREAD_RATIO) return false;
+  }
+
+  // (4) Open interest ≥ MIN. Low OI = nobody actually holds this strike;
+  // displayed price is more market-maker placeholder than fair value.
+  if (c.openInterest != null && c.openInterest < OPTION_QUALITY_MIN_OI) return false;
+
+  return true;
+}
+
+// "Speculative" tag for contracts that pass the minimum filters but are thin
+// enough that the engine should treat any edge they imply as advisory. The
+// commodity-base smile builder propagates this tag to the row's confidence.
+function isSpeculativeOption(c) {
+  if (c.volume24h == null) return false;
+  return c.volume24h <= OPTION_VOLUME_SPECULATIVE_MAX;
 }
 
 async function fetchChain(underlying, expirationDate) {
@@ -111,7 +157,9 @@ async function fetchChain(underlying, expirationDate) {
   return results
     .map(normalizeContract)
     .filter((c) => c.strike != null)
-    .filter(passesDeltaFilter);
+    .filter(passesDeltaFilter)
+    .filter(passesQualityFilters)
+    .map((c) => ({ ...c, speculative: isSpeculativeOption(c) }));
 }
 
 async function pollOnce(underlying, expirationDateRef) {
@@ -209,4 +257,4 @@ export async function fetchPrevClose(ticker) {
   return close;
 }
 
-export { isOptionsMarketOpen, passesDeltaFilter };
+export { isOptionsMarketOpen, passesDeltaFilter, passesQualityFilters, isSpeculativeOption };

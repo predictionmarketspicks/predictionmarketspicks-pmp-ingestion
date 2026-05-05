@@ -56,7 +56,11 @@ export async function fetchTopMarkets({ limit = 200, timeoutMs = GAMMA_FETCH_TIM
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const url = `${GAMMA_API_BASE}/markets?active=true&closed=false&order=volume24hr&ascending=false&limit=${limit}`;
+    // include_tag=true (singular, not the plural include_tags some Polymarket
+    // mirrors document) is required — Gamma's /markets default response omits
+    // the tags array entirely. Without this, every row stores tags=NULL and
+    // Session C's `tags @> ARRAY[...]` reads return zero hits.
+    const url = `${GAMMA_API_BASE}/markets?active=true&closed=false&order=volume24hr&ascending=false&limit=${limit}&include_tag=true`;
     const res = await gammaGet(url, { signal: controller.signal, label: 'polymarket-gamma' });
     if (!res.ok) {
       console.warn(`[polymarket-gamma] HTTP ${res.status} — returning 0 rows`);

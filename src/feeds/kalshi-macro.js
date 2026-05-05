@@ -5,22 +5,28 @@
 // needs the raw fields (yes_bid, yes_ask, last, OI, prev_*, close_time) so
 // downstream consumers can rebuild any view without a second Kalshi call.
 //
-// Reuses the 22-series watchlist from feeds/movers.js — single source of truth
-// for which series the engine tracks. KXMVE filter (sports parlay junk) stays
-// in place; without it Kalshi's catalog dumps ~2800 zero-vol markets at us.
+// Reuses the watchlist + concurrency limiter from feeds/movers.js — single
+// source of truth for which series the engine tracks. KXMVE filter (sports
+// parlay junk) stays in place; without it Kalshi's catalog dumps ~2800
+// zero-vol markets at us.
+//
+// Pre-2026-05-04 this fan-out used Promise.allSettled with no concurrency cap.
+// Kalshi REST throttled ~7 of 22 simultaneous calls with 429s, which the old
+// catch silently turned into empty arrays — a quiet loss of ~7 series per
+// snapshot for weeks. withConcurrency caps in-flight requests; the 429 branch
+// below now logs explicitly so the next regression is visible.
 
-import { KALSHI_SERIES, toCents, toNum } from './movers.js';
+import { KALSHI_SERIES, toCents, toNum, withConcurrency, kalshiGet } from './movers.js';
 
 const KALSHI_API_BASE =
   process.env.KALSHI_API_BASE || 'https://api.elections.kalshi.com/trade-api/v2';
 
+const KALSHI_REST_CONCURRENCY = Number(process.env.KALSHI_REST_CONCURRENCY || 2);
+
 async function fetchSeriesMarkets(series, category, signal) {
-  const url = `${KALSHI_API_BASE}/markets?series_ticker=${series}&status=open&limit=100`;
+  const url = `${KALSHI_API_BASE}/markets?series_ticker=${series}&status=open&limit=200`;
   try {
-    const res = await fetch(url, {
-      headers: { Accept: 'application/json', 'User-Agent': 'pmp-ingestion/macro' },
-      signal,
-    });
+    const res = await kalshiGet(url, { signal, label: 'macro', userAgent: 'pmp-ingestion/macro' });
     if (!res.ok) return { series, category, markets: [] };
     const json = await res.json();
     return { series, category, markets: Array.isArray(json?.markets) ? json.markets : [] };
@@ -30,21 +36,19 @@ async function fetchSeriesMarkets(series, category, signal) {
   }
 }
 
-// Returns one row per Kalshi market across the 22-series watchlist. Shape
-// matches macro_market_snapshots columns 1:1 — the engine wraps this in
-// snapshot_at + writes directly.
+// Returns one row per Kalshi market across the watchlist (zero-vol markets
+// dropped). Shape matches macro_market_snapshots columns 1:1 — the engine
+// wraps this in snapshot_at + writes directly.
 //
 // Field-fallback order for yes_price/prev_price mirrors macro-movers.ts so
 // downstream readers see identical numbers whether they hit Kalshi directly
 // (legacy) or this table (Session 3).
-export async function fetchAllMacroMarkets({ timeoutMs = 10_000 } = {}) {
+export async function fetchAllMacroMarkets({ timeoutMs = 30_000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const results = await Promise.allSettled(
-      KALSHI_SERIES.map(({ series, category }) =>
-        fetchSeriesMarkets(series, category, controller.signal),
-      ),
+    const results = await withConcurrency(KALSHI_SERIES, KALSHI_REST_CONCURRENCY, ({ series, category }) =>
+      fetchSeriesMarkets(series, category, controller.signal),
     );
     const rows = [];
     for (const r of results) {
@@ -53,6 +57,9 @@ export async function fetchAllMacroMarkets({ timeoutMs = 10_000 } = {}) {
       for (const m of markets) {
         if (typeof m.ticker !== 'string') continue;
         if (m.ticker.startsWith('KXMVE')) continue; // catalog-wide safety filter
+
+        const volume_24h = toNum(m.volume_24h_fp);
+        if (volume_24h <= 0) continue; // drop dead markets
 
         const yes_bid_cents = toCentsOrNull(m.yes_bid_dollars);
         const yes_ask_cents = toCentsOrNull(m.yes_ask_dollars);
@@ -80,8 +87,8 @@ export async function fetchAllMacroMarkets({ timeoutMs = 10_000 } = {}) {
           prev_yes_ask_cents,
           prev_yes_bid_cents,
           prev_price_cents,
-          volume_24h: toNum(m.volume_24h_fp),
-          open_interest: toIntOrNull(m.open_interest),
+          volume_24h,
+          open_interest: toIntOrNull(m.open_interest_fp ?? m.open_interest),
           implied_pct,
           close_time: typeof m.close_time === 'string' ? m.close_time : null,
         });

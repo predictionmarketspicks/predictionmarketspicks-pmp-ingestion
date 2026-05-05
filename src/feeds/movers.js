@@ -1,6 +1,6 @@
 // Kalshi macro-mover REST fetcher.
 //
-// Ports the 22-series watchlist + normalize logic from
+// Ports the watchlist + normalize logic from
 // supabase/functions/_shared/macro-movers.ts (Deno) to Node, so the engine can
 // own the discord-market-movers cadence going forward (Phase 3).
 //
@@ -9,16 +9,26 @@
 // post-Phase-3-merge. Diff drift here = silent disagreement at handoff time.
 // Field-fallback order and KXMVE filter are deliberately identical.
 //
-// Kalshi REST quirk: /markets?series_ticker=... uses the 'limit' param to bound
-// page size, not to mean "give me everything"; series with >100 active markets
-// would need pagination. The watchlist below all stay <100 in practice.
+// Kalshi REST quirk: /markets?series_ticker=... uses the 'limit' param as page
+// size; 200 is the max page Kalshi will return. With the volume_24h_fp > 0
+// filter applied downstream, no series in this watchlist exceeds 200 active +
+// non-zero-vol markets in practice. If that ever changes the writer needs
+// cursor pagination.
+//
+// Concurrency: Kalshi REST throttles ~7 simultaneous /markets calls. Earlier
+// versions ran all series in parallel and silently lost ~7 series per scan to
+// 429s (kalshi-macro.js suffered the same). withConcurrency caps in-flight
+// requests so every series gets a fair shot.
 
 const KALSHI_API_BASE =
   process.env.KALSHI_API_BASE || 'https://api.elections.kalshi.com/trade-api/v2';
 
-// Validated live with 24h volume on Apr 23, 2026 (mirrors macro-movers.ts).
-// Keep in sync — both surfaces (this fetcher + the Edge Fn shared module) feed
-// the same Discord channel during the soak.
+const KALSHI_REST_CONCURRENCY = Number(process.env.KALSHI_REST_CONCURRENCY || 2);
+const KALSHI_REST_RETRY_DELAY_MS = Number(process.env.KALSHI_REST_RETRY_DELAY_MS || 600);
+
+// Validated live with 24h volume on Apr 23, 2026 + extended May 4, 2026 with
+// NBA/ETH/World Cup/MLS series. Keep in sync with macro-movers.ts (Deno) —
+// both feed the same Discord channel during the soak.
 export const KALSHI_SERIES = [
   { series: 'KXCPIYOY', category: 'Economics' },
   { series: 'KXGDP', category: 'Economics' },
@@ -28,6 +38,7 @@ export const KALSHI_SERIES = [
 
   { series: 'KXNFLMVP', category: 'Sports' },
   { series: 'KXNBAMVP', category: 'Sports' },
+  { series: 'KXNBAGAME', category: 'Sports' },
   { series: 'KXNFLDRAFTPICK', category: 'Sports' },
   { series: 'KXHEISMAN', category: 'Sports' },
   { series: 'KXSUPERBOWLHEADLINE', category: 'Sports' },
@@ -35,6 +46,12 @@ export const KALSHI_SERIES = [
   { series: 'KXMLBF5TOTAL', category: 'Sports' },
   { series: 'KXLALIGABTTS', category: 'Sports' },
   { series: 'KXATPGRANDSLAM', category: 'Sports' },
+  { series: 'KXMENWORLDCUP', category: 'Sports' },
+  { series: 'KXWCGROUPWIN', category: 'Sports' },
+  { series: 'KXWCGAME', category: 'Sports' },
+  { series: 'KXWCROUND', category: 'Sports' },
+  { series: 'KXWCSQUAD', category: 'Sports' },
+  { series: 'KXMLSGAME', category: 'Sports' },
 
   { series: 'KXPRESPARTY', category: 'Politics' },
   { series: 'KXIMPEACH', category: 'Politics' },
@@ -42,12 +59,33 @@ export const KALSHI_SERIES = [
   { series: 'KXBTCMINY', category: 'Crypto' },
   { series: 'KXBTCMAXY', category: 'Crypto' },
   { series: 'KXBTC15M', category: 'Crypto' },
+  { series: 'KXETH', category: 'Crypto' },
 
   { series: 'KXSURVIVOR', category: 'Entertainment' },
 
   { series: 'KXHURCTOTMAJ', category: 'Weather' },
   { series: 'KXRAINAUSM', category: 'Weather' },
 ];
+
+// Sliding-window concurrency limiter. Returns Promise.allSettled-shape results
+// so callers don't have to change. Used by both fetchKalshiCandidates and the
+// macro writer in kalshi-macro.js.
+export async function withConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      try {
+        results[idx] = { status: 'fulfilled', value: await fn(items[idx]) };
+      } catch (err) {
+        results[idx] = { status: 'rejected', reason: err };
+      }
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 export function toCents(v) {
   const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : NaN;
@@ -60,13 +98,35 @@ export function toNum(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-async function fetchSeries(series, category, signal) {
-  const url = `${KALSHI_API_BASE}/markets?series_ticker=${series}&status=open&limit=100`;
-  try {
-    const res = await fetch(url, {
-      headers: { Accept: 'application/json', 'User-Agent': 'pmp-ingestion/movers' },
+// Single GET with up to 3 retries on 429. Linear backoff at
+// KALSHI_REST_RETRY_DELAY_MS unless server sent Retry-After. Local testing
+// shows Kalshi REST throttles ~5 req/sec per IP; 3 retries at 600ms covers a
+// full 1.8s burst without dropping the series.
+export async function kalshiGet(url, { signal, label = 'kalshi', userAgent = 'pmp-ingestion' } = {}) {
+  const maxAttempts = 4;
+  let res;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    res = await fetch(url, {
+      headers: { Accept: 'application/json', 'User-Agent': userAgent },
       signal,
     });
+    if (res.status !== 429) return res;
+    if (attempt === maxAttempts - 1) {
+      console.warn(`[${label}] kalshi 429 — gave up after ${maxAttempts} attempts`);
+      return res;
+    }
+    const retryAfter = Number(res.headers.get('retry-after')) * 1000;
+    const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : KALSHI_REST_RETRY_DELAY_MS;
+    console.warn(`[${label}] kalshi 429 — retrying after ${wait}ms (attempt ${attempt + 1}/${maxAttempts})`);
+    await new Promise((r) => setTimeout(r, wait));
+  }
+  return res;
+}
+
+async function fetchSeries(series, category, signal) {
+  const url = `${KALSHI_API_BASE}/markets?series_ticker=${series}&status=open&limit=200`;
+  try {
+    const res = await kalshiGet(url, { signal, label: 'movers', userAgent: 'pmp-ingestion/movers' });
     if (!res.ok) return { series, category, items: [] };
     const json = await res.json();
     return { series, category, items: Array.isArray(json?.markets) ? json.markets : [] };
@@ -75,14 +135,12 @@ async function fetchSeries(series, category, signal) {
   }
 }
 
-export async function fetchKalshiCandidates({ timeoutMs = 10_000 } = {}) {
+export async function fetchKalshiCandidates({ timeoutMs = 30_000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const results = await Promise.allSettled(
-      KALSHI_SERIES.map(({ series, category }) =>
-        fetchSeries(series, category, controller.signal),
-      ),
+    const results = await withConcurrency(KALSHI_SERIES, KALSHI_REST_CONCURRENCY, ({ series, category }) =>
+      fetchSeries(series, category, controller.signal),
     );
     const out = [];
     for (const r of results) {
@@ -91,6 +149,8 @@ export async function fetchKalshiCandidates({ timeoutMs = 10_000 } = {}) {
       for (const m of items) {
         if (typeof m.ticker !== 'string') continue;
         if (m.ticker.startsWith('KXMVE')) continue; // system-wide safety filter
+        const volume_24h = toNum(m.volume_24h_fp);
+        if (volume_24h <= 0) continue; // drop dead markets — keep payload tight
         const yes_price = toCents(
           m.yes_ask_dollars ?? m.yes_bid_dollars ?? m.last_price_dollars,
         );
@@ -100,7 +160,6 @@ export async function fetchKalshiCandidates({ timeoutMs = 10_000 } = {}) {
             m.previous_price_dollars,
         );
         const price_change_24h = prev_price > 0 ? yes_price - prev_price : 0;
-        const volume_24h = toNum(m.volume_24h_fp);
         out.push({
           source: 'kalshi',
           seriesOrSlug: series,

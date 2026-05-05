@@ -125,6 +125,28 @@ export async function insertMacroSnapshots(rows, { snapshotAt } = {}) {
   return { count: data?.length ?? 0 };
 }
 
+// ---------- polymarket_market_snapshots (Polymarket Session A) ----------
+//
+// Append-only time series of Polymarket Gamma markets. Sibling to
+// macro_market_snapshots — same shape (one row per scan, batch upsert), same
+// failure model (throw on insert error so the engine logs and the next tick
+// retries; a missed 5min snapshot is acceptable).
+//
+// onConflict on (condition_id, snapshot_at) collapses retries that land on the
+// same instant — ignoreDuplicates lets the writer be idempotent at the ms.
+export async function insertPolymarketSnapshots(rows, { snapshotAt } = {}) {
+  if (!rows || rows.length === 0) return { count: 0 };
+  const stamp = snapshotAt || new Date().toISOString();
+  const stamped = rows.map((r) => ({ ...r, snapshot_at: stamp }));
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('polymarket_market_snapshots')
+    .upsert(stamped, { onConflict: 'condition_id,snapshot_at', ignoreDuplicates: true })
+    .select('id');
+  if (error) throw new Error(`polymarket_market_snapshots upsert: ${error.message}`);
+  return { count: data?.length ?? 0 };
+}
+
 // Write feed_performance rows for backtest scoring. feed_type chosen by caller
 // ('market_movers', 'commodity_edge'). Errors are logged but not thrown — a
 // missed performance row doesn't block the user-facing Discord post.

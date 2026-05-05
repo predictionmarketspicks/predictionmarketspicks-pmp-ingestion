@@ -46,6 +46,12 @@ import {
   runMacroSnapshotOnce,
   getMacroState,
 } from './engine/macro.js';
+import {
+  bootstrapPolymarketSnapshot,
+  stopPolymarketSnapshot,
+  runPolymarketSnapshotOnce,
+  getPolymarketSnapshotState,
+} from './engine/polymarket-snapshot.js';
 
 initSentry();
 
@@ -511,6 +517,7 @@ const server = http.createServer((req, res) => {
       lastErrorAt: moversState.lastErrorAt,
     };
     snap.engine.macro = getMacroState();
+    snap.engine.polymarket_snapshot = getPolymarketSnapshotState();
     const status = liveness.healthy ? 200 : 503;
     res.writeHead(status, { 'content-type': 'application/json' });
     res.end(JSON.stringify(snap));
@@ -546,6 +553,22 @@ const server = http.createServer((req, res) => {
   // post-deploy without waiting up to 15min for the next scheduled tick.
   if (url.pathname === '/dev/macro') {
     runMacroSnapshotOnce()
+      .then((result) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ...result }));
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err?.message || String(err) }));
+      });
+    return;
+  }
+
+  // Manual trigger for ops debugging — fires one Polymarket Gamma snapshot
+  // pass and returns the count of rows written. Useful for verifying the new
+  // table post-deploy without waiting up to 15min for the next scheduled tick.
+  if (url.pathname === '/dev/poly') {
+    runPolymarketSnapshotOnce()
       .then((result) => {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true, ...result }));
@@ -605,6 +628,8 @@ bootstrapMovers();
 
 bootstrapMacro();
 
+bootstrapPolymarketSnapshot();
+
 // --- shutdown ---
 
 async function shutdown(signal) {
@@ -617,6 +642,7 @@ async function shutdown(signal) {
   if (arbState.compareTimer) clearTimeout(arbState.compareTimer);
   if (moversState.scanTimer) clearTimeout(moversState.scanTimer);
   stopMacro();
+  stopPolymarketSnapshot();
   stopKalshi();
   stopPolymarket();
   stopAllPyth();

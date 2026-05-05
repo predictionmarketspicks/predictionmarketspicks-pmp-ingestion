@@ -1,0 +1,102 @@
+// Polymarket Gamma snapshot engine — runs fetchTopMarkets through the writer
+// on a 5min/15min market-hours/off-hours timer. Sibling to engine/macro.js;
+// same control flow, same observability hooks.
+//
+// The handoff (POLYMARKET_FLY_MIGRATION_PLAN.md §2.1) anchors the cadence to
+// US market hours via isOptionsMarketOpen() — the same approximation the
+// Massive poller and macro engine use. Polymarket markets warm and cool with
+// US news/event windows, so the same gate fits.
+//
+// Phase notes: this writer's consumers (the 22 callers from §1) still hit
+// Gamma directly today. Until Sessions B–D migrate them, this table is a
+// parallel stream — extra Gamma calls but identical answers, with a stable
+// row shape that the downstream callers can switch onto one PR at a time.
+
+import { fetchTopMarkets } from '../feeds/polymarket-gamma.js';
+import { insertPolymarketSnapshots } from '../delivery/supabase.js';
+import { isOptionsMarketOpen } from '../feeds/massive.js';
+import { recordTick, registerFeed } from '../observability/health.js';
+
+const SNAPSHOT_INTERVAL_MARKET_MS = Number(
+  process.env.POLY_SNAPSHOT_INTERVAL_MARKET_MS || 5 * 60 * 1000,
+);
+const SNAPSHOT_INTERVAL_OFF_MS = Number(
+  process.env.POLY_SNAPSHOT_INTERVAL_OFF_MS || 15 * 60 * 1000,
+);
+const SNAPSHOT_LIMIT = Number(process.env.POLY_SNAPSHOT_LIMIT || 200);
+
+const state = {
+  scans: 0,
+  rowsWritten: 0,
+  lastRunAt: null,
+  lastErrorAt: null,
+  lastError: null,
+  scanTimer: null,
+};
+
+let stopRequested = false;
+
+registerFeed('polymarket_engine');
+
+export async function runPolymarketSnapshotOnce() {
+  state.scans += 1;
+  state.lastRunAt = new Date().toISOString();
+  try {
+    const rows = await fetchTopMarkets({ limit: SNAPSHOT_LIMIT });
+    if (rows.length === 0) {
+      console.warn('[polymarket-snapshot] fetched 0 rows — Gamma returned nothing or all dead-tail');
+      return { rowsFetched: 0, rowsWritten: 0 };
+    }
+    const { count } = await insertPolymarketSnapshots(rows);
+    state.rowsWritten += count;
+    recordTick('polymarket_engine');
+    console.log(`[polymarket-snapshot] wrote ${count} rows (fetched ${rows.length})`);
+    return { rowsFetched: rows.length, rowsWritten: count };
+  } catch (err) {
+    state.lastErrorAt = new Date().toISOString();
+    state.lastError = (err?.message || String(err)).slice(0, 240);
+    console.error('[polymarket-snapshot] failed', err?.message || err);
+    throw err;
+  }
+}
+
+function schedulePolymarketSnapshot() {
+  if (stopRequested) return;
+  const delay = isOptionsMarketOpen() ? SNAPSHOT_INTERVAL_MARKET_MS : SNAPSHOT_INTERVAL_OFF_MS;
+  state.scanTimer = setTimeout(async () => {
+    try {
+      await runPolymarketSnapshotOnce();
+    } catch {
+      /* runPolymarketSnapshotOnce already logged */
+    }
+    schedulePolymarketSnapshot();
+  }, delay);
+}
+
+export function bootstrapPolymarketSnapshot() {
+  // Wait briefly so the rest of the process settles before the first Gamma
+  // burst. 20s puts us after the 15s macro engine bootstrap to avoid stacking
+  // outbound REST bursts on cold start.
+  setTimeout(() => {
+    runPolymarketSnapshotOnce().catch(() => {});
+    schedulePolymarketSnapshot();
+  }, 20_000);
+}
+
+export function stopPolymarketSnapshot() {
+  stopRequested = true;
+  if (state.scanTimer) {
+    clearTimeout(state.scanTimer);
+    state.scanTimer = null;
+  }
+}
+
+export function getPolymarketSnapshotState() {
+  return {
+    scans: state.scans,
+    rowsWritten: state.rowsWritten,
+    lastRunAt: state.lastRunAt,
+    lastErrorAt: state.lastErrorAt,
+    lastError: state.lastError,
+  };
+}

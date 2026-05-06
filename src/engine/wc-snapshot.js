@@ -16,8 +16,9 @@ import { fetchWcKalshiRows } from '../feeds/wc-kalshi.js';
 import { fetchWcPolymarketRows } from '../feeds/wc-polymarket.js';
 import { fetchWcOddsApiRows, getOddsApiQuotaRemaining } from '../feeds/wc-odds-api.js';
 import { fetchWcEspnGames } from '../feeds/wc-espn.js';
-import { insertWorldCupMarketSnapshots } from '../delivery/supabase.js';
+import { insertWorldCupMarketSnapshots, refreshWcMarketMatviews } from '../delivery/supabase.js';
 import { recordTick, registerFeed } from '../observability/health.js';
+import { runWcMispricingsOnce, getWcMispricingsState } from './wc-mispricings.js';
 
 const SNAPSHOT_INTERVAL_MS = Number(process.env.WC_SNAPSHOT_INTERVAL_MS || 30 * 60 * 1000);
 const BOOTSTRAP_DELAY_MS = Number(process.env.WC_BOOTSTRAP_DELAY_MS || 30_000);
@@ -84,20 +85,42 @@ export async function runWcSnapshotOnce() {
     return { rowsFetched: 0, rowsWritten: 0, espnGames: espnGames.length };
   }
 
+  let writeResult;
   try {
     const { count } = await insertWorldCupMarketSnapshots(allRows);
     state.rowsWritten += count;
+    writeResult = { rowsFetched: allRows.length, rowsWritten: count, espnGames: espnGames.length };
     recordTick('wc_engine');
     console.log(
       `[wc-snapshot] wrote ${count} rows (kalshi=${kalshiRows.length} poly=${polyRows.length} dk=${dkRows.length} espn=${espnGames.length} quota=${getOddsApiQuotaRemaining()})`,
     );
-    return { rowsFetched: allRows.length, rowsWritten: count, espnGames: espnGames.length };
   } catch (err) {
     state.lastErrorAt = new Date().toISOString();
     state.lastError = (err?.message || String(err)).slice(0, 240);
     console.error('[wc-snapshot] write failed:', err?.message || err);
     throw err;
   }
+
+  // Refresh world_cup_market_latest before the mispricing engine joins
+  // against it. Refresh failure is non-fatal — the mispricing engine logs and
+  // proceeds against whatever the matview last held; next 30min tick retries.
+  try {
+    await refreshWcMarketMatviews();
+  } catch (err) {
+    console.warn('[wc-snapshot] matview refresh failed:', err?.message || err);
+  }
+
+  // PR 4 — fire mispricing engine in the same tick. Errors are caught and
+  // logged inside runWcMispricingsOnce() so a single bad run doesn't block
+  // the next snapshot.
+  try {
+    const mp = await runWcMispricingsOnce();
+    writeResult.mispricings = mp;
+  } catch (err) {
+    console.error('[wc-snapshot] mispricing run threw:', err?.message || err);
+  }
+
+  return writeResult;
 }
 
 function scheduleWc() {
@@ -145,3 +168,7 @@ export function getWcSnapshotState() {
 export function getWcEspnGames() {
   return { games: state.espnGames, updatedAt: state.espnUpdatedAt };
 }
+
+// Re-export PR 4 state so /health exposes wc_mispricings alongside wc_snapshot
+// without index.js needing a direct import from wc-mispricings.js.
+export { getWcMispricingsState };

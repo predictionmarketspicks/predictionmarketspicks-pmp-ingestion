@@ -58,7 +58,9 @@ import {
   runWcSnapshotOnce,
   getWcSnapshotState,
   getWcEspnGames,
+  getWcMispricingsState,
 } from './engine/wc-snapshot.js';
+import { runWcMispricingsOnce } from './engine/wc-mispricings.js';
 
 initSentry();
 
@@ -527,6 +529,7 @@ const server = http.createServer((req, res) => {
     snap.engine.polymarket_snapshot = getPolymarketSnapshotState();
     snap.engine.wc_snapshot = getWcSnapshotState();
     snap.engine.wc_espn = getWcEspnGames();
+    snap.engine.wc_mispricings = getWcMispricingsState();
     const status = liveness.healthy ? 200 : 503;
     res.writeHead(status, { 'content-type': 'application/json' });
     res.end(JSON.stringify(snap));
@@ -593,6 +596,22 @@ const server = http.createServer((req, res) => {
   // ops debugging and the post-merge soak window.
   if (url.pathname === '/dev/wc') {
     runWcSnapshotOnce()
+      .then((result) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ...result }));
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err?.message || String(err) }));
+      });
+    return;
+  }
+
+  // PR 4 — manual mispricing trigger. Reads sim_latest × market_latest as-is
+  // (no fresh snapshot fetch) so it's safe to fire ad-hoc during the soak
+  // without blowing through the Odds API quota.
+  if (url.pathname === '/dev/wc-mispricings') {
+    runWcMispricingsOnce()
       .then((result) => {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true, ...result }));

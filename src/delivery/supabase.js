@@ -170,9 +170,66 @@ export async function insertWorldCupMarketSnapshots(rows, { snapshotAt } = {}) {
   return { count: data?.length ?? 0 };
 }
 
+// ---------- world_cup_simulation_latest / world_cup_market_latest reads (PR 4) ----------
+//
+// PR 4 mispricing engine joins these two matviews. Both are kept fresh by
+// upstream writers: the nightly Python sim refreshes simulation_latest via
+// refresh_world_cup_latest_matviews(); the Fly engine refreshes market_latest
+// + mispricings_latest via refresh_world_cup_market_matviews() (companion
+// migration 20260506_wc_market_matview_refresh_rpc.sql).
+
+export async function fetchWcSimulationLatest() {
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('world_cup_simulation_latest')
+    .select('entity_id, kind, sim_run_id, sim_pct, sim_american_odds, sim_ran_at, metadata');
+  if (error) throw new Error(`world_cup_simulation_latest read: ${error.message}`);
+  return data || [];
+}
+
+export async function fetchWcMarketLatest() {
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('world_cup_market_latest')
+    .select(
+      'entity_id, kind, platform, ticker_or_id, yes_price_cents, volume_24h, price_change_24h_pp, liquidity, url, snapshot_at, as_of_age_seconds',
+    );
+  if (error) throw new Error(`world_cup_market_latest read: ${error.message}`);
+  return data || [];
+}
+
+// Append-only insert into world_cup_mispricings. One row per (entity, kind,
+// computed_at) — every tick is a distinct detection event. _latest matview
+// collapses by (entity_id, kind). 30-day TTL via pg_cron jobid created in
+// PR 1 schema migration.
+//
+// Failures throw — engine logs and skips the Discord/feed_performance side
+// effects so we don't double-post on a retry that succeeds writing later.
+export async function insertWcMispricings(rows) {
+  if (!rows || rows.length === 0) return { count: 0 };
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('world_cup_mispricings')
+    .insert(rows)
+    .select('id');
+  if (error) throw new Error(`world_cup_mispricings insert: ${error.message}`);
+  return { count: data?.length ?? 0 };
+}
+
+// Refresh world_cup_market_latest + world_cup_mispricings_latest via the
+// security-definer RPC (companion migration). Sim-side matviews are owned by
+// the nightly Python sim and not touched here.
+export async function refreshWcMarketMatviews() {
+  const sb = getClient();
+  const { error } = await sb.rpc('refresh_world_cup_market_matviews');
+  if (error) throw new Error(`refresh_world_cup_market_matviews: ${error.message}`);
+  return { ok: true };
+}
+
 // Write feed_performance rows for backtest scoring. feed_type chosen by caller
-// ('market_movers', 'commodity_edge'). Errors are logged but not thrown — a
-// missed performance row doesn't block the user-facing Discord post.
+// ('market_movers', 'commodity_edge', 'world_cup'). Errors are logged but not
+// thrown — a missed performance row doesn't block the user-facing Discord
+// post.
 export async function recordFeedPerformance(rows) {
   if (!rows || rows.length === 0) return { count: 0 };
   const sb = getClient();

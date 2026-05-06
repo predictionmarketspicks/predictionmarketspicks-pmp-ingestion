@@ -1,0 +1,44 @@
+name: WC Sim Nightly
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 02:00 ET — well before any markets meaningfully move
+  workflow_dispatch:
+    inputs:
+      validate_only:
+        description: 'Run validation only, no DB writes'
+        type: boolean
+        default: false
+      iterations:
+        description: 'Monte Carlo iterations (override default 10000)'
+        type: string
+        default: '10000'
+
+jobs:
+  run-sim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: scripts/wc/requirements.txt
+
+      - name: Install deps
+        run: pip install -r scripts/wc/requirements.txt
+
+      - name: Run sim
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DISCORD_BOT_TOKEN:    ${{ secrets.DISCORD_BOT_TOKEN }}
+          WC_SIM_ITERATIONS:    ${{ github.event.inputs.iterations || '10000' }}
+        run: |
+          if [ "${{ github.event.inputs.validate_only }}" = "true" ]; then
+            python scripts/run-wc-sim.py --validate-only
+          else
+            python scripts/run-wc-sim.py
+          fi

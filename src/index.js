@@ -52,6 +52,13 @@ import {
   runPolymarketSnapshotOnce,
   getPolymarketSnapshotState,
 } from './engine/polymarket-snapshot.js';
+import {
+  bootstrapWcSnapshot,
+  stopWcSnapshot,
+  runWcSnapshotOnce,
+  getWcSnapshotState,
+  getWcEspnGames,
+} from './engine/wc-snapshot.js';
 
 initSentry();
 
@@ -518,6 +525,8 @@ const server = http.createServer((req, res) => {
     };
     snap.engine.macro = getMacroState();
     snap.engine.polymarket_snapshot = getPolymarketSnapshotState();
+    snap.engine.wc_snapshot = getWcSnapshotState();
+    snap.engine.wc_espn = getWcEspnGames();
     const status = liveness.healthy ? 200 : 503;
     res.writeHead(status, { 'content-type': 'application/json' });
     res.end(JSON.stringify(snap));
@@ -580,6 +589,21 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Manual trigger — one WC snapshot scan across all four feeds. Useful for
+  // ops debugging and the post-merge soak window.
+  if (url.pathname === '/dev/wc') {
+    runWcSnapshotOnce()
+      .then((result) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ...result }));
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err?.message || String(err) }));
+      });
+    return;
+  }
+
   // Manual trigger for ops debugging — fires one snapshot for the named
   // commodity, returns the result.
   if (url.pathname === '/dev/snapshot') {
@@ -630,6 +654,8 @@ bootstrapMacro();
 
 bootstrapPolymarketSnapshot();
 
+bootstrapWcSnapshot();
+
 // --- shutdown ---
 
 async function shutdown(signal) {
@@ -643,6 +669,7 @@ async function shutdown(signal) {
   if (moversState.scanTimer) clearTimeout(moversState.scanTimer);
   stopMacro();
   stopPolymarketSnapshot();
+  stopWcSnapshot();
   stopKalshi();
   stopPolymarket();
   stopAllPyth();

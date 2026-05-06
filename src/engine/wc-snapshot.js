@@ -19,6 +19,7 @@ import { fetchWcEspnGames } from '../feeds/wc-espn.js';
 import { insertWorldCupMarketSnapshots, refreshWcMarketMatviews } from '../delivery/supabase.js';
 import { recordTick, registerFeed } from '../observability/health.js';
 import { runWcMispricingsOnce, getWcMispricingsState } from './wc-mispricings.js';
+import { runWcPayloadsOnce, getWcPayloadsState } from './wc-payloads.js';
 
 const SNAPSHOT_INTERVAL_MS = Number(process.env.WC_SNAPSHOT_INTERVAL_MS || 30 * 60 * 1000);
 const BOOTSTRAP_DELAY_MS = Number(process.env.WC_BOOTSTRAP_DELAY_MS || 30_000);
@@ -120,6 +121,16 @@ export async function runWcSnapshotOnce() {
     console.error('[wc-snapshot] mispricing run threw:', err?.message || err);
   }
 
+  // PR 5 — write V2 widget payloads (world-cup-2026 + wc-mispricings).
+  // Reads sim_latest × market_latest × mispricings_latest fresh; never blocks
+  // the orchestrator on a payload-write failure.
+  try {
+    const pl = await runWcPayloadsOnce();
+    writeResult.payloads = pl;
+  } catch (err) {
+    console.error('[wc-snapshot] payload write threw:', err?.message || err);
+  }
+
   return writeResult;
 }
 
@@ -172,3 +183,6 @@ export function getWcEspnGames() {
 // Re-export PR 4 state so /health exposes wc_mispricings alongside wc_snapshot
 // without index.js needing a direct import from wc-mispricings.js.
 export { getWcMispricingsState };
+
+// Re-export PR 5 state for /health visibility.
+export { getWcPayloadsState, runWcPayloadsOnce };

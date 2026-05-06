@@ -147,6 +147,29 @@ export async function insertPolymarketSnapshots(rows, { snapshotAt } = {}) {
   return { count: data?.length ?? 0 };
 }
 
+// ---------- world_cup_market_snapshot (WC PR 3) ----------
+//
+// Append-only time series of WC market quotes from kalshi/polymarket/
+// draftkings (DK consensus via The Odds API). One row per (entity_id, kind,
+// platform) per scan. Engine runs every 30min; the table has no UNIQUE
+// constraint, so plain insert (not upsert). 30-day retention is enforced by
+// pg_cron jobid 75 (created in PR 1).
+//
+// Failures throw so the engine logs and the next 30min tick retries; a
+// missed snapshot is acceptable.
+export async function insertWorldCupMarketSnapshots(rows, { snapshotAt } = {}) {
+  if (!rows || rows.length === 0) return { count: 0 };
+  const stamp = snapshotAt || new Date().toISOString();
+  const stamped = rows.map((r) => ({ ...r, snapshot_at: stamp }));
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('world_cup_market_snapshot')
+    .insert(stamped)
+    .select('id');
+  if (error) throw new Error(`world_cup_market_snapshot insert: ${error.message}`);
+  return { count: data?.length ?? 0 };
+}
+
 // Write feed_performance rows for backtest scoring. feed_type chosen by caller
 // ('market_movers', 'commodity_edge'). Errors are logged but not thrown — a
 // missed performance row doesn't block the user-facing Discord post.

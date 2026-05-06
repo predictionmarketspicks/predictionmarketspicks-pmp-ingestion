@@ -59,6 +59,8 @@ import {
   getWcSnapshotState,
   getWcEspnGames,
   getWcMispricingsState,
+  getWcPayloadsState,
+  runWcPayloadsOnce,
 } from './engine/wc-snapshot.js';
 import { runWcMispricingsOnce } from './engine/wc-mispricings.js';
 
@@ -530,6 +532,7 @@ const server = http.createServer((req, res) => {
     snap.engine.wc_snapshot = getWcSnapshotState();
     snap.engine.wc_espn = getWcEspnGames();
     snap.engine.wc_mispricings = getWcMispricingsState();
+    snap.engine.wc_payloads = getWcPayloadsState();
     const status = liveness.healthy ? 200 : 503;
     res.writeHead(status, { 'content-type': 'application/json' });
     res.end(JSON.stringify(snap));
@@ -615,6 +618,21 @@ const server = http.createServer((req, res) => {
       .then((result) => {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true, ...result }));
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err?.message || String(err) }));
+      });
+    return;
+  }
+
+  // PR 5 — manual payload-rebuild trigger. Pure read+upsert (no Kalshi /
+  // Polymarket fetches), safe to fire on demand for ops debugging.
+  if (url.pathname === '/dev/wc-payloads') {
+    runWcPayloadsOnce()
+      .then((result) => {
+        res.writeHead(result.ok === false ? 500 : 200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
       })
       .catch((err) => {
         res.writeHead(500, { 'content-type': 'application/json' });

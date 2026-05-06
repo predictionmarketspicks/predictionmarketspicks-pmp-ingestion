@@ -226,6 +226,45 @@ export async function refreshWcMarketMatviews() {
   return { ok: true };
 }
 
+// Read top-N from world_cup_mispricings_latest, optionally filtered by tier
+// and ordered by abs_edge_pp desc. PR 5 widget payload writer reads
+// tier='STRONG' limit=5.
+export async function fetchWcMispricingsLatest({ tier, limit = 5 } = {}) {
+  const sb = getClient();
+  let q = sb
+    .from('world_cup_mispricings_latest')
+    .select(
+      'entity_id, kind, display_platform, sim_pct, market_pct, edge_pp, abs_edge_pp, tier, market_volume_24h, computed_at, metadata',
+    )
+    .order('abs_edge_pp', { ascending: false })
+    .limit(limit);
+  if (tier) q = q.eq('tier', tier);
+  const { data, error } = await q;
+  if (error) throw new Error(`world_cup_mispricings_latest read: ${error.message}`);
+  return data || [];
+}
+
+// Generic V2 widget_payloads upsert. Same envelope across the listed variants
+// (the renderer differentiates via ctx.variant). Used by the WC payload writer
+// (PR 5) and any future Fly-side V2 writer.
+export async function upsertWidgetPayloads(slug, envelope, variants = ['hero', 'sidebar']) {
+  if (!slug) throw new Error('widget_payloads: slug required');
+  if (!envelope) throw new Error('widget_payloads: envelope required');
+  const sb = getClient();
+  const updated_at = new Date().toISOString();
+  const rows = variants.map((variant) => ({
+    widget_slug: slug,
+    variant,
+    payload: envelope,
+    updated_at,
+  }));
+  const { error } = await sb
+    .from('widget_payloads')
+    .upsert(rows, { onConflict: 'widget_slug,variant' });
+  if (error) throw new Error(`widget_payloads upsert ${slug}: ${error.message}`);
+  return { count: rows.length };
+}
+
 // Write feed_performance rows for backtest scoring. feed_type chosen by caller
 // ('market_movers', 'commodity_edge', 'world_cup'). Errors are logged but not
 // thrown — a missed performance row doesn't block the user-facing Discord

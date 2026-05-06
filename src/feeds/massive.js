@@ -28,9 +28,12 @@ import {
 
 const MASSIVE_BASE = process.env.MASSIVE_API_BASE || 'https://api.massive.com';
 
-// Cadence per BUILD_PLAN §9: 5s during US options market hours, 60s off-hours.
-// Off-hours cadence still runs so cold-start latency after a restart is small.
-const POLL_INTERVAL_MARKET_MS = 5_000;
+// Cadence: 15min during US options market hours, 60s off-hours. Reduced from
+// 5s on 2026-05-05 after Massive Options Advanced (real-time) tier was cut.
+// Delayed tier underneath only refreshes ~every 15 min, so 5s polling is just
+// re-fetching the same snapshot. Off-hours cadence retained for cold-start
+// recovery. Restore to 5s when the replacement real-time source is wired.
+const POLL_INTERVAL_MARKET_MS = 15 * 60 * 1000;
 const POLL_INTERVAL_OFF_MS = 60_000;
 
 // Limit the chain pull to plausibly-near-the-money strikes. Massive returns up

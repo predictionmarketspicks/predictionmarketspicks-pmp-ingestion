@@ -32,10 +32,10 @@ jobs:
 
       - name: Run sim
         env:
-          SUPABASE_URL:             ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY:     ${{ secrets.SUPABASE_SERVICE_KEY }}
-          DISCORD_BOT_LOGS_WEBHOOK: ${{ secrets.DISCORD_BOT_LOGS_WEBHOOK }}
-          WC_SIM_ITERATIONS:        ${{ github.event.inputs.iterations || '10000' }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DISCORD_BOT_TOKEN:    ${{ secrets.DISCORD_BOT_TOKEN }}
+          WC_SIM_ITERATIONS:    ${{ github.event.inputs.iterations || '10000' }}
         run: |
           if [ "${{ github.event.inputs.validate_only }}" = "true" ]; then
             python scripts/run-wc-sim.py --validate-only

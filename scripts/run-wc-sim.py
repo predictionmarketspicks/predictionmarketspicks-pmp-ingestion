@@ -5,7 +5,7 @@ WC 2026 nightly Monte Carlo + analytical match/player projection.
 Inputs (env):
   SUPABASE_URL                     write target
   SUPABASE_SERVICE_KEY             write key (service role, NOT anon)
-  DISCORD_BOT_LOGS_WEBHOOK         optional — posts validation failures
+  DISCORD_BOT_TOKEN                optional — posts validation failures to #bot-logs
   WC_SIM_ITERATIONS                optional override (default 10000)
 
 Outputs (DB):

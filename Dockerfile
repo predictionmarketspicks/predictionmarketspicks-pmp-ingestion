@@ -7,6 +7,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev || npm install --omit=dev
 
 COPY src ./src
+COPY data ./data
 
 ENV NODE_ENV=production
 ENV PORT=8080

@@ -98,7 +98,12 @@ for (const config of enabledCommodities) {
   // goes down, /health returns 503. The engine markers below are descriptive
   // only; they tick once per snapshot (~5min during market hours) which is
   // looser than the 90s liveness window and would false-page if required.
-  markFeedRequired(`massive_${config.underlyingEtf.toLowerCase()}`);
+  //
+  // Massive moved to a 15min poll cadence on the delayed tier (May 5 2026),
+  // so we override the stale threshold to 17min — anything tighter would
+  // false-page between every poll. Pyth still polls at ~10s and is fine on
+  // the global 90s/300s thresholds.
+  markFeedRequired(`massive_${config.underlyingEtf.toLowerCase()}`, { maxStaleMs: 17 * 60 * 1000 });
   markFeedRequired(`pyth_${config.pythSymbol.replace(/[/]/g, '_').toLowerCase()}`);
   registerFeed(`${config.commodity}_engine`);
 }

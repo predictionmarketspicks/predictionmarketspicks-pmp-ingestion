@@ -7,12 +7,14 @@
 //   - markFeedRequired(name) opts a feed into the readiness gate. If any
 //     required feed is stale beyond the active threshold, /health returns 503
 //     and BetterStack pages the operator.
-//   - Threshold is 90s during US market hours (9:30 AM – 4 PM ET, Mon–Fri)
-//     and 300s off-hours. Polling feeds (massive 5–60s, pyth 10s) clear that
-//     bar trivially; WS feeds (kalshi, polymarket) only fail it when the
-//     connection has actually died. Quiet markets where no ticks fire still
-//     count: that means stale data on the site, which is the thing we want
-//     paged on.
+//   - Default threshold is 90s during US market hours (9:30 AM – 4 PM ET,
+//     Mon–Fri) and 300s off-hours. WS feeds (kalshi, polymarket) and fast
+//     pollers (pyth 10s) clear that bar trivially.
+//   - Slow feeds can pass `{ maxStaleMs }` to markFeedRequired to use their
+//     own threshold. Massive feeds on the delayed tier poll every 15min and
+//     would never clear the global bar, so they register with a 17min
+//     override (15min poll + buffer). The override applies in BOTH market and
+//     off-hours states; it is not multiplied against the global threshold.
 //   - 60s post-boot grace window: cold-start before any feed has had a chance
 //     to tick must not flap the monitor. The Fly check has a 30s grace_period
 //     of its own — this stacks on top.
@@ -20,7 +22,7 @@
 const startedAt = Date.now();
 
 const feeds = new Map();
-const requiredFeeds = new Set();
+const requiredFeeds = new Map(); // name → { maxStaleMs?: number }
 
 const MARKET_HOURS_THRESHOLD_MS = 90 * 1000;
 const OFF_HOURS_THRESHOLD_MS = 300 * 1000;
@@ -32,9 +34,10 @@ export function registerFeed(name) {
   }
 }
 
-export function markFeedRequired(name) {
+export function markFeedRequired(name, opts = {}) {
   registerFeed(name);
-  requiredFeeds.add(name);
+  const prev = requiredFeeds.get(name) || {};
+  requiredFeeds.set(name, { ...prev, ...opts });
 }
 
 export function setFeedStatus(name, patch) {
@@ -65,7 +68,7 @@ export function evaluateLiveness(nowMs = Date.now()) {
     return { healthy: true, inMarketHours, thresholdMs, uptimeMs, grace: true, stale: [] };
   }
   const stale = [];
-  for (const name of requiredFeeds) {
+  for (const [name, override] of requiredFeeds) {
     const f = feeds.get(name);
     if (!f) {
       stale.push({ name, reason: 'unregistered' });
@@ -76,8 +79,9 @@ export function evaluateLiveness(nowMs = Date.now()) {
       continue;
     }
     const ageMs = nowMs - f.lastTickAt;
-    if (ageMs > thresholdMs) {
-      stale.push({ name, reason: 'stale', ageMs });
+    const effectiveThreshold = override.maxStaleMs ?? thresholdMs;
+    if (ageMs > effectiveThreshold) {
+      stale.push({ name, reason: 'stale', ageMs, thresholdMs: effectiveThreshold });
     }
   }
   return { healthy: stale.length === 0, inMarketHours, thresholdMs, uptimeMs, grace: false, stale };
@@ -93,6 +97,7 @@ export function snapshot() {
       ageMs: state.lastTickAt ? now - state.lastTickAt : null,
       lastError: state.lastError,
       required: requiredFeeds.has(name),
+      maxStaleMs: requiredFeeds.get(name)?.maxStaleMs ?? null,
     };
   }
   return {

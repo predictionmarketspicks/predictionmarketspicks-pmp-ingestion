@@ -101,6 +101,29 @@ describe('evaluateLiveness', () => {
     expect(result.healthy).toBe(false);
     expect(result.stale.map((s) => s.name)).toEqual(['polymarket']);
   });
+
+  it('honors per-feed maxStaleMs override beyond the global threshold', () => {
+    // Massive on delayed tier polls every 15min; would false-page on the
+    // 90s market-hours threshold without an override.
+    health.markFeedRequired('massive_slv', { maxStaleMs: 17 * 60 * 1000 });
+    const t = ET_MARKET_NOON.getTime();
+
+    // 10min stale — well past the 90s default but under the 17min override
+    health.setFeedStatus('massive_slv', { lastTickAt: t - 10 * 60 * 1000 });
+    const fresh = health.evaluateLiveness(t);
+    expect(fresh.healthy).toBe(true);
+    expect(fresh.stale).toEqual([]);
+
+    // 18min stale — past the 17min override
+    health.setFeedStatus('massive_slv', { lastTickAt: t - 18 * 60 * 1000 });
+    const stale = health.evaluateLiveness(t);
+    expect(stale.healthy).toBe(false);
+    expect(stale.stale[0]).toMatchObject({
+      name: 'massive_slv',
+      reason: 'stale',
+      thresholdMs: 17 * 60 * 1000,
+    });
+  });
 });
 
 describe('snapshot', () => {

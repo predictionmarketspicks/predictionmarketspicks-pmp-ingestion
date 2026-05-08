@@ -6,27 +6,93 @@
 //                                    before kickoff; pre-tournament returns
 //                                    [])
 //
-// Free tier: 500 credits/month. We're a single 30min consumer; even at
-// peak (48 credits per scan × 48 scans/day × 30 days) we'd well exceed
-// quota — so we ALWAYS use a single fetch per sport key per scan
-// (~1 credit each) and DK-only bookmaker filter to keep payloads small.
+// Free tier: 500 credits/month. The wc-snapshot orchestrator calls this
+// feed every 30min, but we cannot afford 48 calls/day × 2 sport keys.
+// Three nested gates keep credit burn inside budget — see
+// handoffs/ODDS_API_QUOTA_PLAN_2026-05-08.md for the full phasing plan.
+//
+//   1. Interval gate — `WC_ODDS_API_INTERVAL_MS` (default 7 days; bumped to
+//      ~24h on June 4, kept at 24h through the tournament). Within the
+//      interval we re-emit the cached row set so DK columns in
+//      world_cup_market_snapshot stay populated without re-spending credits.
+//   2. Match-day gate — H2H (per-match) sweep only fires when a kickoff is
+//      within `[-LOOKBACK, +LOOKAHEAD]` of now (defaults: 6h / 24h). Outside
+//      that window only the cheap outright sweep runs. Schedule lives in
+//      `data/wc-2026-schedule.json`.
+//   3. Floor gate — if `x-requests-remaining < ODDS_API_MIN_REMAINING`
+//      (default 100, raised from 30 on 2026-05-08), all fetches are
+//      skipped and a Discord #bot-logs alert fires (24h dedup).
 //
 // Output rows use platform='draftkings' (DK consensus) and kind=champion or
 // match_winner_*. Group winner outrights aren't surfaced by The Odds API in
 // a structured way so we skip them.
 
+import { readFileSync } from 'node:fs';
 import {
   lookupTeamByName,
   lookupGroupMatchId,
   americanOddsToImpliedPct,
   priceToCents,
 } from './wc-shared.js';
+import { postBotLog } from '../delivery/discord.js';
 
 const ODDS_BASE = process.env.ODDS_API_BASE || 'https://api.the-odds-api.com/v4/sports';
 const ODDS_TIMEOUT_MS = Number(process.env.ODDS_API_TIMEOUT_MS || 15_000);
-const ODDS_MIN_REMAINING = Number(process.env.ODDS_API_MIN_REMAINING || 30);
+const ODDS_API_MIN_REMAINING = Number(process.env.ODDS_API_MIN_REMAINING || 100);
+const WC_ODDS_API_INTERVAL_MS = Number(
+  process.env.WC_ODDS_API_INTERVAL_MS || 7 * 24 * 60 * 60 * 1000,
+);
+const WC_ODDS_API_ALERT_DEDUP_MS = Number(
+  process.env.WC_ODDS_API_ALERT_DEDUP_MS || 24 * 60 * 60 * 1000,
+);
+const MATCH_DAY_LOOKAHEAD_MS = Number(
+  process.env.WC_MATCH_DAY_LOOKAHEAD_MS || 24 * 60 * 60 * 1000,
+);
+const MATCH_DAY_LOOKBACK_MS = Number(
+  process.env.WC_MATCH_DAY_LOOKBACK_MS || 6 * 60 * 60 * 1000,
+);
 
 let lastRemaining = null;
+let lastFetchAt = null;
+let cachedRows = null;
+let lastAlertAt = null;
+
+const SCHEDULE = loadSchedule();
+
+function loadSchedule() {
+  try {
+    const url = new URL('../../data/wc-2026-schedule.json', import.meta.url);
+    return JSON.parse(readFileSync(url, 'utf8'));
+  } catch (err) {
+    console.warn('[wc-odds-api] schedule load failed — match-day gate disabled, fail-open:', err?.message || err);
+    return null;
+  }
+}
+
+// Match-day window check. Returns true if any match kickoff is within
+// `[-LOOKBACK, +LOOKAHEAD]` of `now` (covers pre-game line build + post-game
+// settlement noise), or if any knockout round window straddles now.
+// Fail-open: if schedule is missing or malformed, return true.
+export function isMatchDayWindow(now = Date.now()) {
+  if (!SCHEDULE) return true;
+  const matches = SCHEDULE.group_stage || [];
+  for (const m of matches) {
+    const k = Date.parse(m.kickoff_utc);
+    if (!Number.isFinite(k)) continue;
+    const delta = now - k;
+    if (delta < 0 && -delta <= MATCH_DAY_LOOKAHEAD_MS) return true;
+    if (delta >= 0 && delta <= MATCH_DAY_LOOKBACK_MS) return true;
+  }
+  for (const w of SCHEDULE.knockout_windows || []) {
+    const start = Date.parse(`${w.start_date_utc}T00:00:00Z`);
+    const end = Date.parse(`${w.end_date_utc}T23:59:59Z`);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    if (now >= start - MATCH_DAY_LOOKAHEAD_MS && now <= end + MATCH_DAY_LOOKBACK_MS) {
+      return true;
+    }
+  }
+  return false;
+}
 
 async function oddsGet(url, signal) {
   const res = await fetch(url, {
@@ -167,26 +233,86 @@ function rowsFromH2H(events) {
   return rows;
 }
 
+async function tryAlertQuotaGuard(remaining) {
+  const now = Date.now();
+  if (lastAlertAt && (now - lastAlertAt) < WC_ODDS_API_ALERT_DEDUP_MS) return;
+  lastAlertAt = now;
+  try {
+    const msg =
+      `:warning: **The Odds API quota guard tripped**\n` +
+      `Remaining: \`${remaining}\` (floor: \`${ODDS_API_MIN_REMAINING}\`)\n` +
+      `wc-odds-api is now skipping fetches until quota resets or floor is lowered.\n` +
+      `Source: \`pmp-ingestion/src/feeds/wc-odds-api.js\` on Fly.`;
+    await postBotLog(msg);
+  } catch (err) {
+    console.error('[wc-odds-api] quota alert post failed:', err?.message || err);
+  }
+}
+
 export async function fetchWcOddsApiRows({ timeoutMs = ODDS_TIMEOUT_MS } = {}) {
   if (!process.env.THE_ODDS_API_KEY) {
     console.log('[wc-odds-api] THE_ODDS_API_KEY not set — skipping');
     return [];
   }
-  if (lastRemaining != null && lastRemaining < ODDS_MIN_REMAINING) {
-    console.warn(`[wc-odds-api] quota guard: ${lastRemaining} remaining, skipping scan`);
-    return [];
+
+  const now = Date.now();
+
+  // Gate 1 — interval throttle. Re-emit cached rows on close ticks so DK
+  // entries in world_cup_market_snapshot stay populated without re-spend.
+  // First boot has no cache; let it fall through.
+  const intervalElapsed =
+    !lastFetchAt || now - lastFetchAt >= WC_ODDS_API_INTERVAL_MS;
+  if (!intervalElapsed && Array.isArray(cachedRows) && cachedRows.length > 0) {
+    const hoursSince = ((now - lastFetchAt) / 3_600_000).toFixed(1);
+    const intervalH = (WC_ODDS_API_INTERVAL_MS / 3_600_000).toFixed(1);
+    console.log(
+      `[wc-odds-api] interval gate (${hoursSince}h since last fetch, threshold ${intervalH}h) — emitting ${cachedRows.length} cached rows`,
+    );
+    return cachedRows;
   }
+
+  // Gate 3 (early) — quota floor. Skip the network entirely and alert once
+  // per 24h. We hit this case on the first tick AFTER a fetch dropped the
+  // counter under the floor; subsequent ticks will keep emitting cached rows
+  // until interval rolls over.
+  if (lastRemaining != null && lastRemaining < ODDS_API_MIN_REMAINING) {
+    console.warn(
+      `[wc-odds-api] quota guard: ${lastRemaining} remaining, below floor ${ODDS_API_MIN_REMAINING} — skipping scan`,
+    );
+    await tryAlertQuotaGuard(lastRemaining);
+    return Array.isArray(cachedRows) ? cachedRows : [];
+  }
+
+  // Gate 2 — match-day awareness for the per-match (H2H) sweep. Outrights
+  // are 1 cheap event so they always run.
+  const matchDay = isMatchDayWindow(now);
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const [outrights, h2h] = await Promise.all([
-      fetchOutrights(controller.signal),
-      fetchH2H(controller.signal),
-    ]);
+    const tasks = [fetchOutrights(controller.signal)];
+    if (matchDay) {
+      tasks.push(fetchH2H(controller.signal));
+    } else {
+      console.log('[wc-odds-api] match-day gate: no kickoff in window — skipping H2H sweep');
+      tasks.push(Promise.resolve([]));
+    }
+    const [outrights, h2h] = await Promise.all(tasks);
     const rows = [...rowsFromOutrights(outrights), ...rowsFromH2H(h2h)];
+
+    lastFetchAt = now;
+    cachedRows = rows;
+
     console.log(
-      `[wc-odds-api] outright_events=${outrights.length} h2h_events=${h2h.length} rows=${rows.length} quota_remaining=${lastRemaining}`,
+      `[wc-odds-api] outright_events=${outrights.length} h2h_events=${h2h.length} rows=${rows.length} quota_remaining=${lastRemaining} match_day=${matchDay}`,
     );
+
+    // If THIS fetch dropped the counter below the floor, alert immediately
+    // (don't wait for the next tick to skip).
+    if (lastRemaining != null && lastRemaining < ODDS_API_MIN_REMAINING) {
+      await tryAlertQuotaGuard(lastRemaining);
+    }
+
     return rows;
   } finally {
     clearTimeout(timer);
@@ -197,4 +323,12 @@ export function getOddsApiQuotaRemaining() {
   return lastRemaining;
 }
 
-export const __test__ = { rowsFromOutrights, rowsFromH2H };
+// Test-only state reset so vitest specs don't bleed module state across cases.
+export function __resetWcOddsApiState() {
+  lastRemaining = null;
+  lastFetchAt = null;
+  cachedRows = null;
+  lastAlertAt = null;
+}
+
+export const __test__ = { rowsFromOutrights, rowsFromH2H, isMatchDayWindow };

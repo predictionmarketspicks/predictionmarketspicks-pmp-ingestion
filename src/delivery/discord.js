@@ -25,6 +25,7 @@ const CHANNEL_ID = {
   MODERATE: '1487857830391451750',
   SPECULATIVE: '1499364066706198542',
   MOVERS: '1487857819482063049',
+  BOT_LOGS: '1487857846111567952',
 };
 
 const GAIN_GREEN = 0x2d5a3d; // brand --gain
@@ -189,6 +190,18 @@ export async function postMoversAlert({ gainers, losers }) {
   const payload = { embeds, allowed_mentions: { parse: [] } };
   assertBrandSafe(payload);
   return postToChannel(CHANNEL_ID.MOVERS, payload);
+}
+
+// Plain-text alert to #bot-logs for engine infra messages (quota guards,
+// failed feeds, etc). No embed, no brand-safety lint — this channel is
+// internal and may legitimately surface third-party words.
+export async function postBotLog(content) {
+  const text = sanitize(String(content || ''), 1900);
+  if (!text) return false;
+  return postToChannel(CHANNEL_ID.BOT_LOGS, {
+    content: text,
+    allowed_mentions: { parse: [] },
+  });
 }
 
 export { KALSHI_REFERRAL_URL, CHANNEL_ID };

@@ -53,6 +53,12 @@ import {
   getPolymarketSnapshotState,
 } from './engine/polymarket-snapshot.js';
 import {
+  bootstrapGasSnapshot,
+  stopGasSnapshot,
+  runGasSnapshotOnce,
+  getGasSnapshotState,
+} from './engine/gas-snapshot.js';
+import {
   bootstrapWcSnapshot,
   stopWcSnapshot,
   runWcSnapshotOnce,
@@ -534,6 +540,7 @@ const server = http.createServer((req, res) => {
     };
     snap.engine.macro = getMacroState();
     snap.engine.polymarket_snapshot = getPolymarketSnapshotState();
+    snap.engine.gas_snapshot = getGasSnapshotState();
     snap.engine.wc_snapshot = getWcSnapshotState();
     snap.engine.wc_espn = getWcEspnGames();
     snap.engine.wc_mispricings = getWcMispricingsState();
@@ -573,6 +580,22 @@ const server = http.createServer((req, res) => {
   // post-deploy without waiting up to 15min for the next scheduled tick.
   if (url.pathname === '/dev/macro') {
     runMacroSnapshotOnce()
+      .then((result) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ...result }));
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err?.message || String(err) }));
+      });
+    return;
+  }
+
+  // Manual trigger for ops debugging — fires one Kalshi gas snapshot pass and
+  // returns the count of rows written. Useful for verifying kalshi_gas_strikes
+  // post-deploy without waiting up to 15min for the next scheduled tick.
+  if (url.pathname === '/dev/gas') {
+    runGasSnapshotOnce()
       .then((result) => {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true, ...result }));
@@ -696,6 +719,8 @@ bootstrapMacro();
 
 bootstrapPolymarketSnapshot();
 
+bootstrapGasSnapshot();
+
 bootstrapWcSnapshot();
 
 // --- shutdown ---
@@ -711,6 +736,7 @@ async function shutdown(signal) {
   if (moversState.scanTimer) clearTimeout(moversState.scanTimer);
   stopMacro();
   stopPolymarketSnapshot();
+  stopGasSnapshot();
   stopWcSnapshot();
   stopKalshi();
   stopPolymarket();

@@ -125,6 +125,27 @@ export async function insertMacroSnapshots(rows, { snapshotAt } = {}) {
   return { count: data?.length ?? 0 };
 }
 
+// ---------- kalshi_gas_strikes (Oracle Gas Edge) ----------
+//
+// Append-only time series of Kalshi gas markets (KXAAAGASD daily +
+// KXAAAGASM monthly). Sibling to macro_market_snapshots — same shape, same
+// failure model. The table has a UNIQUE index on (ticker, captured_at), so
+// upsert + ignoreDuplicates makes the write idempotent at the millisecond.
+//
+// Failures throw — engine logs and the next 5min/15min tick retries; a missed
+// snapshot is acceptable. The /tools/oracle-gas dashboard tolerates a 30min
+// gap before showing a stale-data warning.
+export async function insertKalshiGasStrikes(rows) {
+  if (!rows || rows.length === 0) return { count: 0 };
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('kalshi_gas_strikes')
+    .upsert(rows, { onConflict: 'ticker,captured_at', ignoreDuplicates: true })
+    .select('id');
+  if (error) throw new Error(`kalshi_gas_strikes upsert: ${error.message}`);
+  return { count: data?.length ?? 0 };
+}
+
 // ---------- polymarket_market_snapshots (Polymarket Session A) ----------
 //
 // Append-only time series of Polymarket Gamma markets. Sibling to

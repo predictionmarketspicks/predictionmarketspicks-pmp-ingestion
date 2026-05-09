@@ -12,6 +12,7 @@ import {
 import { startKalshi, stopKalshi, getQuote as getKalshiQuote } from './feeds/kalshi.js';
 import { startPyth, stopAllPyth, FEED_IDS as PYTH_FEED_IDS } from './feeds/pyth.js';
 import { startMassivePoller, stopAllMassivePollers, isOptionsMarketOpen } from './feeds/massive.js';
+import { startYahooOil, stopYahooOil } from './feeds/yahoo-oil.js';
 import {
   startPolymarket,
   stopPolymarket,
@@ -108,9 +109,15 @@ for (const config of enabledCommodities) {
   // Massive moved to a 15min poll cadence on the delayed tier (May 5 2026),
   // so we override the stale threshold to 17min — anything tighter would
   // false-page between every poll. Pyth still polls at ~10s and is fine on
-  // the global 90s/300s thresholds.
-  markFeedRequired(`massive_${config.underlyingEtf.toLowerCase()}`, { maxStaleMs: 17 * 60 * 1000 });
-  markFeedRequired(`pyth_${config.pythSymbol.replace(/[/]/g, '_').toLowerCase()}`);
+  // the global 90s/300s thresholds. Yahoo (oil) polls at 15min like Massive
+  // and gets the same 17min override.
+  if (config.useYahooOil) {
+    markFeedRequired('yahoo_cl_f_spot', { maxStaleMs: 17 * 60 * 1000 });
+    markFeedRequired('yahoo_uso_chain', { maxStaleMs: 17 * 60 * 1000 });
+  } else {
+    markFeedRequired(`massive_${config.underlyingEtf.toLowerCase()}`, { maxStaleMs: 17 * 60 * 1000 });
+    markFeedRequired(`pyth_${config.pythSymbol.replace(/[/]/g, '_').toLowerCase()}`);
+  }
   registerFeed(`${config.commodity}_engine`);
 }
 markFeedRequired('kalshi');
@@ -199,12 +206,19 @@ async function runSnapshotOnce(state) {
     // `delayed_test` branch is kept for any future bridge-week scenario
     // (paid tier rollback, second underlying still on delayed tier, etc.).
     //
+    // Per-config `bypassWriterTag` lets a feed post normally regardless of
+    // the global tag — used for oil (Yahoo path, May 9 2026) so it ships
+    // alerts while silver/gold remain gated under delayed_test awaiting
+    // their replacement real-time source.
+    //
     // posted_alerts dedup (Phase 3): the engine fires a snapshot every
     // ~5 minutes during market hours. Without dedup, the same edge would
     // re-post 12×/hour. Cooldown is 6h, keyed by (commodity, tier, direction,
     // strike) — a tier upgrade (MODERATE → STRONG) re-fires (different key);
     // the same tier inside the cooldown does not.
-    if (top && snap.meta.topTier !== 'NO_EDGE' && (tag === 'intraday' || tag === 'daily')) {
+    const tagOk = tag === 'intraday' || tag === 'daily';
+    const bypass = config.bypassWriterTag === true;
+    if (top && snap.meta.topTier !== 'NO_EDGE' && (tagOk || bypass)) {
       const key = commodityAlertKey(config.commodity, snap.meta.topTier, top);
       const suppressed = await filterAlreadyPostedKeys([key], { hoursWindow: 6 });
       if (suppressed.has(key)) {
@@ -233,7 +247,7 @@ async function runSnapshotOnce(state) {
       console.log(`[${config.commodity}] would post discord ${snap.meta.topTier} (gated by writer_tag=${tag})`);
     }
 
-    if (tag === 'intraday' || tag === 'daily') {
+    if (tagOk || bypass) {
       revalidateCommodityEdge(config.commodity)
         .then((r) => console.log(`[${config.commodity}] revalidate strategy=${r.strategy} ok=${r.ok}`))
         .catch((err) => console.warn(`[${config.commodity}] revalidate threw`, err?.message || err));
@@ -282,20 +296,34 @@ function scheduleSnapshot(state) {
 
 async function bootstrapEngine(state) {
   await refreshEvent(state);
-  startMassivePoller(state.config.underlyingEtf, state.expirationDateRef);
-  // Wait briefly so feeds have data on the first snapshot.
+  if (state.config.useYahooOil) {
+    startYahooOil(state.expirationDateRef);
+  } else {
+    startMassivePoller(state.config.underlyingEtf, state.expirationDateRef);
+  }
+  // Wait briefly so feeds have data on the first snapshot. Yahoo's first
+  // chain fetch is ~3 round-trips (cookie → crumb → options); 15s leaves
+  // headroom over the 8s silver/gold path.
+  const firstSnapshotDelayMs = state.config.useYahooOil ? 15_000 : 8_000;
   setTimeout(async () => {
     await runSnapshotOnce(state);
     scheduleSnapshot(state);
-  }, 8_000);
+  }, firstSnapshotDelayMs);
   state.eventRefreshTimer = setInterval(() => refreshEvent(state), 30 * 60 * 1000);
 }
 
 async function bootstrapAll() {
   // Pyth: dedupe symbols across enabled commodities, skip those without a
-  // verified feed ID (the poller logs a warning and the engine fails open).
+  // verified feed ID and the Yahoo-sourced ones (oil) since Pyth isn't used
+  // for them. The poller logs a warning for unverified IDs and the engine
+  // fails open.
   const pythSymbols = Array.from(
-    new Set(enabledCommodities.map((c) => c.pythSymbol).filter((s) => PYTH_FEED_IDS[s])),
+    new Set(
+      enabledCommodities
+        .filter((c) => !c.useYahooOil)
+        .map((c) => c.pythSymbol)
+        .filter((s) => PYTH_FEED_IDS[s]),
+    ),
   );
   startPyth(pythSymbols);
   for (const state of engines.values()) {
@@ -742,6 +770,7 @@ async function shutdown(signal) {
   stopPolymarket();
   stopAllPyth();
   stopAllMassivePollers();
+  stopYahooOil();
   server.close(() => {
     console.log('[shutdown] http closed');
     process.exit(0);

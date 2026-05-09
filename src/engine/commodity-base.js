@@ -27,6 +27,7 @@ import {
 import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/massive.js';
 import { getPrice } from '../feeds/pyth.js';
+import { getOilSpot, getUsoChain } from '../feeds/yahoo-oil.js';
 import { fetchEvent, getNextEvent } from '../feeds/kalshi-event.js';
 
 // ---------- Kalshi probability inference ----------
@@ -151,19 +152,22 @@ export async function discoverEvent(config) {
 // Returns { meta, rows } shaped for the supabase writer. Returns null if any
 // upstream feed has no data yet (cold-start race) or a fail-open guard fires.
 export async function computeSnapshot(config, event, { now = new Date() } = {}) {
-  const pyth = getPrice(config.pythSymbol);
-  const chain = getChain(config.underlyingEtf);
-  if (!pyth) {
-    // Fail-open: pyth feed for this commodity isn't producing prices (likely
-    // an unverified feed ID for oil/copper, or Hermes hiccup).
-    console.warn(`[${config.commodity}] no pyth price for ${config.pythSymbol} — skipping snapshot`);
+  // Oil sources spot + chain from Yahoo (free, 15-min delayed) instead of
+  // pyth + massive. Same downstream shape; only the input feeds differ.
+  const useYahoo = config.useYahooOil === true;
+  const spot = useYahoo ? getOilSpot() : getPrice(config.pythSymbol);
+  const chain = useYahoo ? getUsoChain() : getChain(config.underlyingEtf);
+  if (!spot) {
+    console.warn(
+      `[${config.commodity}] no spot price (${useYahoo ? 'yahoo CL=F' : `pyth ${config.pythSymbol}`}) — skipping snapshot`,
+    );
     return null;
   }
   if (!chain || !chain.contracts || chain.contracts.length === 0) {
     return null;
   }
 
-  const spotPrice = pyth.price;
+  const spotPrice = spot.price;
   let etfPrice =
     chain.contracts.find((c) => c.underlyingPrice != null)?.underlyingPrice || null;
   if (!etfPrice) {
@@ -267,7 +271,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       confidence,
       rationale,
       spot_price: spotPrice,
-      spot_source: pyth.source,
+      spot_source: spot.source,
       underlying_etf: config.underlyingEtf,
       underlying_price: etfPrice,
     });

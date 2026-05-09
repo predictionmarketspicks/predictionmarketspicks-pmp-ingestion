@@ -41,33 +41,25 @@ const MONTH_ABBR_TO_INDEX = {
 // arrive uppercase from the API (KXAAAGASD-26MAY09); we lowercase before
 // matching so handcrafted lowercase tickers in tests still work.
 //
+// Both KXAAAGASD (daily) and KXAAAGASM (monthly) encode the resolution date
+// as YY+MMM+DD. The handoff briefly suggested monthly was YY+MMM only — but
+// live Kalshi data (verified 2026-05-08) shows monthly events use
+// `KXAAAGASM-26MAY31` (last day of month encoded explicitly). One regex
+// covers both series.
+//
 // Returns YYYY-MM-DD string or null when the prefix isn't recognized.
 export function parseResolutionDate(eventOrMarketTicker) {
   if (typeof eventOrMarketTicker !== 'string') return null;
   const lc = eventOrMarketTicker.toLowerCase();
 
-  // Daily: kxaaagasd-{yy}{mmm}{dd}[-...]
-  const daily = lc.match(/^kxaaagasd-(\d{2})([a-z]{3})(\d{2})(?:[-_]|$)/);
-  if (daily) {
-    const year = 2000 + parseInt(daily[1], 10);
-    const monthIdx = MONTH_ABBR_TO_INDEX[daily[2]];
-    const day = parseInt(daily[3], 10);
-    if (monthIdx == null || !Number.isFinite(day)) return null;
-    return formatYmd(year, monthIdx, day);
-  }
+  const m = lc.match(/^kxaaagas[dm]-(\d{2})([a-z]{3})(\d{2})(?:[-_]|$)/);
+  if (!m) return null;
 
-  // Monthly: kxaaagasm-{yy}{mmm}[-...]  → resolves on the last day of that month
-  const monthly = lc.match(/^kxaaagasm-(\d{2})([a-z]{3})(?:[-_]|$)/);
-  if (monthly) {
-    const year = 2000 + parseInt(monthly[1], 10);
-    const monthIdx = MONTH_ABBR_TO_INDEX[monthly[2]];
-    if (monthIdx == null) return null;
-    // Last day of the month: day 0 of month+1.
-    const last = new Date(Date.UTC(year, monthIdx + 1, 0));
-    return last.toISOString().slice(0, 10);
-  }
-
-  return null;
+  const year = 2000 + parseInt(m[1], 10);
+  const monthIdx = MONTH_ABBR_TO_INDEX[m[2]];
+  const day = parseInt(m[3], 10);
+  if (monthIdx == null || !Number.isFinite(day)) return null;
+  return formatYmd(year, monthIdx, day);
 }
 
 function formatYmd(year, monthIdx, day) {

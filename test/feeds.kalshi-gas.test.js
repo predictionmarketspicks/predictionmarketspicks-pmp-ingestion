@@ -29,15 +29,23 @@ describe('parseResolutionDate (KXAAAGASD daily)', () => {
 });
 
 describe('parseResolutionDate (KXAAAGASM monthly)', () => {
-  it('resolves to the last day of the month', () => {
-    expect(parseResolutionDate('KXAAAGASM-26MAY')).toBe('2026-05-31');
-    expect(parseResolutionDate('KXAAAGASM-26FEB')).toBe('2026-02-28'); // not a leap year
-    expect(parseResolutionDate('KXAAAGASM-28FEB')).toBe('2028-02-29'); // leap year
-    expect(parseResolutionDate('KXAAAGASM-26APR')).toBe('2026-04-30');
+  // Live Kalshi data (verified 2026-05-08) shows monthly events encode the
+  // explicit resolution day, e.g. KXAAAGASM-26MAY31 — not KXAAAGASM-26MAY.
+  // Same regex handles both series.
+  it('parses uppercase monthly event ticker', () => {
+    expect(parseResolutionDate('KXAAAGASM-26MAY31')).toBe('2026-05-31');
+    expect(parseResolutionDate('KXAAAGASM-26AUG31')).toBe('2026-08-31');
+    expect(parseResolutionDate('KXAAAGASM-26APR30')).toBe('2026-04-30');
   });
 
-  it('parses full market ticker with strike', () => {
-    expect(parseResolutionDate('KXAAAGASM-26AUG-T5.30')).toBe('2026-08-31');
+  it('parses full market ticker with strike suffix', () => {
+    expect(parseResolutionDate('KXAAAGASM-26MAY31-5.30')).toBe('2026-05-31');
+    expect(parseResolutionDate('KXAAAGASM-26AUG31-T5.30')).toBe('2026-08-31');
+  });
+
+  it('handles February correctly (no last-day-of-month inference)', () => {
+    expect(parseResolutionDate('KXAAAGASM-26FEB28')).toBe('2026-02-28');
+    expect(parseResolutionDate('KXAAAGASM-28FEB29')).toBe('2028-02-29');
   });
 });
 
@@ -50,6 +58,7 @@ describe('parseResolutionDate (rejection)', () => {
   it('returns null for malformed dates', () => {
     expect(parseResolutionDate('KXAAAGASD-26ZZZ09')).toBeNull();
     expect(parseResolutionDate('KXAAAGASD-')).toBeNull();
+    expect(parseResolutionDate('KXAAAGASM-26MAY')).toBeNull(); // no DD — not Kalshi's actual format
     expect(parseResolutionDate('')).toBeNull();
     expect(parseResolutionDate(null)).toBeNull();
     expect(parseResolutionDate(undefined)).toBeNull();

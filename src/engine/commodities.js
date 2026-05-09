@@ -5,21 +5,24 @@
 // wrapper file in src/engine/. The shared compute fn in commodity-base.js
 // reads the rest from the row passed in.
 //
-// Pyth feed verification status (May 2 2026):
-//   silver  XAG/USD  — verified (Kalshi settlement source)
-//   gold    XAU/USD  — verified (Kalshi settlement source)
-//   oil     WTI      — UNVERIFIED placeholder ID. Pyth Hermes serves per-expiry
-//                      WTI futures (WTIM6, WTIN6, …), not a continuous feed.
-//                      Engine fails open: when Pyth WTI returns null, oil
-//                      snapshot is skipped (logged warn, no DB write). TODO:
-//                      validate the ID via /v2/price_feeds, or add a Massive
-//                      futures path. See docs/COMMODITY_FEEDS.md.
-//   copper  XCU/USD  — UNVERIFIED, no Pyth feed ID configured. Same fail-open
-//                      pattern as oil. Pre-launch verification required.
+// Spot/chain feed source per commodity (May 9 2026):
+//   silver  Pyth XAG/USD  + Massive SLV chain   (verified, real-time)
+//   gold    Pyth XAU/USD  + Massive GLD chain   (verified, real-time)
+//   oil     Yahoo CL=F    + Yahoo USO chain     (15-min delayed, free, fragile —
+//                                                see src/feeds/yahoo-oil.js)
+//   copper  Pyth XCU/USD  — UNVERIFIED, no Pyth feed ID configured. Engine
+//                           fails open when getPrice() returns null.
+//
+// Per-commodity `useYahooOil` flag flips the compute path in commodity-base.js
+// to source spot + chain from src/feeds/yahoo-oil.js instead of pyth + massive.
+// Per-commodity `bypassWriterTag` flag exempts a feed from the WRITER_TAG
+// gate that suppresses Discord posts + Vercel revalidation. Used for oil so
+// it can post normally while silver/gold remain gated under delayed_test
+// awaiting their replacement real-time source.
 //
 // `enabled` flag: false = engine bootstraps but no-ops. Lets the multi-engine
-// scheduler ship without a real feed source for oil/copper. Flip to true once
-// the Pyth feed (or a substitute) is verified for that commodity.
+// scheduler ship without a real feed source for copper. Flip to true once
+// the spot feed is wired.
 
 import {
   SNAPSHOT_INTERVAL_MARKET_MS,
@@ -56,10 +59,12 @@ export const COMMODITIES = {
     commodity: 'oil',
     seriesTicker: 'KXWTI',
     underlyingEtf: 'USO',
-    pythSymbol: 'WTI',
+    pythSymbol: 'WTI', // not used when useYahooOil is true; kept for shape parity
     spotUnit: '$/bbl',
-    spotLabel: 'Pyth WTI (unverified)',
-    enabled: false, // flip true once Pyth WTI feed ID is verified
+    spotLabel: 'Yahoo CL=F (15-min delayed)',
+    enabled: true,
+    useYahooOil: true,
+    bypassWriterTag: true,
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,

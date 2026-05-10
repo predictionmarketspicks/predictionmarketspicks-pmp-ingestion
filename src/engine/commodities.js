@@ -39,6 +39,10 @@ export const COMMODITIES = {
     spotUnit: '$/oz',
     spotLabel: 'Pyth XAG/USD',
     enabled: true,
+    // FRED skip: no clean daily silver spot equivalent on FRED (LBMA silver
+    // is monthly only). Revisit if a daily series surfaces. See handoffs/
+    // BATCH_FRED_P5_AND_TRACKER_P2_2026-05-10.md.
+    fredSeriesId: null,
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
@@ -51,6 +55,8 @@ export const COMMODITIES = {
     spotUnit: '$/oz',
     spotLabel: 'Pyth XAU/USD',
     enabled: true,
+    // FRED Phase 5: London Bullion Market PM fix, daily.
+    fredSeriesId: 'GOLDPMGBD228NLBM',
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
@@ -65,6 +71,9 @@ export const COMMODITIES = {
     enabled: true,
     useYahooOil: true,
     bypassWriterTag: true,
+    // FRED Phase 5: WTI Cushing daily close. Critical given the Yahoo CL=F
+    // path is the most fragile of the four feeds.
+    fredSeriesId: 'DCOILWTICO',
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
@@ -77,6 +86,8 @@ export const COMMODITIES = {
     spotUnit: '$/lb',
     spotLabel: 'Pyth XCU/USD (unverified)',
     enabled: false, // flip true once a copper spot feed is wired
+    // FRED skip: same constraint as silver — no daily FRED copper series.
+    fredSeriesId: null,
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,

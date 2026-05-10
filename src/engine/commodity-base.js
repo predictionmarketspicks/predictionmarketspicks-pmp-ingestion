@@ -24,11 +24,16 @@ import {
   DIVIDEND_YIELD,
   fusedTier,
   confidenceTierInt,
+  downgradeFusedTier,
+  downgradeLegacyConfidence,
+  FRED_DIVERGENCE_BP_THRESHOLD,
+  FRED_MAX_AGE_HOURS,
 } from './thresholds.js';
 import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/massive.js';
 import { getPrice } from '../feeds/pyth.js';
 import { getOilSpot, getUsoChain } from '../feeds/yahoo-oil.js';
+import { getFredDailyClose } from '../feeds/fred.js';
 import { fetchEvent, getNextEvent } from '../feeds/kalshi-event.js';
 
 // ---------- Kalshi probability inference ----------
@@ -188,6 +193,29 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 
   const smile = buildIvSmile(chain.contracts, etfPrice);
 
+  // FRED Phase 5 cross-check — once per snapshot. Compares realtime spot
+  // (Pyth or Yahoo) against the FRED daily close. >150bp divergence flags
+  // the realtime feed as likely stale; per-row tier/confidence get
+  // demoted one notch downstream. Silver/copper opt out via fredSeriesId=null.
+  let fredDivergenceBp = null;
+  let divergenceWarning = false;
+  let fredObservationDate = null;
+  if (config.fredSeriesId) {
+    const fred = await getFredDailyClose(config.fredSeriesId);
+    if (fred && fred.age_hours < FRED_MAX_AGE_HOURS && fred.price > 0) {
+      fredDivergenceBp = ((spotPrice - fred.price) / fred.price) * 10000;
+      fredObservationDate = fred.observation_date;
+      if (Math.abs(fredDivergenceBp) > FRED_DIVERGENCE_BP_THRESHOLD) {
+        divergenceWarning = true;
+        console.warn(
+          `[${config.commodity}] FRED divergence ${fredDivergenceBp.toFixed(0)}bp ` +
+          `(spot ${spotPrice.toFixed(2)} vs FRED ${config.fredSeriesId} ` +
+          `${fred.price.toFixed(2)} on ${fredObservationDate}) — demoting tier`,
+        );
+      }
+    }
+  }
+
   const rows = [];
   for (const rawMarket of event.markets) {
     if (rawMarket.floorStrike == null) continue;
@@ -251,8 +279,22 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       }
     }
 
-    const fusedTierStr = edge != null ? fusedTier(Math.abs(edge)) : 'NO_EDGE';
-    const tierInt = confidenceTierInt(fusedTierStr);
+    let fusedTierStr = edge != null ? fusedTier(Math.abs(edge)) : 'NO_EDGE';
+    let tierInt = confidenceTierInt(fusedTierStr);
+
+    // FRED Phase 5 — demote tier/confidence one notch when realtime spot
+    // diverges from FRED daily close beyond the threshold. SPECULATIVE
+    // collapses to NO_EDGE (suppress) and direction reverts to PASS so the
+    // actionable filter drops it.
+    if (divergenceWarning) {
+      fusedTierStr = downgradeFusedTier(fusedTierStr);
+      tierInt = confidenceTierInt(fusedTierStr);
+      confidence = downgradeLegacyConfidence(confidence);
+      if (fusedTierStr === 'NO_EDGE') direction = 'PASS';
+      const bp = Math.abs(fredDivergenceBp ?? 0).toFixed(0);
+      const caveat = ` (caveat: spot diverges from FRED ${config.fredSeriesId} by ${bp}bp — realtime feed may be stale; tier demoted)`;
+      rationale = (rationale ?? '') + caveat;
+    }
 
     rows.push({
       snapshot_at: now.toISOString(),
@@ -275,6 +317,8 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       spot_source: spot.source,
       underlying_etf: config.underlyingEtf,
       underlying_price: etfPrice,
+      fred_divergence_bp: fredDivergenceBp,
+      divergence_warning: divergenceWarning,
     });
   }
 
@@ -295,6 +339,12 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     dividendYield: DIVIDEND_YIELD,
   });
 
+  // FRED divergence demotes meta.topTier the same way per-row tiers were
+  // demoted, so Discord routing + downstream consumers see the suppressed
+  // confidence rather than the raw edge_pp tier.
+  const rawTopTier = topEdge ? fusedTier(Math.abs(topEdge.edge_pp)) : 'NO_EDGE';
+  const finalTopTier = divergenceWarning ? downgradeFusedTier(rawTopTier) : rawTopTier;
+
   return {
     meta: {
       commodity: config.commodity,
@@ -307,10 +357,13 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       hoursToClose: (closeMs - now.getTime()) / 3.6e6,
       strikeCount: rows.length,
       topEdge,
-      topTier: topEdge ? fusedTier(Math.abs(topEdge.edge_pp)) : 'NO_EDGE',
-      topTierInt: topEdge ? confidenceTierInt(fusedTier(Math.abs(topEdge.edge_pp))) : 0,
+      topTier: finalTopTier,
+      topTierInt: confidenceTierInt(finalTopTier),
       spotLabel: config.spotLabel,
       gamma,
+      fredDivergenceBp,
+      fredObservationDate,
+      divergenceWarning,
     },
     rows,
   };

@@ -40,6 +40,34 @@ export function confidenceTierInt(tier) {
   return tier === 'STRONG' ? 3 : tier === 'MODERATE' ? 2 : tier === 'SPECULATIVE' ? 1 : 0;
 }
 
+// FRED Phase 5: tier downgrade applied when Pyth/Yahoo spot diverges from FRED
+// daily close beyond FRED_DIVERGENCE_BP_THRESHOLD. STRONG→MODERATE,
+// MODERATE→SPECULATIVE, SPECULATIVE→NO_EDGE (suppress).
+export function downgradeFusedTier(tier) {
+  if (tier === 'STRONG') return 'MODERATE';
+  if (tier === 'MODERATE') return 'SPECULATIVE';
+  if (tier === 'SPECULATIVE') return 'NO_EDGE';
+  return tier;
+}
+
+// Legacy confidence vocabulary downgrade — same one-notch demotion the
+// front-end reads. 'skip' is terminal (already non-actionable).
+export function downgradeLegacyConfidence(c) {
+  if (c === 'high') return 'medium';
+  if (c === 'medium') return 'low';
+  return c;
+}
+
+// 150bp = 1.5%. Conservative threshold — normal intraday drift between Pyth
+// realtime and FRED daily close is well under 100bp. Re-tune after 30 days
+// if alert fatigue appears.
+export const FRED_DIVERGENCE_BP_THRESHOLD = 150;
+
+// FRED publishes daily; allow up to 30h to absorb one missed publish before
+// suppressing the cross-check entirely. Older than that we treat the FRED
+// feed itself as stale and fail open.
+export const FRED_MAX_AGE_HOURS = 30;
+
 // Snapshot cadence — engine writes this often during market hours, less when
 // the options market is closed. Phase 2A renamed from SILVER_* to commodity-
 // agnostic; back-compat aliases kept for any external imports.

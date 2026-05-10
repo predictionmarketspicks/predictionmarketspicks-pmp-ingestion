@@ -209,6 +209,28 @@ export async function insertPolymarketSnapshots(rows, { snapshotAt } = {}) {
   return { count: data?.length ?? 0 };
 }
 
+// ---------- tail_candidates (Live Longshot Scanner Phase 2) ----------
+//
+// Append-only firehose of tail observations (price ≤0.10 OR ≥0.90 with
+// $10K+ event volume). Each row is a 5/15min poll snapshot of one market on
+// one side. The tail-edge-compute Supabase edge fn reads a 6h rolling window
+// to score persistence. 14d TTL via pg_cron cleanup.
+//
+// No UNIQUE constraint — append-only by design. Failures DO NOT throw: the
+// caller has already written the canonical snapshot row, and a tail-side write
+// loss costs us one observation in a many-per-day stream. The next 5/15min
+// tick refills.
+export async function insertTailCandidates(rows) {
+  if (!rows || rows.length === 0) return { count: 0 };
+  const sb = getClient();
+  const { data, error } = await sb.from('tail_candidates').insert(rows).select('id');
+  if (error) {
+    console.warn(`[tail_candidates] insert failed: ${error.message}`);
+    return { count: 0, error: error.message };
+  }
+  return { count: data?.length ?? 0 };
+}
+
 // ---------- world_cup_market_snapshot (WC PR 3) ----------
 //
 // Append-only time series of WC market quotes from kalshi/polymarket/

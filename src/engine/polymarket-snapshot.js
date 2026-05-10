@@ -16,6 +16,7 @@ import { fetchTopMarkets } from '../feeds/polymarket-gamma.js';
 import { insertPolymarketSnapshots } from '../delivery/supabase.js';
 import { isOptionsMarketOpen } from '../feeds/massive.js';
 import { recordTick, registerFeed } from '../observability/health.js';
+import { derivePolymarketTailCandidates, writeTailCandidatesFromBatch } from './tail-edge.js';
 
 const SNAPSHOT_INTERVAL_MARKET_MS = Number(
   process.env.POLY_SNAPSHOT_INTERVAL_MARKET_MS || 5 * 60 * 1000,
@@ -51,6 +52,8 @@ export async function runPolymarketSnapshotOnce() {
     state.rowsWritten += count;
     recordTick('polymarket_engine');
     console.log(`[polymarket-snapshot] wrote ${count} rows (fetched ${rows.length})`);
+    // Tail-side write is fire-and-forget — never blocks the primary snapshot.
+    await writeTailCandidatesFromBatch(rows, derivePolymarketTailCandidates, 'polymarket');
     return { rowsFetched: rows.length, rowsWritten: count };
   } catch (err) {
     state.lastErrorAt = new Date().toISOString();

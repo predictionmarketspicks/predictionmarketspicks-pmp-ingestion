@@ -16,6 +16,7 @@ import { fetchAllMacroMarkets } from '../feeds/kalshi-macro.js';
 import { insertMacroSnapshots } from '../delivery/supabase.js';
 import { isOptionsMarketOpen } from '../feeds/massive.js';
 import { recordTick, registerFeed } from '../observability/health.js';
+import { deriveKalshiTailCandidates, writeTailCandidatesFromBatch } from './tail-edge.js';
 
 const SNAPSHOT_INTERVAL_MARKET_MS = Number(
   process.env.MACRO_INTERVAL_MARKET_MS || 5 * 60 * 1000,
@@ -50,6 +51,9 @@ export async function runMacroSnapshotOnce() {
     state.rowsWritten += count;
     recordTick('macro_engine');
     console.log(`[macro] snapshot wrote ${count} rows across ${rows.length} markets`);
+    // Tail-side write is fire-and-forget — never blocks the primary snapshot.
+    // The function logs+swallows its own errors; we don't await failure-cost.
+    await writeTailCandidatesFromBatch(rows, deriveKalshiTailCandidates, 'kalshi-macro');
     return { rowsFetched: rows.length, rowsWritten: count };
   } catch (err) {
     state.lastErrorAt = new Date().toISOString();

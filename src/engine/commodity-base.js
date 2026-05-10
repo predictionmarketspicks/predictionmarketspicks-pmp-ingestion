@@ -16,6 +16,7 @@
 // Yahoo, which has known quantization issues; the engine doesn't).
 
 import { probAboveStrike, yearFraction } from './options.js';
+import { computeDealerGamma } from './gamma.js';
 import {
   MIN_EDGE_PP,
   MIN_VOL_FOR_LIVE_PRICE,
@@ -283,6 +284,17 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     topEdge = actionable.reduce((best, cur) => (Math.abs(cur.edge_pp) > Math.abs(best.edge_pp) ? cur : best));
   }
 
+  // Dealer gamma — uses the same ETF chain + spot + T already in scope. UNIQUE
+  // (commodity, snapshot_date) on commodity_gamma_snapshots means intraday
+  // ticks update the same row; tomorrow gets a new one.
+  const gamma = computeDealerGamma({
+    contracts: chain.contracts,
+    etfSpot: etfPrice,
+    T,
+    riskFreeRate: RISK_FREE_RATE,
+    dividendYield: DIVIDEND_YIELD,
+  });
+
   return {
     meta: {
       commodity: config.commodity,
@@ -298,6 +310,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       topTier: topEdge ? fusedTier(Math.abs(topEdge.edge_pp)) : 'NO_EDGE',
       topTierInt: topEdge ? confidenceTierInt(fusedTier(Math.abs(topEdge.edge_pp))) : 0,
       spotLabel: config.spotLabel,
+      gamma,
     },
     rows,
   };

@@ -46,6 +46,47 @@ export async function upsertCommodityEdgeRows(rows) {
   return { count: data?.length ?? 0, tag };
 }
 
+// Daily dealer-gamma snapshot. UNIQUE (commodity, snapshot_date) — intraday
+// ticks during the same UTC day update the row in place; tomorrow gets a new
+// one. Failures are logged, not thrown — gamma is a secondary signal and a
+// missed write must never block the primary edge upsert.
+//
+// snapshot_date defaults to today UTC. spot_price + gamma_neutral_price are
+// in the underlying ETF's units (SLV/GLD/USO), matching legacy behavior so
+// the readers in lib/tools/gamma-snapshot.ts don't need a units update.
+export async function upsertGammaSnapshot({
+  commodity,
+  etfSpot,
+  netDealerGamma,
+  gammaNeutralPrice,
+  gammaEnvironment,
+  signalModifier,
+  snapshotDate,
+}) {
+  if (!commodity || !(etfSpot > 0)) return { ok: false, reason: 'invalid_input' };
+  const date = snapshotDate || new Date().toISOString().slice(0, 10);
+  const sb = getClient();
+  const { error } = await sb
+    .from('commodity_gamma_snapshots')
+    .upsert(
+      {
+        commodity,
+        snapshot_date: date,
+        spot_price: etfSpot,
+        net_dealer_gamma: netDealerGamma,
+        gamma_neutral_price: gammaNeutralPrice,
+        gamma_environment: gammaEnvironment,
+        signal_modifier: signalModifier,
+      },
+      { onConflict: 'commodity,snapshot_date' },
+    );
+  if (error) {
+    console.error(`[commodity_gamma_snapshots] upsert failed for ${commodity}: ${error.message}`);
+    return { ok: false, reason: error.message };
+  }
+  return { ok: true, date };
+}
+
 // Phase 2B: insert arb alert rows into arb_alerts. Append-only — each row is a
 // distinct detection event. Cleanup is handled by the cron job that drops rows
 // older than 7 days. Bridge-week safety: rows still write under writer_tag=

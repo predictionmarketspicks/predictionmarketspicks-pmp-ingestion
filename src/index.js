@@ -27,6 +27,7 @@ import { ARB_COMPARE_INTERVAL_MS } from './engine/arb-thresholds.js';
 import { EXPIRATION_BURST_WINDOW_MS } from './engine/thresholds.js';
 import {
   upsertCommodityEdgeRows,
+  upsertGammaSnapshot,
   insertArbAlerts,
   filterAlreadyPostedKeys,
   recordPostedAlerts,
@@ -200,6 +201,26 @@ async function runSnapshotOnce(state) {
       ? `top=${top.direction} $${top.strike.toFixed(2)} ${(top.edge_pp * 100).toFixed(1)}pp ${snap.meta.topTier}`
       : 'top=NO_EDGE';
     console.log(`[${config.commodity}] snapshot: ${count} rows tag=${tag} • ${topStr} • spot=$${snap.meta.spotPrice.toFixed(2)}`);
+
+    // Dealer-gamma snapshot — UNIQUE (commodity, snapshot_date) makes intraday
+    // ticks idempotent (last-write-wins). Failures are logged but never throw,
+    // so a gamma write outage cannot block edge upserts or Discord posts.
+    if (snap.meta.gamma) {
+      const g = snap.meta.gamma;
+      const gammaResult = await upsertGammaSnapshot({
+        commodity: config.commodity,
+        etfSpot: snap.meta.etfPrice,
+        netDealerGamma: g.netDealerGamma,
+        gammaNeutralPrice: g.gammaNeutralPrice,
+        gammaEnvironment: g.gammaEnvironment,
+        signalModifier: g.signalModifier,
+      });
+      if (gammaResult.ok) {
+        console.log(
+          `[${config.commodity}] gamma: ${g.gammaEnvironment} mod=${g.signalModifier} net=${g.netDealerGamma.toExponential(2)} neutral=$${g.gammaNeutralPrice.toFixed(2)} strikes=${g.strikesContributing}`,
+        );
+      }
+    }
 
     // Discord + revalidate are gated on writer_tag — Massive flipped to
     // real-time on 2026-05-04 and operator set WRITER_TAG=intraday. The

@@ -28,13 +28,14 @@ import {
 
 const MASSIVE_BASE = process.env.MASSIVE_API_BASE || 'https://api.massive.com';
 
-// Cadence: 15min during US options market hours, 60s off-hours. Reduced from
-// 5s on 2026-05-05 after Massive Options Advanced (real-time) tier was cut.
-// Delayed tier underneath only refreshes ~every 15 min, so 5s polling is just
-// re-fetching the same snapshot. Off-hours cadence retained for cold-start
-// recovery. Restore to 5s when the replacement real-time source is wired.
+// Cadence: 15min during US options market hours, 1h off-hours. Reduced from
+// 5s on 2026-05-05 after Massive Options Advanced (real-time) tier was cut;
+// off-hours dropped from 60s → 1h on 2026-05-06 since the delayed tier only
+// refreshes ~every 15 min and the options market is closed off-hours, so 60s
+// polling was just re-fetching the same stale snapshot. Restore market=5s and
+// off=60s when the replacement real-time source is wired.
 const POLL_INTERVAL_MARKET_MS = 15 * 60 * 1000;
-const POLL_INTERVAL_OFF_MS = 60_000;
+const POLL_INTERVAL_OFF_MS = 60 * 60 * 1000;
 
 // Limit the chain pull to plausibly-near-the-money strikes. Massive returns up
 // to 250 contracts per page; SLV weekly chains are ~40-60 strikes per side, so

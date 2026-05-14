@@ -11,7 +11,16 @@ import {
 } from './observability/health.js';
 import { startKalshi, stopKalshi, getQuote as getKalshiQuote } from './feeds/kalshi.js';
 import { startPyth, stopAllPyth, FEED_IDS as PYTH_FEED_IDS } from './feeds/pyth.js';
-import { startMassivePoller, stopAllMassivePollers, isOptionsMarketOpen } from './feeds/massive.js';
+// isOptionsMarketOpen still lives in massive.js (pure utility, no provider
+// coupling). Lifecycle goes through the options-provider abstraction so the
+// chain source can swap via OPTIONS_PROVIDER env without engine changes.
+import { isOptionsMarketOpen } from './feeds/massive.js';
+import {
+  startOptionsFeed,
+  stopAllOptionsFeeds,
+  requiredFeedName,
+  OPTIONS_PROVIDER,
+} from './feeds/options-provider.js';
 import { startYahooOil, stopYahooOil } from './feeds/yahoo-oil.js';
 import {
   startPolymarket,
@@ -117,7 +126,12 @@ for (const config of enabledCommodities) {
     markFeedRequired('yahoo_cl_f_spot', { maxStaleMs: 17 * 60 * 1000 });
     markFeedRequired('yahoo_uso_chain', { maxStaleMs: 17 * 60 * 1000 });
   } else {
-    markFeedRequired(`massive_${config.underlyingEtf.toLowerCase()}`, { maxStaleMs: 17 * 60 * 1000 });
+    // Stale threshold is provider-aware: Databento polls at 5s (sidecar HTTP
+    // every market tick), Massive at 15min. 17min covers Massive's worst
+    // case; Databento is well inside that. Tighten in a Phase 2 cleanup
+    // once Massive is retired.
+    const staleMs = OPTIONS_PROVIDER === 'databento' ? 60 * 1000 : 17 * 60 * 1000;
+    markFeedRequired(requiredFeedName(config.underlyingEtf), { maxStaleMs: staleMs });
     markFeedRequired(`pyth_${config.pythSymbol.replace(/[/]/g, '_').toLowerCase()}`);
   }
   registerFeed(`${config.commodity}_engine`);
@@ -338,7 +352,7 @@ async function bootstrapEngine(state) {
   if (state.config.useYahooOil) {
     startYahooOil(state.expirationDateRef);
   } else {
-    startMassivePoller(state.config.underlyingEtf, state.expirationDateRef);
+    startOptionsFeed(state);
   }
   // Wait briefly so feeds have data on the first snapshot. Yahoo's first
   // chain fetch is ~3 round-trips (cookie → crumb → options); 15s leaves
@@ -808,7 +822,7 @@ async function shutdown(signal) {
   stopKalshi();
   stopPolymarket();
   stopAllPyth();
-  stopAllMassivePollers();
+  stopAllOptionsFeeds();
   stopYahooOil();
   server.close(() => {
     console.log('[shutdown] http closed');

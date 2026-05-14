@@ -57,6 +57,23 @@ export function bsPrice(S, K, T, r, q, sigma, type) {
   return K * Math.exp(-r * T) * normCdf(-d2) - S * Math.exp(-q * T) * normCdf(-d1);
 }
 
+// Δ_call = exp(-q*T) * N(d1); Δ_put = exp(-q*T) * (N(d1) - 1). Needed when
+// the chain arrives without server-side greeks (Databento OPRA records carry
+// raw quotes, not solved Δ — Massive's Options Advanced shortcut doesn't apply
+// here). At T=0 or sigma=0 the option is pure intrinsic, so Δ is ±1 if ITM
+// and 0 if OTM. dq=0 collapses to the cash-equity case.
+export function bsDelta(S, K, T, r, q, sigma, type) {
+  if (T <= 0 || sigma <= 0 || S <= 0 || K <= 0) {
+    const itm = type === 'call' ? S > K : S < K;
+    if (!itm) return 0;
+    return type === 'call' ? 1 : -1;
+  }
+  const [d1] = d1d2(S, K, T, r, q, sigma);
+  const nd1 = normCdf(d1);
+  const dq = Math.exp(-q * T);
+  return type === 'call' ? dq * nd1 : dq * (nd1 - 1);
+}
+
 export function bsGamma(S, K, T, r, q, sigma) {
   if (T <= 0 || sigma <= 0 || S <= 0) return 0;
   const [d1] = d1d2(S, K, T, r, q, sigma);

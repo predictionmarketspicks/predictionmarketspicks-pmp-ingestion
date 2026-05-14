@@ -30,7 +30,7 @@ import {
   FRED_MAX_AGE_HOURS,
 } from './thresholds.js';
 import { getQuote } from '../feeds/kalshi.js';
-import { getChain, fetchPrevClose } from '../feeds/massive.js';
+import { getChain, fetchPrevClose } from '../feeds/options-provider.js';
 import { getPrice } from '../feeds/pyth.js';
 import { getOilSpot, getUsoChain, getContractSpot } from '../feeds/yahoo-oil.js';
 import { getFredDailyClose } from '../feeds/fred.js';

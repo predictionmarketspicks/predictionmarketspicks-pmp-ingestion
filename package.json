@@ -12,6 +12,8 @@
     "dev": "node --watch src/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "parity:databento": "node scripts/parity-databento-vs-massive.js",
+    "pull:databento": "node scripts/databento-pull.js",
     "lint:no-axios": "node -e \"const lock=require('fs').existsSync('package-lock.json')?require('fs').readFileSync('package-lock.json','utf8'):'';if(/\\\"axios\\\"/.test(lock)||/plain-crypto-js/.test(lock)){console.error('axios or plain-crypto-js detected — security incident');process.exit(1)}console.log('no axios')\""
   },
   "dependencies": {

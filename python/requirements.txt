@@ -1,0 +1,4 @@
+# Databento sidecar — pinned to the most recent stable line at 2026-05-14.
+# The SDK pulls zstandard + numpy + pandas + pyarrow; container memory should
+# accommodate ~250MB resident set. Bump fly.toml memory after first soak.
+databento>=0.46,<1.0

@@ -76,10 +76,12 @@ export const COMMODITIES = {
     // metadata and pull the matching Yahoo specific-month spot
     // (CLM26.NYM etc.) instead of CL=F continuous. Falls back to CL=F
     // continuous if Kalshi or Yahoo declines.
-    // Default OFF — operator flips after verifying the spot label flows
-    // through correctly. Once verified, the page-side rollover guard
-    // (lib/tools/oil-edge.ts) becomes structurally redundant.
-    useContractAwareSpot: false,
+    // Flipped ON 2026-05-13 immediately after Part B landed — operator
+    // accepts the small live-bake risk. Once Fly logs show
+    // `using contract-aware spot ...` and commodity_edge_signals.spot_source
+    // reads `yahoo_clm26_nym` (or current contract), the page-side rollover
+    // guard in lib/tools/oil-edge.ts becomes structurally redundant.
+    useContractAwareSpot: true,
     // FRED Phase 5: WTI Cushing daily close. Critical given the Yahoo CL=F
     // path is the most fragile of the four feeds.
     fredSeriesId: 'DCOILWTICO',

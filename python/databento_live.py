@@ -311,8 +311,16 @@ def run_http_server() -> None:
 def run_live_client() -> None:
     api_key = os.environ.get("DATABENTO_API_KEY")
     if not api_key:
-        log.error("DATABENTO_API_KEY not set — sidecar idle until restart with key")
-        return
+        # Idle. Don't crash — supervisor would loop us forever and the
+        # HTTP /health endpoint must stay reachable so the Node engine can
+        # see this state in its own observability snapshot. Block here so
+        # the daemon HTTP thread stays alive; operator sets the secret and
+        # we come back via the next `fly deploy` or machine restart.
+        log.error("DATABENTO_API_KEY not set — sidecar idle, /health still serving")
+        with _lock:
+            _counters["last_error"] = "DATABENTO_API_KEY not set"
+        while True:
+            time.sleep(3600)
     client = db.Live(
         key=api_key,
         reconnect_policy=getattr(db, "ReconnectPolicy", None) and db.ReconnectPolicy.RECONNECT or "reconnect",

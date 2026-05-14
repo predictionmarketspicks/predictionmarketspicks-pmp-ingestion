@@ -71,6 +71,15 @@ export const COMMODITIES = {
     enabled: true,
     useYahooOil: true,
     bypassWriterTag: true,
+    // Contract-aware spot (Part B of OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13).
+    // When true, resolve the active settle contract from Kalshi series
+    // metadata and pull the matching Yahoo specific-month spot
+    // (CLM26.NYM etc.) instead of CL=F continuous. Falls back to CL=F
+    // continuous if Kalshi or Yahoo declines.
+    // Default OFF — operator flips after verifying the spot label flows
+    // through correctly. Once verified, the page-side rollover guard
+    // (lib/tools/oil-edge.ts) becomes structurally redundant.
+    useContractAwareSpot: false,
     // FRED Phase 5: WTI Cushing daily close. Critical given the Yahoo CL=F
     // path is the most fragile of the four feeds.
     fredSeriesId: 'DCOILWTICO',

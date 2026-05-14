@@ -339,4 +339,58 @@ export function getUsoChain() {
   return chainCache;
 }
 
+// --- contract-aware spot (Part B of OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13) ---
+//
+// Yahoo exposes CME WTI specific-month tickers under the `.NYM` suffix:
+//   JUN26 → CLM26.NYM, JUL26 → CLN26.NYM, AUG26 → CLQ26.NYM
+// Same v8 chart endpoint + bare UA pattern the continuous-front-month spot uses.
+// Cached per-yyyymm with a 5-minute TTL so multi-tick bursts don't hammer Yahoo.
+
+const CME_MONTH_CODE = ['F', 'G', 'H', 'J', 'K', 'M', 'N', 'Q', 'U', 'V', 'X', 'Z'];
+const CONTRACT_SPOT_TTL_MS = 5 * 60 * 1000;
+const contractSpotCache = new Map(); // yyyymm → { fetchedAt, price, publishTimeMs, source, symbol }
+
+export function yahooContractSymbol(yyyymm) {
+  if (typeof yyyymm !== 'string' || !/^\d{6}$/.test(yyyymm)) return null;
+  const yy = yyyymm.slice(2, 4);
+  const mm = Number.parseInt(yyyymm.slice(4, 6), 10);
+  if (mm < 1 || mm > 12) return null;
+  return `CL${CME_MONTH_CODE[mm - 1]}${yy}.NYM`;
+}
+
+async function fetchContractSpotOnce(symbol) {
+  const url = `${YAHOO_QUERY1}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': UA, Accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`yahoo contract spot HTTP ${res.status} (${symbol})`);
+  const j = await res.json();
+  const meta = j?.chart?.result?.[0]?.meta;
+  const price = num(meta?.regularMarketPrice);
+  if (price == null) throw new Error(`yahoo contract spot empty payload (${symbol})`);
+  const publishTimeMs = (num(meta?.regularMarketTime) ?? Math.floor(Date.now() / 1000)) * 1000;
+  // source label e.g. 'yahoo_clm26_nym' — matches handoff naming convention.
+  const source = `yahoo_${symbol.toLowerCase().replace('.', '_')}`;
+  return { price, publishTimeMs, source, symbol };
+}
+
+export async function getContractSpot(yyyymm) {
+  const symbol = yahooContractSymbol(yyyymm);
+  if (!symbol) return null;
+  const hit = contractSpotCache.get(yyyymm);
+  if (hit && Date.now() - hit.fetchedAt < CONTRACT_SPOT_TTL_MS) return hit;
+  try {
+    const spot = await fetchContractSpotOnce(symbol);
+    const entry = { fetchedAt: Date.now(), ...spot };
+    contractSpotCache.set(yyyymm, entry);
+    return entry;
+  } catch (err) {
+    console.warn(`[yahoo-oil] contract spot fetch failed: ${err?.message || err}`);
+    // Return stale cache if we have one — better than nothing during a transient blip.
+    if (hit) return hit;
+    return null;
+  }
+}
+
 export { pickExpiryClosestTo, POLL_INTERVAL_MARKET_MS, POLL_INTERVAL_OFF_MS };

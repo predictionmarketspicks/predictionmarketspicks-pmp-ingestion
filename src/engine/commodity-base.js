@@ -32,9 +32,10 @@ import {
 import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/massive.js';
 import { getPrice } from '../feeds/pyth.js';
-import { getOilSpot, getUsoChain } from '../feeds/yahoo-oil.js';
+import { getOilSpot, getUsoChain, getContractSpot } from '../feeds/yahoo-oil.js';
 import { getFredDailyClose } from '../feeds/fred.js';
 import { fetchEvent, getNextEvent } from '../feeds/kalshi-event.js';
+import { getActiveSettleContract } from '../feeds/kalshi-series.js';
 
 // ---------- Kalshi probability inference ----------
 // Direct port of KalshiMarket.yes_implied_prob in commodity_edge/src/kalshi.py.
@@ -161,7 +162,48 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   // Oil sources spot + chain from Yahoo (free, 15-min delayed) instead of
   // pyth + massive. Same downstream shape; only the input feeds differ.
   const useYahoo = config.useYahooOil === true;
-  const spot = useYahoo ? getOilSpot() : getPrice(config.pythSymbol);
+
+  // Contract-aware spot (Part B of OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13).
+  // When config.useContractAwareSpot is true and the commodity is oil,
+  // resolve the active settle contract from Kalshi /series and pull the
+  // matching specific-month Yahoo ticker (CLM26.NYM, CLN26.NYM, ...).
+  // Falls back to CL=F continuous on any resolution failure.
+  let spot = null;
+  if (useYahoo && config.useContractAwareSpot === true) {
+    try {
+      const settle = await getActiveSettleContract(config.seriesTicker, event.closeTime);
+      if (settle) {
+        const cSpot = await getContractSpot(settle.yyyymm);
+        if (cSpot && cSpot.price > 0) {
+          spot = {
+            price: cSpot.price,
+            publishTimeMs: cSpot.publishTimeMs,
+            source: cSpot.source, // e.g. 'yahoo_clm26_nym'
+          };
+          console.log(
+            `[${config.commodity}] using contract-aware spot ${settle.contract} (${cSpot.symbol}) = $${cSpot.price.toFixed(2)}`,
+          );
+        } else {
+          console.warn(
+            `[${config.commodity}] contract-aware spot lookup empty for ${settle.contract} — falling back to CL=F`,
+          );
+        }
+      } else {
+        console.warn(
+          `[${config.commodity}] could not resolve settle contract for ${config.seriesTicker} — falling back to CL=F`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[${config.commodity}] contract-aware spot resolution failed: ${err?.message || err} — falling back to CL=F`,
+      );
+    }
+  }
+
+  if (!spot) {
+    spot = useYahoo ? getOilSpot() : getPrice(config.pythSymbol);
+  }
+
   const chain = useYahoo ? getUsoChain() : getChain(config.underlyingEtf);
   if (!spot) {
     console.warn(

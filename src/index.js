@@ -35,6 +35,7 @@ import {
 } from './delivery/supabase.js';
 import { postCommodityAlert, postMoversAlert } from './delivery/discord.js';
 import { revalidateCommodityEdge } from './delivery/revalidate.js';
+import { findActiveRollover as findOilRollover } from './engine/wti-rollover.js';
 import { fetchKalshiCandidates } from './feeds/movers.js';
 import {
   applyFilters as applyMoverFilters,
@@ -239,7 +240,21 @@ async function runSnapshotOnce(state) {
     // the same tier inside the cooldown does not.
     const tagOk = tag === 'intraday' || tag === 'daily';
     const bypass = config.bypassWriterTag === true;
-    if (top && snap.meta.topTier !== 'NO_EDGE' && (tagOk || bypass)) {
+
+    // WTI contract-month rollover guard. When Kalshi has rolled to next month
+    // but our Yahoo CL=F continuous spot still reads the prior month, the
+    // comparator surfaces basis-mismatch artifacts. Suppress Discord + skip
+    // revalidate across the window. Vercel page already shows a paused banner
+    // (see lib/tools/oil-edge.ts). Delete when Part B (contract-aware spot)
+    // ships — handoffs/OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13.md.
+    const oilRollover =
+      config.commodity === 'oil' ? findOilRollover(snap.meta.eventCloseAt) : null;
+
+    if (top && snap.meta.topTier !== 'NO_EDGE' && oilRollover) {
+      console.log(
+        `[${config.commodity}] discord+revalidate suppressed — rollover ${oilRollover.fromContract}→${oilRollover.toContract} active`,
+      );
+    } else if (top && snap.meta.topTier !== 'NO_EDGE' && (tagOk || bypass)) {
       const key = commodityAlertKey(config.commodity, snap.meta.topTier, top);
       const suppressed = await filterAlreadyPostedKeys([key], { hoursWindow: 6 });
       if (suppressed.has(key)) {
@@ -268,6 +283,9 @@ async function runSnapshotOnce(state) {
       console.log(`[${config.commodity}] would post discord ${snap.meta.topTier} (gated by writer_tag=${tag})`);
     }
 
+    // Revalidate still runs during rollover — the page-side guard
+    // (lib/tools/oil-edge.ts findActiveRollover) re-renders with the banner
+    // and PASS rows, so a fresh build is desirable, not harmful.
     if (tagOk || bypass) {
       revalidateCommodityEdge(config.commodity)
         .then((r) => console.log(`[${config.commodity}] revalidate strategy=${r.strategy} ok=${r.ok}`))

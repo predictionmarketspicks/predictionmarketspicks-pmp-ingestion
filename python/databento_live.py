@@ -110,7 +110,9 @@ def on_record(record: Any) -> None:
 
     Recognized types (databento-python ≥0.36):
       - InstrumentDefMsg → instrument metadata
-      - MBP1Msg          → top-of-book bid/ask (the workhorse)
+      - Cmbp1Msg         → consolidated NBBO across the 18 OPRA venues
+                           (OPRA's cmbp-1 schema; fields are flattened —
+                           bid_px_00 / ask_px_00 etc., not nested in levels)
       - TradeMsg         → trade prints
       - SymbolMappingMsg → ignored (raw_symbol is already on the def)
       - SystemMsg        → server messages, log only
@@ -135,23 +137,27 @@ def on_record(record: Any) -> None:
                 _counters["last_tick_at_ns"] = time.time_ns()
             return
 
-        if rtype == "MBP1Msg":
-            # MBP-1: depth 1, every BBO change. Levels are arrays of one entry.
-            levels = getattr(record, "levels", None)
-            if not levels:
-                return
-            top = levels[0]
-            # Prices ship as int64 fixed-point ($/1e9). Use pretty_* helpers.
-            bid_px = getattr(top, "pretty_bid_px", None)
-            ask_px = getattr(top, "pretty_ask_px", None)
-            bid_sz = getattr(top, "bid_sz", None)
-            ask_sz = getattr(top, "ask_sz", None)
+        if rtype == "Cmbp1Msg":
+            # OPRA cmbp-1: consolidated NBBO across 18 options venues. Fields
+            # are direct on the record (not in a levels array). pretty_* helpers
+            # convert int64 fixed-point to floats; NaN-equivalent on either side
+            # means no two-sided quote at that venue, which we read as null.
+            bid_px = getattr(record, "pretty_bid_px_00", None)
+            ask_px = getattr(record, "pretty_ask_px_00", None)
+            bid_sz = getattr(record, "bid_sz_00", None)
+            ask_sz = getattr(record, "ask_sz_00", None)
             with _lock:
                 slot = _book.setdefault(record.instrument_id, {})
-                if bid_px is not None:
-                    slot["bid"] = float(bid_px) if bid_px and bid_px > 0 else None
-                if ask_px is not None:
-                    slot["ask"] = float(ask_px) if ask_px and ask_px > 0 else None
+                # NaN protects against the int64 max-value sentinel Databento
+                # uses for unset bid/ask in the raw stream.
+                if bid_px is not None and bid_px == bid_px and bid_px > 0:
+                    slot["bid"] = float(bid_px)
+                else:
+                    slot["bid"] = None
+                if ask_px is not None and ask_px == ask_px and ask_px > 0:
+                    slot["ask"] = float(ask_px)
+                else:
+                    slot["ask"] = None
                 if bid_sz is not None:
                     slot["bid_size"] = int(bid_sz)
                 if ask_sz is not None:
@@ -326,7 +332,11 @@ def run_live_client() -> None:
         reconnect_policy=getattr(db, "ReconnectPolicy", None) and db.ReconnectPolicy.RECONNECT or "reconnect",
     )
 
-    for schema in ("definition", "mbp-1", "trades"):
+    # OPRA.PILLAR doesn't carry mbp-1 (that's the per-venue equity schema).
+    # cmbp-1 is the consolidated NBBO across all 18 options venues, which is
+    # what we actually want for mid-quote pricing. tcbbo is the lower-volume
+    # trade-time variant; cmbp-1 is the workhorse.
+    for schema in ("definition", "cmbp-1", "trades"):
         client.subscribe(
             dataset=DATASET,
             schema=schema,

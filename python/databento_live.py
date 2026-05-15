@@ -31,7 +31,7 @@ import queue
 import sys
 import threading
 import time
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -83,6 +83,10 @@ _instruments: dict[int, dict[str, Any]] = {}
 _book: dict[int, dict[str, Any]] = {}
 _trade_history: dict[int, deque[tuple[int, int]]] = defaultdict(deque)
 _record_queue: queue.SimpleQueue = queue.SimpleQueue()
+# rtype name → count. Tracks every distinct record class name the SDK
+# delivers so we can see when (e.g.) Cmbp1Msg gets renamed by an SDK
+# upgrade or when we're getting unexpected message types.
+_type_counts: Counter = Counter()
 _counters = {
     "definitions": 0,
     "quotes": 0,
@@ -152,6 +156,7 @@ def _process_record(record: Any) -> None:
       - ErrorMsg         → server errors, log + surface in /health
     """
     rtype = type(record).__name__
+    _type_counts[rtype] += 1
 
     if rtype == "InstrumentDefMsg":
         _instruments[record.instrument_id] = {
@@ -420,14 +425,16 @@ def _run_heartbeat() -> None:
     while True:
         time.sleep(15)
         with _lock:
+            type_breakdown = ", ".join(f"{k}={v}" for k, v in _type_counts.most_common(10))
             log.info(
-                "heartbeat defs=%d quotes=%d trades=%d processed=%d queue_depth=%d peak=%d last_err=%s",
+                "heartbeat defs=%d quotes=%d trades=%d processed=%d queue_depth=%d peak=%d types=[%s] last_err=%s",
                 _counters["definitions"],
                 _counters["quotes"],
                 _counters["trades"],
                 _counters["processed"],
                 _record_queue.qsize(),
                 _counters["queue_depth_peak"],
+                type_breakdown,
                 (_counters["last_error"] or "none")[:120],
             )
 

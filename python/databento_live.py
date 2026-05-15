@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import sys
 import threading
 import time
@@ -49,6 +50,17 @@ LISTEN_PORT = int(os.environ.get("DATABENTO_SIDECAR_PORT", "9090"))
 # print rates — older entries get evicted lazily on read.
 VOLUME_WINDOW_NS = 24 * 60 * 60 * 1_000_000_000
 
+# Worker batching. The SDK callback thread enqueues raw records onto
+# _record_queue and returns immediately — this is the only thing that keeps
+# Databento from declaring us a "slow client" on peak-volume days (OPEX, etc).
+# A dedicated worker thread drains the queue and applies book updates under
+# the lock in batches of up to QUEUE_BATCH records per acquisition so we
+# amortize lock cost across many quotes. SimpleQueue is lock-free + unbounded;
+# if the worker ever falls catastrophically behind, memory growth surfaces in
+# /health (queue_depth) long before it OOMs the machine.
+QUEUE_BATCH = 512
+QUEUE_DRAIN_IDLE_SLEEP_S = 0.001
+
 
 # --- logging -----------------------------------------------------------
 
@@ -62,17 +74,22 @@ log = logging.getLogger("databento-sidecar")
 
 # --- state -------------------------------------------------------------
 
-# All shared state lives behind one lock. The SDK callback thread writes;
-# the HTTP handler threads read. Hot path is small (dict get/set), so a
-# coarse lock is fine for this workload (<10k records/sec sustained on SLV).
+# All shared state lives behind one lock. The dedicated worker thread writes;
+# the HTTP handler threads read. The SDK callback thread NEVER touches the
+# lock — it only enqueues, which is essential to keep wire-side throughput
+# decoupled from book-update cost.
 _lock = threading.Lock()
 _instruments: dict[int, dict[str, Any]] = {}
 _book: dict[int, dict[str, Any]] = {}
 _trade_history: dict[int, deque[tuple[int, int]]] = defaultdict(deque)
+_record_queue: queue.SimpleQueue = queue.SimpleQueue()
 _counters = {
     "definitions": 0,
     "quotes": 0,
     "trades": 0,
+    "enqueued": 0,
+    "processed": 0,
+    "queue_depth_peak": 0,
     "last_tick_at_ns": 0,
     "last_error": None,
     "connected_at_ns": 0,
@@ -102,11 +119,27 @@ def _rolling_volume(instrument_id: int, now_ns: int) -> int:
     return sum(size for _, size in history)
 
 
-# --- record callback ---------------------------------------------------
+# --- record callback (hot path) ----------------------------------------
 
 
 def on_record(record: Any) -> None:
-    """Single dispatch entry. Updates state under the lock and bumps tick.
+    """SDK callback hot path. Enqueue and return — NO lock acquisition, NO
+    heavy work. This is what lets the Databento Live client drain its socket
+    fast enough that the gateway never declares us a slow client on high-vol
+    days (OPEX, FOMC, etc).
+
+    SimpleQueue.put is implemented as a single atomic deque append in CPython
+    — sub-microsecond per call, no GIL contention beyond the deque mutation
+    itself.
+    """
+    _record_queue.put(record)
+
+
+# --- worker (cold path) ------------------------------------------------
+
+
+def _process_record(record: Any) -> None:
+    """Apply one record to the in-memory book. Caller must hold _lock.
 
     Recognized types (databento-python ≥0.36):
       - InstrumentDefMsg → instrument metadata
@@ -118,82 +151,102 @@ def on_record(record: Any) -> None:
       - SystemMsg        → server messages, log only
       - ErrorMsg         → server errors, log + surface in /health
     """
-    try:
-        rtype = type(record).__name__
+    rtype = type(record).__name__
 
-        if rtype == "InstrumentDefMsg":
-            with _lock:
-                _instruments[record.instrument_id] = {
-                    "raw_symbol": getattr(record, "raw_symbol", None),
-                    # Strike is stored as int64 fixed-point ($/1e9). pretty_strike_price
-                    # is provided by the SDK for convenience.
-                    "strike": float(getattr(record, "pretty_strike_price", 0.0) or 0.0),
-                    # Expiration is YYYYMMDD int or ns since epoch depending on field.
-                    "expiration": _format_expiration(record),
-                    "contract_type": _format_contract_type(record),
-                    "underlying": getattr(record, "underlying", None),
-                }
-                _counters["definitions"] += 1
-                _counters["last_tick_at_ns"] = time.time_ns()
-            return
+    if rtype == "InstrumentDefMsg":
+        _instruments[record.instrument_id] = {
+            "raw_symbol": getattr(record, "raw_symbol", None),
+            "strike": float(getattr(record, "pretty_strike_price", 0.0) or 0.0),
+            "expiration": _format_expiration(record),
+            "contract_type": _format_contract_type(record),
+            "underlying": getattr(record, "underlying", None),
+        }
+        _counters["definitions"] += 1
+        _counters["last_tick_at_ns"] = time.time_ns()
+        return
 
-        if rtype == "Cmbp1Msg":
-            # OPRA cmbp-1: consolidated NBBO across 18 options venues. Fields
-            # are direct on the record (not in a levels array). pretty_* helpers
-            # convert int64 fixed-point to floats; NaN-equivalent on either side
-            # means no two-sided quote at that venue, which we read as null.
-            bid_px = getattr(record, "pretty_bid_px_00", None)
-            ask_px = getattr(record, "pretty_ask_px_00", None)
-            bid_sz = getattr(record, "bid_sz_00", None)
-            ask_sz = getattr(record, "ask_sz_00", None)
-            with _lock:
-                slot = _book.setdefault(record.instrument_id, {})
-                # NaN protects against the int64 max-value sentinel Databento
-                # uses for unset bid/ask in the raw stream.
-                if bid_px is not None and bid_px == bid_px and bid_px > 0:
-                    slot["bid"] = float(bid_px)
-                else:
-                    slot["bid"] = None
-                if ask_px is not None and ask_px == ask_px and ask_px > 0:
-                    slot["ask"] = float(ask_px)
-                else:
-                    slot["ask"] = None
-                if bid_sz is not None:
-                    slot["bid_size"] = int(bid_sz)
-                if ask_sz is not None:
-                    slot["ask_size"] = int(ask_sz)
-                slot["ts_ns"] = record.ts_event
-                _counters["quotes"] += 1
-                _counters["last_tick_at_ns"] = time.time_ns()
-            return
+    if rtype == "Cmbp1Msg":
+        bid_px = getattr(record, "pretty_bid_px_00", None)
+        ask_px = getattr(record, "pretty_ask_px_00", None)
+        bid_sz = getattr(record, "bid_sz_00", None)
+        ask_sz = getattr(record, "ask_sz_00", None)
+        slot = _book.setdefault(record.instrument_id, {})
+        if bid_px is not None and bid_px == bid_px and bid_px > 0:
+            slot["bid"] = float(bid_px)
+        else:
+            slot["bid"] = None
+        if ask_px is not None and ask_px == ask_px and ask_px > 0:
+            slot["ask"] = float(ask_px)
+        else:
+            slot["ask"] = None
+        if bid_sz is not None:
+            slot["bid_size"] = int(bid_sz)
+        if ask_sz is not None:
+            slot["ask_size"] = int(ask_sz)
+        slot["ts_ns"] = record.ts_event
+        _counters["quotes"] += 1
+        _counters["last_tick_at_ns"] = time.time_ns()
+        return
 
-        if rtype == "TradeMsg":
-            price = float(getattr(record, "pretty_price", 0.0) or 0.0)
-            size = int(getattr(record, "size", 0) or 0)
-            ts_ns = record.ts_event
-            with _lock:
-                slot = _book.setdefault(record.instrument_id, {})
-                if price > 0:
-                    slot["last"] = price
-                history = _trade_history[record.instrument_id]
-                history.append((ts_ns, size))
-                _counters["trades"] += 1
-                _counters["last_tick_at_ns"] = time.time_ns()
-            return
+    if rtype == "TradeMsg":
+        price = float(getattr(record, "pretty_price", 0.0) or 0.0)
+        size = int(getattr(record, "size", 0) or 0)
+        ts_ns = record.ts_event
+        slot = _book.setdefault(record.instrument_id, {})
+        if price > 0:
+            slot["last"] = price
+        history = _trade_history[record.instrument_id]
+        history.append((ts_ns, size))
+        _counters["trades"] += 1
+        _counters["last_tick_at_ns"] = time.time_ns()
+        return
 
-        if rtype == "ErrorMsg":
-            msg = getattr(record, "err", str(record))
-            log.warning("server error: %s", msg)
-            with _lock:
-                _counters["last_error"] = str(msg)[:240]
-            return
+    if rtype == "ErrorMsg":
+        msg = getattr(record, "err", str(record))
+        log.warning("server error: %s", msg)
+        _counters["last_error"] = str(msg)[:240]
+        return
 
-        if rtype == "SystemMsg":
-            log.info("system: %s", getattr(record, "msg", ""))
-            return
+    if rtype == "SystemMsg":
+        log.info("system: %s", getattr(record, "msg", ""))
+        return
 
-    except Exception:  # noqa: BLE001 — never let one bad record kill the stream
-        log.exception("on_record dispatch failed for type=%s", type(record).__name__)
+
+def _run_worker() -> None:
+    """Drain the record queue and apply records to the book.
+
+    Batches up to QUEUE_BATCH records per lock acquisition to amortize the
+    lock-acquire/release cost across many quotes. On an empty queue, sleeps
+    briefly so the worker doesn't burn CPU spinning during off-hours.
+    """
+    while True:
+        # Block on the first record so we don't busy-spin when idle.
+        try:
+            first = _record_queue.get(timeout=1.0)
+        except queue.Empty:
+            continue
+
+        batch: list[Any] = [first]
+        # Drain everything currently available, up to QUEUE_BATCH.
+        while len(batch) < QUEUE_BATCH:
+            try:
+                batch.append(_record_queue.get_nowait())
+            except queue.Empty:
+                break
+
+        with _lock:
+            for record in batch:
+                try:
+                    _process_record(record)
+                except Exception:  # noqa: BLE001
+                    log.exception(
+                        "process_record failed for type=%s",
+                        type(record).__name__,
+                    )
+            _counters["processed"] += len(batch)
+            depth = _record_queue.qsize()
+            if depth > _counters["queue_depth_peak"]:
+                _counters["queue_depth_peak"] = depth
 
 
 def _format_expiration(record: Any) -> str | None:
@@ -253,6 +306,9 @@ class Handler(BaseHTTPRequestHandler):
                     "definitions": _counters["definitions"],
                     "quotes": _counters["quotes"],
                     "trades": _counters["trades"],
+                    "processed": _counters["processed"],
+                    "queue_depth": _record_queue.qsize(),
+                    "queue_depth_peak": _counters["queue_depth_peak"],
                     "last_error": _counters["last_error"],
                     "now": _now_iso(),
                 }
@@ -359,6 +415,8 @@ def run_live_client() -> None:
 def main() -> int:
     http_thread = threading.Thread(target=run_http_server, name="http", daemon=True)
     http_thread.start()
+    worker_thread = threading.Thread(target=_run_worker, name="record-worker", daemon=True)
+    worker_thread.start()
     try:
         run_live_client()
     except KeyboardInterrupt:

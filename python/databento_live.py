@@ -176,6 +176,34 @@ def _process_record(record: Any) -> None:
         _counters["last_tick_at_ns"] = time.time_ns()
         return
 
+    if rtype_norm == "symbolmappingmsg":
+        # databento-python ≥0.40 with `stype_in="parent"` delivers ALL the
+        # contract metadata we need via SymbolMappingMsg + Cmbp1Msg and stops
+        # emitting InstrumentDefMsg entirely. The raw OPRA symbol carries
+        # strike/expiry/type in the OCC 21-char format:
+        #   "GLD   260612C00416000"
+        #   └─ ticker (6, padded)
+        #         └─ YYMMDD expiry
+        #               └─ C/P
+        #                └─ strike × 1000, 8 digits
+        # parse_occ_symbol() handles the format; SymbolMappingMsg also carries
+        # the parent-symbol → instrument_id mapping we'd otherwise get from
+        # InstrumentDefMsg, so populating _instruments here is functionally
+        # equivalent for the downstream chain response.
+        raw = getattr(record, "stype_in_symbol", None) or getattr(record, "raw_symbol", None)
+        parsed = _parse_occ_symbol(raw) if raw else None
+        if parsed:
+            _instruments[record.instrument_id] = {
+                "raw_symbol": raw,
+                "strike": parsed["strike"],
+                "expiration": parsed["expiration"],
+                "contract_type": parsed["contract_type"],
+                "underlying": parsed["underlying"],
+            }
+            _counters["definitions"] += 1
+            _counters["last_tick_at_ns"] = time.time_ns()
+        return
+
     if rtype_norm == "cmbp1msg":
         bid_px = getattr(record, "pretty_bid_px_00", None)
         ask_px = getattr(record, "pretty_ask_px_00", None)
@@ -258,6 +286,40 @@ def _run_worker() -> None:
             depth = _record_queue.qsize()
             if depth > _counters["queue_depth_peak"]:
                 _counters["queue_depth_peak"] = depth
+
+
+def _parse_occ_symbol(symbol: str) -> dict[str, Any] | None:
+    """Parse an OPRA OCC 21-char option symbol like 'GLD   260612C00416000'
+    into its components. Returns None on any malformed input — the caller is
+    expected to skip the record rather than raise.
+
+    Layout:
+      [0..6)  underlying (right-padded with spaces, e.g. 'GLD   ' or 'SPY   ')
+      [6..12) YYMMDD expiry (e.g. '260612' → 2026-06-12). 2-digit year is
+              assumed 20YY (OCC standard; covers contracts out to 2099).
+      [12]    'C' (call) or 'P' (put)
+      [13..21) 8-digit strike × 1000 (e.g. '00416000' → $416.000)
+    """
+    if not symbol or len(symbol) < 21:
+        return None
+    s = symbol if len(symbol) == 21 else symbol.ljust(21)
+    try:
+        underlying = s[0:6].strip()
+        yy = int(s[6:8])
+        mm = int(s[8:10])
+        dd = int(s[10:12])
+        cp = s[12]
+        strike_raw = int(s[13:21])
+    except (ValueError, IndexError):
+        return None
+    if not underlying or cp not in ("C", "P") or mm < 1 or mm > 12 or dd < 1 or dd > 31:
+        return None
+    return {
+        "underlying": underlying,
+        "expiration": f"20{yy:02d}-{mm:02d}-{dd:02d}",
+        "contract_type": "call" if cp == "C" else "put",
+        "strike": strike_raw / 1000.0,
+    }
 
 
 def _format_expiration(record: Any) -> str | None:

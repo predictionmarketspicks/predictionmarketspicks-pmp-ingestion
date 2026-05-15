@@ -12,10 +12,17 @@ methodology in Node (where the existing fallback solver in
 src/engine/options.js already lives) while the binary-protocol layer
 runs in a thoroughly-tested SDK.
 
-Scope (Phase 1): SLV only. Subscribes to OPRA.PILLAR for schemas
-mbp-1 (top of book, every quote), definition (strike/expiry/type),
-and trades (last price + cumulative volume). Holds the book in memory,
-exposes it as JSON on GET /chain/<underlying>.
+Scope: multi-underlying (DATABENTO_SYMBOLS, default SLV.OPT). Subscribes
+to OPRA.PILLAR for four schemas:
+  - definition  → strike / expiry / contract type (one per instrument)
+  - cmbp-1      → consolidated NBBO across all 18 options venues (the
+                  workhorse — every quote update)
+  - trades      → trade prints (last price + 24h rolling volume)
+  - statistics  → daily EOD (open_interest for dealer-gamma weighting)
+Holds the book in memory, exposes it as JSON on GET /chain/<underlying>.
+Pre-filters far-dated instruments at the SDK callback (>DATABENTO_MAX_-
+EXPIRY_DAYS, default 60) to keep GIL pressure off the reader thread on
+peak-volume sessions.
 
 Health: GET /health returns connectivity + tick counters. Node polls
 this every 30s and routes it into observability/health.js so the existing
@@ -44,6 +51,15 @@ DATASET = "OPRA.PILLAR"
 SYMBOLS = (os.environ.get("DATABENTO_SYMBOLS") or "SLV.OPT").split(",")
 LISTEN_HOST = os.environ.get("DATABENTO_SIDECAR_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("DATABENTO_SIDECAR_PORT", "9090"))
+
+# Cap how far out an option's expiry must be to stay subscribed. OPRA's firehose
+# is dominated by LEAPS and quarter-out contracts that the engine never trades
+# (commodity-base.js filters to weekly/monthly near-term events). Dropping these
+# at the SDK callback — before the queue, before the lock — keeps GIL pressure
+# off the SDK reader thread on peak-volume days (OPEX, FOMC). Tunable via
+# DATABENTO_MAX_EXPIRY_DAYS; 60 days covers every event ticker the Kalshi
+# series currently lists, with a comfortable buffer.
+MAX_EXPIRY_DAYS = int(os.environ.get("DATABENTO_MAX_EXPIRY_DAYS", "60"))
 
 # 24h trade-volume window. Rolling sum keyed by (instrument_id) over deque
 # of (ts_ns, size). The bound here caps memory if a strike sees pathological
@@ -83,6 +99,12 @@ _instruments: dict[int, dict[str, Any]] = {}
 _book: dict[int, dict[str, Any]] = {}
 _trade_history: dict[int, deque[tuple[int, int]]] = defaultdict(deque)
 _record_queue: queue.SimpleQueue = queue.SimpleQueue()
+# Pre-filter passlist. Written by the worker when it classifies an instrument
+# from its SymbolMappingMsg/InstrumentDefMsg (expiry beyond MAX_EXPIRY_DAYS).
+# Read lock-free by the SDK callback so it can drop matching records before
+# they enter the queue. set.__contains__ is a single C-level hash lookup —
+# atomic w.r.t. concurrent .add() in CPython, so no lock is needed.
+_drop_instrument: set[int] = set()
 # rtype name → count. Tracks every distinct record class name the SDK
 # delivers so we can see when (e.g.) Cmbp1Msg gets renamed by an SDK
 # upgrade or when we're getting unexpected message types.
@@ -94,13 +116,22 @@ _counters = {
     "definitions": 0,
     "quotes": 0,
     "trades": 0,
+    "stats": 0,
+    "oi_updates": 0,
     "enqueued": 0,
     "processed": 0,
     "queue_depth_peak": 0,
+    "callback_dropped": 0,
     "last_tick_at_ns": 0,
     "last_error": None,
     "connected_at_ns": 0,
 }
+
+# DBN StatType code for daily open interest, per
+# https://databento.com/docs/standards-and-conventions/common-fields-enums-types.
+# Compare against the int rather than databento.StatType.OPEN_INTEREST so an
+# SDK rename or import-path shuffle doesn't silently drop OI updates.
+STAT_TYPE_OPEN_INTEREST = 9
 
 
 def _now_iso() -> str:
@@ -135,10 +166,16 @@ def on_record(record: Any) -> None:
     fast enough that the gateway never declares us a slow client on high-vol
     days (OPEX, FOMC, etc).
 
-    SimpleQueue.put is implemented as a single atomic deque append in CPython
-    — sub-microsecond per call, no GIL contention beyond the deque mutation
-    itself.
+    Pre-filter: instruments classified for drop by the worker (far-dated
+    expiries) short-circuit here. set.__contains__ is atomic in CPython —
+    safe to read concurrent with worker .add(). Counter increment is also
+    a single bytecode hot enough to skip the lock; a few lost increments
+    under contention is acceptable for an observability counter.
     """
+    iid = getattr(record, "instrument_id", None)
+    if iid is not None and iid in _drop_instrument:
+        _counters["callback_dropped"] += 1
+        return
     _record_queue.put(record)
 
 
@@ -168,13 +205,15 @@ def _process_record(record: Any) -> None:
     rtype_norm = rtype.lower()
 
     if rtype_norm == "instrumentdefmsg":
+        expiration = _format_expiration(record)
         _instruments[record.instrument_id] = {
             "raw_symbol": getattr(record, "raw_symbol", None),
             "strike": float(getattr(record, "pretty_strike_price", 0.0) or 0.0),
-            "expiration": _format_expiration(record),
+            "expiration": expiration,
             "contract_type": _format_contract_type(record),
             "underlying": getattr(record, "underlying", None),
         }
+        _classify_instrument_drop(record.instrument_id, expiration)
         _counters["definitions"] += 1
         _counters["last_tick_at_ns"] = time.time_ns()
         return
@@ -211,6 +250,7 @@ def _process_record(record: Any) -> None:
                 "contract_type": parsed["contract_type"],
                 "underlying": parsed["underlying"],
             }
+            _classify_instrument_drop(record.instrument_id, parsed["expiration"])
             _counters["definitions"] += 1
             _counters["last_tick_at_ns"] = time.time_ns()
         return
@@ -249,6 +289,22 @@ def _process_record(record: Any) -> None:
         history.append((ts_ns, size))
         _counters["trades"] += 1
         _counters["last_tick_at_ns"] = time.time_ns()
+        return
+
+    if rtype_norm == "statmsg":
+        # OPRA.PILLAR statistics: daily EOD prints. OPEN_INTEREST is the only
+        # field the dealer-gamma compute needs (settlement/high/low are nice
+        # to have but the engine doesn't use them today). One update per
+        # instrument per session — values persist between updates.
+        _counters["stats"] += 1
+        _counters["last_tick_at_ns"] = time.time_ns()
+        stat_type = getattr(record, "stat_type", None)
+        if stat_type == STAT_TYPE_OPEN_INTEREST:
+            quantity = getattr(record, "quantity", None)
+            if quantity is not None and quantity >= 0:
+                slot = _book.setdefault(record.instrument_id, {})
+                slot["open_interest"] = int(quantity)
+                _counters["oi_updates"] += 1
         return
 
     if rtype_norm == "errormsg":
@@ -297,6 +353,39 @@ def _run_worker() -> None:
             depth = _record_queue.qsize()
             if depth > _counters["queue_depth_peak"]:
                 _counters["queue_depth_peak"] = depth
+
+
+def _days_to_expiry(expiry_iso: str | None, now_ns: int | None = None) -> int | None:
+    """Days from now to YYYY-MM-DD expiry. Returns None on malformed input.
+    Negative when already expired — caller should drop those instruments.
+    """
+    if not expiry_iso or len(expiry_iso) < 10:
+        return None
+    try:
+        yy, mm, dd = int(expiry_iso[0:4]), int(expiry_iso[5:7]), int(expiry_iso[8:10])
+    except ValueError:
+        return None
+    # struct_time month/day are 1-indexed; use a tuple → epoch conversion that
+    # doesn't pull in datetime/timezone overhead at hot-path scale.
+    try:
+        exp_epoch = time.mktime((yy, mm, dd, 0, 0, 0, 0, 0, 0))
+    except (OverflowError, ValueError):
+        return None
+    now_s = (now_ns or time.time_ns()) / 1_000_000_000
+    return int((exp_epoch - now_s) / 86400)
+
+
+def _classify_instrument_drop(instrument_id: int, expiry_iso: str | None) -> None:
+    """Decide whether to drop quotes for this instrument. Called from the
+    worker when an InstrumentDefMsg or SymbolMappingMsg lands.
+
+    Anything more than MAX_EXPIRY_DAYS out (or already expired, or with
+    unparseable expiry) is added to _drop_instrument. Subsequent Cmbp1Msg /
+    TradeMsg records for that id are short-circuited at the SDK callback.
+    """
+    days = _days_to_expiry(expiry_iso)
+    if days is None or days < 0 or days > MAX_EXPIRY_DAYS:
+        _drop_instrument.add(instrument_id)
 
 
 def _parse_occ_symbol(symbol: str) -> dict[str, Any] | None:
@@ -390,9 +479,14 @@ class Handler(BaseHTTPRequestHandler):
                     "definitions": _counters["definitions"],
                     "quotes": _counters["quotes"],
                     "trades": _counters["trades"],
+                    "stats": _counters["stats"],
+                    "oi_updates": _counters["oi_updates"],
                     "processed": _counters["processed"],
                     "queue_depth": _record_queue.qsize(),
                     "queue_depth_peak": _counters["queue_depth_peak"],
+                    "callback_dropped": _counters["callback_dropped"],
+                    "drop_filter_size": len(_drop_instrument),
+                    "max_expiry_days": MAX_EXPIRY_DAYS,
                     "last_error": _counters["last_error"],
                     "now": _now_iso(),
                 }
@@ -434,7 +528,10 @@ def build_chain_response(underlying: str) -> dict[str, Any]:
                 "ask_size": quote.get("ask_size"),
                 "last": quote.get("last"),
                 "volume_24h": volume24h,
-                "open_interest": None,  # OPRA OI lives on the daily statistics schema (Phase 2)
+                # OPRA OI flows in via the daily statistics schema (StatMsg
+                # with stat_type=OPEN_INTEREST). Persists between updates;
+                # None until the first session's EOD print lands.
+                "open_interest": quote.get("open_interest"),
                 "ts": _ns_to_iso(quote.get("ts_ns")),
             })
     return {
@@ -476,7 +573,12 @@ def run_live_client() -> None:
     # cmbp-1 is the consolidated NBBO across all 18 options venues, which is
     # what we actually want for mid-quote pricing. tcbbo is the lower-volume
     # trade-time variant; cmbp-1 is the workhorse.
-    for schema in ("definition", "cmbp-1", "trades"):
+    #
+    # statistics: daily EOD prints (open_interest, settlement, session high/low).
+    # Required for dealer-gamma compute, which weights each strike's gamma by
+    # OI. Without this the gamma engine reports strikesContributing=0 because
+    # the cmbp-1 + trades schemas don't carry OI at all.
+    for schema in ("definition", "cmbp-1", "trades", "statistics"):
         client.subscribe(
             dataset=DATASET,
             schema=schema,
@@ -506,13 +608,18 @@ def _run_heartbeat() -> None:
         with _lock:
             type_breakdown = ", ".join(f"{k}={v}" for k, v in _type_counts.most_common(10))
             log.info(
-                "heartbeat defs=%d quotes=%d trades=%d processed=%d queue_depth=%d peak=%d types=[%s] last_err=%s",
+                "heartbeat defs=%d quotes=%d trades=%d stats=%d oi=%d processed=%d "
+                "queue_depth=%d peak=%d callback_dropped=%d drop_filter=%d types=[%s] last_err=%s",
                 _counters["definitions"],
                 _counters["quotes"],
                 _counters["trades"],
+                _counters["stats"],
+                _counters["oi_updates"],
                 _counters["processed"],
                 _record_queue.qsize(),
                 _counters["queue_depth_peak"],
+                _counters["callback_dropped"],
+                len(_drop_instrument),
                 type_breakdown,
                 (_counters["last_error"] or "none")[:120],
             )

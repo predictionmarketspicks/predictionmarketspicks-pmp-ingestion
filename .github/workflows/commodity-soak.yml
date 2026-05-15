@@ -1,0 +1,45 @@
+name: Commodity Engine Soak
+
+# Runs after options market close (21:00 UTC = 5 PM ET) on weekdays.
+# Validates today's commodity_edge_signals writes against the soak criteria
+# defined in scripts/soak-commodities.js. Posts a summary to #bot-logs either
+# way. Fail status surfaces on the GH Actions dashboard.
+#
+# Handoff: SILVER_EDGE_GUARDS_2026-05-15.md.
+
+on:
+  schedule:
+    - cron: '0 21 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      commodities:
+        description: 'Comma-separated commodities to check (default: silver,gold,oil)'
+        type: string
+        default: 'silver,gold,oil'
+      date:
+        description: 'UTC date YYYY-MM-DD (default: today)'
+        type: string
+        default: ''
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Run soak validator
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DISCORD_BOT_TOKEN:    ${{ secrets.DISCORD_BOT_TOKEN }}
+          SOAK_COMMODITIES:     ${{ github.event.inputs.commodities || 'silver,gold,oil' }}
+          SOAK_DATE:            ${{ github.event.inputs.date }}
+        run: node scripts/soak-commodities.js

@@ -36,6 +36,71 @@ import { getOilSpot, getUsoChain, getContractSpot } from '../feeds/yahoo-oil.js'
 import { getFredDailyClose } from '../feeds/fred.js';
 import { fetchEvent, getNextEvent } from '../feeds/kalshi-event.js';
 import { getActiveSettleContract } from '../feeds/kalshi-series.js';
+import { isOptionsMarketOpen } from '../feeds/massive.js';
+import { recordGuardRejection, recordGuardOk } from '../observability/health.js';
+
+// Snapshot-write guards. Hardening added after the 2026-05-15 Databento cutover
+// surfaced a cold-start IV-solver bail-out (handoff: SILVER_EDGE_GUARDS_2026-05-15).
+// Provider-agnostic — a no-op on Massive (server-side IV passes magnitude +
+// smile-coherence trivially), real safety net on Databento or any future
+// provider that re-engages the Brent solver in src/engine/options.js.
+const MIN_STRIKES_PER_SNAPSHOT = 5;
+const IV_HARD_CAP = 3.0;
+const SMILE_CLUSTER_IV_FLOOR = 3.5;
+const SMILE_CLUSTER_EPS = 0.02;
+const SMILE_CLUSTER_LEN = 3;
+const firstSnapshotWritten = new Map(); // commodity → true once one clean parity write has landed this session
+let prevMarketOpen = null; // tracks options-market-open transition for session reset
+
+function maybeResetSessionFlags(now = new Date()) {
+  const open = isOptionsMarketOpen(now);
+  if (prevMarketOpen === false && open === true) {
+    firstSnapshotWritten.clear();
+  }
+  prevMarketOpen = open;
+}
+
+function smileCoherenceCheck(rows) {
+  const high = rows
+    .filter((r) => r.options_iv != null && r.options_iv >= SMILE_CLUSTER_IV_FLOOR)
+    .map((r) => r.options_iv);
+  if (high.length < SMILE_CLUSTER_LEN) return { ok: true };
+  high.sort((a, b) => a - b);
+  let cluster = 1;
+  for (let i = 1; i < high.length; i++) {
+    if (Math.abs(high[i] - high[i - 1]) <= SMILE_CLUSTER_EPS) cluster++;
+    else cluster = 1;
+    if (cluster >= SMILE_CLUSTER_LEN) {
+      return {
+        ok: false,
+        reason: 'smile_cluster',
+        detail: { ivs: high.slice(i - SMILE_CLUSTER_LEN + 1, i + 1) },
+      };
+    }
+  }
+  return { ok: true };
+}
+
+// Order of operations:
+//   1. Per-row drop: options_iv > IV_HARD_CAP (one bad strike shouldn't kill
+//      the snapshot; smile interpolation already excludes IV > 1.5 contributors
+//      but downstream `atmIv` can leak a ceiling-pegged value through).
+//   2. Guard A — min strikes: filtered rows.length >= MIN_STRIKES_PER_SNAPSHOT.
+//   3. Guard B — cold-start spot freshness: if firstSnapshotWritten[commodity]
+//      is not set AND spot_source = 'prev_close_bridge', reject. Lets mid-session
+//      thin-book gaps fall back to prev-close without bailing the engine, but
+//      a fresh session must prove parity before any data lands.
+//   4. Guard C — smile coherence: ≥3 strikes with IV ≥ 3.5 within 0.02 of each
+//      other clusters at the solver ceiling. Real vol smiles don't cluster.
+function validateSnapshot(rows, { commodity, spotSource }) {
+  if (rows.length < MIN_STRIKES_PER_SNAPSHOT) {
+    return { ok: false, reason: 'min_strikes', detail: { count: rows.length } };
+  }
+  if (!firstSnapshotWritten.get(commodity) && spotSource === 'prev_close_bridge') {
+    return { ok: false, reason: 'cold_start_prev_close', detail: { spotSource } };
+  }
+  return smileCoherenceCheck(rows);
+}
 
 // ---------- Kalshi probability inference ----------
 // Direct port of KalshiMarket.yes_implied_prob in commodity_edge/src/kalshi.py.
@@ -364,7 +429,36 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     });
   }
 
-  const actionable = rows.filter((r) => r.edge_pp != null && (r.direction === 'BUY YES' || r.direction === 'BUY NO'));
+  // ---- Snapshot guards (handoff: SILVER_EDGE_GUARDS_2026-05-15) ----
+  // Per-row IV cap first (so one bad strike doesn't kill the snapshot).
+  const ivCapped = rows.filter((r) => r.options_iv == null || r.options_iv <= IV_HARD_CAP);
+  const ivDropped = rows.length - ivCapped.length;
+  if (ivDropped > 0) {
+    console.warn(
+      `[${config.commodity}] iv_cap dropped ${ivDropped} row(s) with options_iv > ${IV_HARD_CAP}`,
+    );
+  }
+
+  maybeResetSessionFlags(now);
+  const validation = validateSnapshot(ivCapped, {
+    commodity: config.commodity,
+    spotSource: spot.source,
+  });
+  if (!validation.ok) {
+    console.warn(
+      `[${config.commodity}] snapshot guard rejected (${validation.reason}): ${JSON.stringify(validation.detail)}`,
+    );
+    // Fire telemetry async; do not await — the engine moves on to the next tick.
+    recordGuardRejection(config.commodity, validation.reason, validation.detail).catch(() => {});
+    return null;
+  }
+  // First clean write of the session — unlatch Guard B so mid-session
+  // prev_close_bridge fallbacks are tolerated.
+  firstSnapshotWritten.set(config.commodity, true);
+  recordGuardOk(config.commodity).catch(() => {});
+
+  const filteredRows = ivCapped;
+  const actionable = filteredRows.filter((r) => r.edge_pp != null && (r.direction === 'BUY YES' || r.direction === 'BUY NO'));
   let topEdge = null;
   if (actionable.length > 0) {
     topEdge = actionable.reduce((best, cur) => (Math.abs(cur.edge_pp) > Math.abs(best.edge_pp) ? cur : best));
@@ -397,7 +491,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       atmIv: smile.atmIv,
       generatedAt: now.toISOString(),
       hoursToClose: (closeMs - now.getTime()) / 3.6e6,
-      strikeCount: rows.length,
+      strikeCount: filteredRows.length,
       topEdge,
       topTier: finalTopTier,
       topTierInt: confidenceTierInt(finalTopTier),
@@ -407,7 +501,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       fredObservationDate,
       divergenceWarning,
     },
-    rows,
+    rows: filteredRows,
   };
 }
 
@@ -415,4 +509,10 @@ export const __test__ = {
   buildIvSmile,
   kalshiYesImpliedProb,
   classifyKalshiView,
+  validateSnapshot,
+  smileCoherenceCheck,
+  IV_HARD_CAP,
+  MIN_STRIKES_PER_SNAPSHOT,
+  // Test seam: lets unit tests force the first-snapshot flag.
+  _firstSnapshotWritten: firstSnapshotWritten,
 };

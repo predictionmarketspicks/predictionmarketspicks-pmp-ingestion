@@ -19,6 +19,9 @@
 //     to tick must not flap the monitor. The Fly check has a 30s grace_period
 //     of its own — this stacks on top.
 
+import { getClient } from '../delivery/supabase.js';
+import { postBotLog } from '../delivery/discord.js';
+
 const startedAt = Date.now();
 
 const feeds = new Map();
@@ -85,6 +88,83 @@ export function evaluateLiveness(nowMs = Date.now()) {
     }
   }
   return { healthy: stale.length === 0, inMarketHours, thresholdMs, uptimeMs, grace: false, stale };
+}
+
+// Guard-rejection telemetry. Called from commodity-base.js when validateSnapshot
+// blocks a write. Two side effects: Discord embed to #bot-logs (rate-limited to
+// 1 per (commodity, reason) per 5min so a 30-min outage doesn't spam the channel)
+// and a data_health upsert so /admin/oracle-health surfaces it alongside feed
+// liveness. Pure-fire-and-forget: errors are swallowed so a Discord/Supabase
+// outage cannot cascade into engine failure.
+const guardRejectionLastFire = new Map(); // `${commodity}:${reason}` → ms
+const GUARD_REJECTION_COOLDOWN_MS = 5 * 60 * 1000;
+
+export async function recordGuardRejection(commodity, reason, detail = {}) {
+  setFeedStatus(`${commodity}_engine`, { lastError: `guard_${reason}_failed` });
+
+  const key = `${commodity}:${reason}`;
+  const now = Date.now();
+  const last = guardRejectionLastFire.get(key) || 0;
+  const shouldPost = now - last >= GUARD_REJECTION_COOLDOWN_MS;
+  if (shouldPost) {
+    guardRejectionLastFire.set(key, now);
+    const lines = [
+      `Engine guard rejected ${commodity} snapshot`,
+      `Commodity: ${commodity}`,
+      `Reason: ${reason}`,
+      `Detail: ${JSON.stringify(detail).slice(0, 600)}`,
+      `At: ${new Date(now).toISOString()}`,
+    ];
+    try {
+      await postBotLog(lines.join('\n'));
+    } catch (err) {
+      console.warn(`[guard] discord post failed: ${err?.message || err}`);
+    }
+  }
+
+  try {
+    const sb = getClient();
+    const { error } = await sb
+      .from('data_health')
+      .upsert(
+        {
+          check_id: `commodity_engine_${commodity}`,
+          status: 'unhealthy',
+          stale_count: 1,
+          total_checked: 1,
+          details: { reason, detail, snapshot_at: new Date(now).toISOString() },
+          checked_at: new Date(now).toISOString(),
+        },
+        { onConflict: 'check_id' },
+      );
+    if (error) console.warn(`[guard] data_health upsert failed: ${error.message}`);
+  } catch (err) {
+    console.warn(`[guard] data_health upsert threw: ${err?.message || err}`);
+  }
+}
+
+// Mark a commodity engine as healthy after a clean validateSnapshot pass.
+// Lets /admin/oracle-health recover from a prior rejection without waiting for
+// an out-of-band reset. Same upsert path as recordGuardRejection.
+export async function recordGuardOk(commodity) {
+  try {
+    const sb = getClient();
+    await sb
+      .from('data_health')
+      .upsert(
+        {
+          check_id: `commodity_engine_${commodity}`,
+          status: 'healthy',
+          stale_count: 0,
+          total_checked: 1,
+          details: { snapshot_at: new Date().toISOString() },
+          checked_at: new Date().toISOString(),
+        },
+        { onConflict: 'check_id' },
+      );
+  } catch {
+    // healthy-state writes are advisory; swallow.
+  }
 }
 
 export function snapshot() {

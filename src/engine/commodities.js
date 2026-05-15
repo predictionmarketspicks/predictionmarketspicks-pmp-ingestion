@@ -46,6 +46,12 @@ export const COMMODITIES = {
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
+    // OPRA is dark off-hours and the SLV options book doesn't move, so
+    // writing snapshots overnight just upserts duplicate rows into
+    // commodity_edge_signals. Engine sleeps the snapshot loop off-hours
+    // and resumes at 9:30 AM ET. Pairs with requiredOffHours:false on the
+    // databento_slv readiness gate (src/index.js).
+    pauseSnapshotsOffHours: true,
   },
   gold: {
     commodity: 'gold',
@@ -60,6 +66,9 @@ export const COMMODITIES = {
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
+    // Same as silver — OPRA dark off-hours, GLD book frozen, no new info to
+    // surface. See commodities.silver.pauseSnapshotsOffHours.
+    pauseSnapshotsOffHours: true,
   },
   oil: {
     commodity: 'oil',

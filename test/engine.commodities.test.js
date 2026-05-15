@@ -38,19 +38,16 @@ describe('COMMODITIES registry', () => {
     });
   });
 
-  it('only enables commodities with verified Pyth feeds (silver, gold)', () => {
-    // Phase 2A: oil + copper are scaffolded but disabled. Flip true once the
-    // Pyth feed (or substitute spot source) is verified — see
-    // docs/COMMODITY_FEEDS.md.
+  it('enables silver/gold/oil, leaves copper disabled until a spot source is wired', () => {
     expect(COMMODITIES.silver.enabled).toBe(true);
     expect(COMMODITIES.gold.enabled).toBe(true);
-    expect(COMMODITIES.oil.enabled).toBe(false);
+    expect(COMMODITIES.oil.enabled).toBe(true);
     expect(COMMODITIES.copper.enabled).toBe(false);
   });
 
   it('listEnabledCommodities filters to enabled only', () => {
     const enabled = listEnabledCommodities();
-    expect(enabled.map((c) => c.commodity).sort()).toEqual(['gold', 'silver']);
+    expect(enabled.map((c) => c.commodity).sort()).toEqual(['gold', 'oil', 'silver']);
   });
 
   it('listAllCommodities returns every config', () => {

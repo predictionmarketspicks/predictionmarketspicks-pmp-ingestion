@@ -2,20 +2,29 @@
 // BetterStack pages on the 503 produced by evaluateLiveness, so the threshold
 // + grace logic must stay deterministic and the public surface stable.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 let health;
-
-beforeEach(async () => {
-  // Re-import per test so the module-scoped startedAt resets and required
-  // feeds + tick state don't bleed between cases.
-  vi.resetModules();
-  health = await import('../src/observability/health.js');
-});
 
 const ET_MARKET_NOON = new Date('2026-05-13T16:00:00Z'); // Wed 12:00 ET (DST)
 const ET_OFF_HOURS_LATE = new Date('2026-05-14T06:00:00Z'); // Thu 02:00 ET
 const ET_WEEKEND = new Date('2026-05-09T16:00:00Z'); // Sat 12:00 ET
+
+beforeEach(async () => {
+  // Pin module load to a fixed instant a few days before the test fixtures so
+  // the module-scoped startedAt is stable AND in the past relative to the
+  // Wed/Thu/Sat timestamps below. Without this, once real wall-clock crosses
+  // the fixture dates, every evaluateLiveness call falls into the boot-grace
+  // branch and the threshold tests silently pass-by-default.
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-05-08T00:00:00Z'));
+  vi.resetModules();
+  health = await import('../src/observability/health.js');
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('isUsMarketOpen', () => {
   it('treats a weekday noon ET instant as market hours', () => {
@@ -100,6 +109,36 @@ describe('evaluateLiveness', () => {
     const result = health.evaluateLiveness(t);
     expect(result.healthy).toBe(false);
     expect(result.stale.map((s) => s.name)).toEqual(['polymarket']);
+  });
+
+  it('drops requiredOffHours:false feeds from the gate when off-hours but keeps them during market hours', () => {
+    // Databento feeds: OPRA dark off-hours, engine deliberately pauses writes,
+    // so the feed is intentionally idle overnight and shouldn't 503 /health.
+    health.markFeedRequired('databento_slv', {
+      maxStaleMs: 60 * 1000,
+      requiredOffHours: false,
+    });
+
+    // Off-hours: arbitrarily stale (or never ticked) is fine — the feed is
+    // dropped from the gate entirely.
+    const offMs = ET_OFF_HOURS_LATE.getTime();
+    health.setFeedStatus('databento_slv', { lastTickAt: offMs - 30 * 60 * 1000 });
+    expect(health.evaluateLiveness(offMs).healthy).toBe(true);
+    // Even if it never ticked at all, off-hours readiness still passes.
+    health.setFeedStatus('databento_slv', { lastTickAt: null });
+    expect(health.evaluateLiveness(offMs).healthy).toBe(true);
+
+    // Market hours: the 60s maxStaleMs applies, never_ticked fails, 95s fails.
+    const marketMs = ET_MARKET_NOON.getTime();
+    health.setFeedStatus('databento_slv', { lastTickAt: null });
+    expect(health.evaluateLiveness(marketMs).healthy).toBe(false);
+    health.setFeedStatus('databento_slv', { lastTickAt: marketMs - 95_000 });
+    const marketStale = health.evaluateLiveness(marketMs);
+    expect(marketStale.healthy).toBe(false);
+    expect(marketStale.stale[0]).toMatchObject({
+      name: 'databento_slv',
+      thresholdMs: 60 * 1000,
+    });
   });
 
   it('honors per-feed maxStaleMs override beyond the global threshold', () => {

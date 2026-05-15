@@ -126,12 +126,17 @@ for (const config of enabledCommodities) {
     markFeedRequired('yahoo_cl_f_spot', { maxStaleMs: 17 * 60 * 1000 });
     markFeedRequired('yahoo_uso_chain', { maxStaleMs: 17 * 60 * 1000 });
   } else {
-    // Stale threshold is provider-aware: Databento polls at 5s (sidecar HTTP
-    // every market tick), Massive at 15min. 17min covers Massive's worst
-    // case; Databento is well inside that. Tighten in a Phase 2 cleanup
-    // once Massive is retired.
-    const staleMs = OPTIONS_PROVIDER === 'databento' ? 60 * 1000 : 17 * 60 * 1000;
-    markFeedRequired(requiredFeedName(config.underlyingEtf), { maxStaleMs: staleMs });
+    // Databento polls at 5s during market hours via the sidecar. Off-hours
+    // OPRA is dark, the sidecar's book doesn't move, and the engine
+    // deliberately pauses writes (commodities.js → pauseSnapshotsOffHours),
+    // so we drop the feed from the readiness gate off-hours rather than
+    // false-paging on an intentionally idle source. Massive's 15min delayed
+    // poll runs 24/5, so it keeps its single 17min override across both
+    // windows.
+    const staleOpts = OPTIONS_PROVIDER === 'databento'
+      ? { maxStaleMs: 60 * 1000, requiredOffHours: false }
+      : { maxStaleMs: 17 * 60 * 1000 };
+    markFeedRequired(requiredFeedName(config.underlyingEtf), staleOpts);
     markFeedRequired(`pyth_${config.pythSymbol.replace(/[/]/g, '_').toLowerCase()}`);
   }
   registerFeed(`${config.commodity}_engine`);
@@ -318,16 +323,37 @@ function isInExpirationWindow(ev) {
   return msToClose > 0 && msToClose <= EXPIRATION_BURST_WINDOW_MS;
 }
 
+// Off-hours dormant interval for commodities that pause writes overnight. We
+// don't need to wake more often than this — the next loop just checks whether
+// the market is open yet and either schedules a real snapshot or sleeps again.
+const OFF_HOURS_DORMANT_CHECK_MS = 10 * 60 * 1000;
+
 function scheduleSnapshot(state) {
   if (stopRequested) return;
   const { config } = state;
   const inBurst = isInExpirationWindow(state.currentEvent);
+  const marketOpen = isOptionsMarketOpen();
+
+  // Commodities flagged pauseSnapshotsOffHours (silver/gold on Databento)
+  // skip the off-hours write loop entirely — OPRA is dark, the book hasn't
+  // moved, and re-upserting identical rows into commodity_edge_signals only
+  // wastes DB writes. Still tick on a slow timer so we resume cleanly at
+  // 9:30 AM ET without waiting for the next bootstrap.
+  if (config.pauseSnapshotsOffHours && !inBurst && !marketOpen) {
+    if (state.lastCadence !== 'dormant') {
+      console.log(`[${config.commodity}] cadence → dormant (off-hours, snapshots paused)`);
+      state.lastCadence = 'dormant';
+    }
+    state.snapshotTimer = setTimeout(() => scheduleSnapshot(state), OFF_HOURS_DORMANT_CHECK_MS);
+    return;
+  }
+
   let delay;
   let cadence;
   if (inBurst) {
     delay = config.snapshotIntervalExpirationMs;
     cadence = 'expiration_burst';
-  } else if (isOptionsMarketOpen()) {
+  } else if (marketOpen) {
     delay = config.snapshotIntervalMarketMs;
     cadence = 'market';
   } else {

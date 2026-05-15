@@ -15,6 +15,11 @@
 //     would never clear the global bar, so they register with a 17min
 //     override (15min poll + buffer). The override applies in BOTH market and
 //     off-hours states; it is not multiplied against the global threshold.
+//   - Feeds that are intentionally idle off-hours (e.g. Databento — OPRA is
+//     dark overnight so the sidecar's book doesn't move and we deliberately
+//     skip engine writes) can register with `{ requiredOffHours: false }`.
+//     They stay required during market hours but are dropped from the gate
+//     off-hours so /health doesn't 503 on a feed that we know is paused.
 //   - 60s post-boot grace window: cold-start before any feed has had a chance
 //     to tick must not flap the monitor. The Fly check has a 30s grace_period
 //     of its own — this stacks on top.
@@ -72,6 +77,11 @@ export function evaluateLiveness(nowMs = Date.now()) {
   }
   const stale = [];
   for (const [name, override] of requiredFeeds) {
+    if (!inMarketHours && override.requiredOffHours === false) {
+      // Intentionally idle off-hours (e.g. Databento — OPRA is dark and the
+      // engine deliberately skips writes). Don't gate readiness on it.
+      continue;
+    }
     const f = feeds.get(name);
     if (!f) {
       stale.push({ name, reason: 'unregistered' });
@@ -178,6 +188,7 @@ export function snapshot() {
       lastError: state.lastError,
       required: requiredFeeds.has(name),
       maxStaleMs: requiredFeeds.get(name)?.maxStaleMs ?? null,
+      requiredOffHours: requiredFeeds.get(name)?.requiredOffHours ?? true,
     };
   }
   return {

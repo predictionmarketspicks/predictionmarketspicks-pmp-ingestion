@@ -87,6 +87,9 @@ _record_queue: queue.SimpleQueue = queue.SimpleQueue()
 # delivers so we can see when (e.g.) Cmbp1Msg gets renamed by an SDK
 # upgrade or when we're getting unexpected message types.
 _type_counts: Counter = Counter()
+# One-shot guard: log the first SymbolMappingMsg's full shape so we can
+# pin down which attribute carries the raw OPRA symbol.
+_logged_symmap_shape: bool = False
 _counters = {
     "definitions": 0,
     "quotes": 0,
@@ -182,15 +185,25 @@ def _process_record(record: Any) -> None:
         # emitting InstrumentDefMsg entirely. The raw OPRA symbol carries
         # strike/expiry/type in the OCC 21-char format:
         #   "GLD   260612C00416000"
-        #   └─ ticker (6, padded)
-        #         └─ YYMMDD expiry
-        #               └─ C/P
-        #                └─ strike × 1000, 8 digits
-        # parse_occ_symbol() handles the format; SymbolMappingMsg also carries
-        # the parent-symbol → instrument_id mapping we'd otherwise get from
-        # InstrumentDefMsg, so populating _instruments here is functionally
-        # equivalent for the downstream chain response.
-        raw = getattr(record, "stype_in_symbol", None) or getattr(record, "raw_symbol", None)
+        # Field name varies by SDK version — try the documented candidates in
+        # order and log the actual record shape once on first arrival so we
+        # can pin the right field name without another deploy.
+        global _logged_symmap_shape
+        if not _logged_symmap_shape:
+            try:
+                attrs = {k: getattr(record, k, None) for k in dir(record) if not k.startswith("_") and not callable(getattr(record, k, None))}
+                log.info("first SymbolMappingMsg shape: %s", attrs)
+            except Exception:  # noqa: BLE001
+                log.exception("first SymbolMappingMsg introspection failed")
+            _logged_symmap_shape = True
+
+        raw = (
+            getattr(record, "stype_in_symbol", None)
+            or getattr(record, "raw_symbol", None)
+            or getattr(record, "stype_out_symbol", None)
+            or getattr(record, "symbol", None)
+            or getattr(record, "pretty_symbol", None)
+        )
         parsed = _parse_occ_symbol(raw) if raw else None
         if parsed:
             _instruments[record.instrument_id] = {

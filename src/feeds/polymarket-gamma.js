@@ -19,6 +19,39 @@ const GAMMA_FETCH_TIMEOUT_MS = Number(process.env.GAMMA_FETCH_TIMEOUT_MS || 30_0
 const GAMMA_RETRY_DELAY_MS = Number(process.env.GAMMA_RETRY_DELAY_MS || 800);
 const GAMMA_MAX_ATTEMPTS = 4;
 
+// Curated allowlist of Polymarket tag slugs PMP actually surfaces.
+// Derived 2026-05-15 from caller audit in handoffs/POLYMARKET_FLY_MIGRATION_PLAN.md:
+//   - lib/api/sports.ts          → sports
+//   - lib/api/world.ts           → world
+//   - lib/api/politics.ts        → politics
+//   - lib/api/polymarket.ts      → trending + crypto
+//   - lib/home/get-homepage-mover-boxes.ts → crypto
+//   - ingest-election-2028        → us-election-2028
+//   - signal-compute + arb-scanner work off slugs that surface via the above
+// Add a slug here ONLY after wiring a consumer that needs it.
+export const POLY_TAG_ALLOWLIST = [
+  'crypto',
+  'politics',
+  'us-election-2028',
+  'world',
+  'sports',         // narrow — Gamma's "sports" tag is the cross-platform set we use
+  'economy',
+  'fed-rate',
+  'culture',        // entertainment / cultural moments
+];
+
+// Pick the most-specific allowlist tag as category. Falls through priority
+// order so `us-election-2028` wins over generic `politics`.
+export function pickCategory(tags) {
+  if (!Array.isArray(tags)) return null;
+  const priority = ['us-election-2028', 'fed-rate', 'economy', 'crypto', 'politics', 'sports', 'world', 'culture'];
+  const tagSlugs = tags
+    .map((t) => (typeof t === 'string' ? t : t?.slug))
+    .filter(Boolean);
+  for (const p of priority) if (tagSlugs.includes(p)) return p;
+  return tagSlugs[0] ?? null;
+}
+
 // Log first N markets per fresh scan so a Gamma field rename is visible.
 // Polymarket has a ship-of-Theseus history (handoff §5) — silent shape drift
 // has bitten us before.
@@ -69,9 +102,25 @@ export async function fetchTopMarkets({ limit = 200, timeoutMs = GAMMA_FETCH_TIM
     const json = await res.json();
     const markets = Array.isArray(json) ? json : Array.isArray(json?.markets) ? json.markets : [];
 
+    // 2026-05-15: filter to allowlist tags. Reduces 200-row payload to ~60–80
+    // rows of markets we actually surface, with no downstream caller change.
+    const filtered = markets.filter((m) => {
+      const tags = Array.isArray(m?.tags) ? m.tags : [];
+      for (const t of tags) {
+        const slug = typeof t === 'string' ? t : t?.slug;
+        if (slug && POLY_TAG_ALLOWLIST.includes(slug)) return true;
+      }
+      return false;
+    });
+
+    // Sanity log — drop a counter so a misconfigured tag list is visible.
+    console.log(
+      `[polymarket-gamma] filtered ${markets.length} → ${filtered.length} after allowlist`,
+    );
+
     let logged = 0;
     const rows = [];
-    for (const m of markets) {
+    for (const m of filtered) {
       if (logged < RAW_SHAPE_LOG_LIMIT) {
         logged += 1;
         console.log(
@@ -103,7 +152,7 @@ export function normalizeMarket(m) {
     condition_id,
     slug,
     question: typeof m.question === 'string' ? m.question : null,
-    category: typeof m.category === 'string' ? m.category : null,
+    category: pickCategory(m.tags) ?? (typeof m.category === 'string' ? m.category : null),
     tags: parseTags(m.tags),
     best_bid: toNumOrNull(m.bestBid),
     best_ask: toNumOrNull(m.bestAsk),
@@ -185,4 +234,4 @@ export function parseTimestamp(v) {
   return new Date(t).toISOString();
 }
 
-export const __test__ = { normalizeMarket, parseTags, parseOutcomes, parseTimestamp, toNumOrNull };
+export const __test__ = { normalizeMarket, parseTags, parseOutcomes, parseTimestamp, toNumOrNull, pickCategory };

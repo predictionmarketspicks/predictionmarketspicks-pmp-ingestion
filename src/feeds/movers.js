@@ -26,45 +26,43 @@ const KALSHI_API_BASE =
 const KALSHI_REST_CONCURRENCY = Number(process.env.KALSHI_REST_CONCURRENCY || 2);
 const KALSHI_REST_RETRY_DELAY_MS = Number(process.env.KALSHI_REST_RETRY_DELAY_MS || 600);
 
-// Validated live with 24h volume on Apr 23, 2026 + extended May 4, 2026 with
-// NBA/ETH/World Cup/MLS series. Keep in sync with macro-movers.ts (Deno) —
-// both feed the same Discord channel during the soak.
+// Single source of truth for what the macro engine ingests into
+// macro_market_snapshots. Curated 2026-05-15 — every series here has a
+// verified site/edge-fn consumer. Sports beyond KXNBAGAME, World Cup KXWC*,
+// and NFL future-pick series intentionally excluded:
+//   - KXNBAGAME → lib/api/draftkings-page.ts (DK NBA comparison)
+//   - World Cup → world_cup_market_snapshot table (separate writer)
+//   - NFL games → nfl_weekly_edges / Gridiron Edge pipeline (separate)
+//   - KXNFLMVP/KXNBAMVP/KXHEISMAN/etc → no consumer, retire
+// Add a series here ONLY when a consumer is shipping that reads it.
 export const KALSHI_SERIES = [
-  { series: 'KXCPIYOY', category: 'Economics' },
-  { series: 'KXGDP', category: 'Economics' },
-  { series: 'KXINXY', category: 'Economics' },
-  { series: 'KXFED', category: 'Economics' },
+  // Economics (5)
+  { series: 'KXCPIYOY',      category: 'Economics' },
+  { series: 'KXGDP',         category: 'Economics' },
+  { series: 'KXINXY',        category: 'Economics' },
+  { series: 'KXFED',         category: 'Economics' },
   { series: 'KXNBERRECESSQ', category: 'Economics' },
 
-  { series: 'KXNFLMVP', category: 'Sports' },
-  { series: 'KXNBAMVP', category: 'Sports' },
+  // Sports — DK comparison only
   { series: 'KXNBAGAME', category: 'Sports' },
-  { series: 'KXNFLDRAFTPICK', category: 'Sports' },
-  { series: 'KXHEISMAN', category: 'Sports' },
-  { series: 'KXSUPERBOWLHEADLINE', category: 'Sports' },
-  { series: 'KXUCLTOTAL', category: 'Sports' },
-  { series: 'KXMLBF5TOTAL', category: 'Sports' },
-  { series: 'KXLALIGABTTS', category: 'Sports' },
-  { series: 'KXATPGRANDSLAM', category: 'Sports' },
-  { series: 'KXMENWORLDCUP', category: 'Sports' },
-  { series: 'KXWCGROUPWIN', category: 'Sports' },
-  { series: 'KXWCGAME', category: 'Sports' },
-  { series: 'KXWCROUND', category: 'Sports' },
-  { series: 'KXWCSQUAD', category: 'Sports' },
-  { series: 'KXMLSGAME', category: 'Sports' },
 
-  { series: 'KXPRESPARTY', category: 'Politics' },
-  { series: 'KXIMPEACH', category: 'Politics' },
+  // Politics (3) — KXNEWOUTBREAK added per macro-movers.ts (Hantavirus momentum play, sunset 2026-06-15)
+  { series: 'KXPRESPARTY',   category: 'Politics' },
+  { series: 'KXIMPEACH',     category: 'Politics' },
+  { series: 'KXNEWOUTBREAK', category: 'Politics' },
 
+  // Crypto (4)
   { series: 'KXBTCMINY', category: 'Crypto' },
   { series: 'KXBTCMAXY', category: 'Crypto' },
-  { series: 'KXBTC15M', category: 'Crypto' },
-  { series: 'KXETH', category: 'Crypto' },
+  { series: 'KXBTC15M',  category: 'Crypto' },
+  { series: 'KXETH',     category: 'Crypto' },
 
+  // Entertainment (1)
   { series: 'KXSURVIVOR', category: 'Entertainment' },
 
+  // Weather (2)
   { series: 'KXHURCTOTMAJ', category: 'Weather' },
-  { series: 'KXRAINAUSM', category: 'Weather' },
+  { series: 'KXRAINAUSM',   category: 'Weather' },
 ];
 
 // Sliding-window concurrency limiter. Returns Promise.allSettled-shape results

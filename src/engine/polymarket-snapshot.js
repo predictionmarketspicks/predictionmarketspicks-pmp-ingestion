@@ -18,13 +18,17 @@ import { isOptionsMarketOpen } from '../feeds/massive.js';
 import { recordTick, registerFeed } from '../observability/health.js';
 import { derivePolymarketTailCandidates, writeTailCandidatesFromBatch } from './tail-edge.js';
 
+// 2026-05-15: dropped from 5min/15min → hourly. 150 runs/day was overkill for
+// data Polymarket itself only refreshes on trade activity. Hourly + the
+// curated allowlist in polymarket-gamma.js = ~24 runs × ~60 slugs ≈ 1.4k
+// rows/day vs 30k/day. See handoffs/done/STORAGE_CLEANUP_2026-05-15.md.
 const SNAPSHOT_INTERVAL_MARKET_MS = Number(
-  process.env.POLY_SNAPSHOT_INTERVAL_MARKET_MS || 5 * 60 * 1000,
+  process.env.POLY_SNAPSHOT_INTERVAL_MARKET_MS || 60 * 60 * 1000,
 );
 const SNAPSHOT_INTERVAL_OFF_MS = Number(
-  process.env.POLY_SNAPSHOT_INTERVAL_OFF_MS || 15 * 60 * 1000,
+  process.env.POLY_SNAPSHOT_INTERVAL_OFF_MS || 60 * 60 * 1000,
 );
-const SNAPSHOT_LIMIT = Number(process.env.POLY_SNAPSHOT_LIMIT || 200);
+const SNAPSHOT_LIMIT = Number(process.env.POLY_SNAPSHOT_LIMIT || 80);
 
 const state = {
   scans: 0,

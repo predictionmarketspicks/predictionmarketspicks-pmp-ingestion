@@ -153,7 +153,9 @@ describe('normalizeMarket', () => {
       condition_id: '0xabc',
       slug: 'will-x-happen',
       question: 'Will X happen?',
-      category: 'Politics',
+      // 2026-05-15: category now derived from tags via pickCategory(); slug
+      // wins over Gamma's free-form `category` string.
+      category: 'politics',
       tags: ['politics'],
       best_bid: 0.42,
       best_ask: 0.45,

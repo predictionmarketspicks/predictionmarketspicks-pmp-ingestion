@@ -412,11 +412,33 @@ def run_live_client() -> None:
     client.block_for_close()
 
 
+def _run_heartbeat() -> None:
+    """Periodic counter snapshot to stdout so fly logs surface quote flow
+    without needing an SSH into the machine. Every 15s, prints:
+      heartbeat defs=N quotes=N trades=N processed=N queue_depth=N peak=N
+    """
+    while True:
+        time.sleep(15)
+        with _lock:
+            log.info(
+                "heartbeat defs=%d quotes=%d trades=%d processed=%d queue_depth=%d peak=%d last_err=%s",
+                _counters["definitions"],
+                _counters["quotes"],
+                _counters["trades"],
+                _counters["processed"],
+                _record_queue.qsize(),
+                _counters["queue_depth_peak"],
+                (_counters["last_error"] or "none")[:120],
+            )
+
+
 def main() -> int:
     http_thread = threading.Thread(target=run_http_server, name="http", daemon=True)
     http_thread.start()
     worker_thread = threading.Thread(target=_run_worker, name="record-worker", daemon=True)
     worker_thread.start()
+    heartbeat_thread = threading.Thread(target=_run_heartbeat, name="heartbeat", daemon=True)
+    heartbeat_thread.start()
     try:
         run_live_client()
     except KeyboardInterrupt:

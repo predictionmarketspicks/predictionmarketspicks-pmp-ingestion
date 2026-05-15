@@ -157,8 +157,14 @@ def _process_record(record: Any) -> None:
     """
     rtype = type(record).__name__
     _type_counts[rtype] += 1
+    # Normalize to handle SDK class-name variants between releases (e.g.
+    # databento-python ≥0.40 ships CMBP1Msg with an upper-cased acronym
+    # while older releases used Cmbp1Msg). Compare against the lowercased
+    # name so a future rename of, say, "ErrorMsg" → "ERRORMsg" doesn't
+    # silently swallow records again.
+    rtype_norm = rtype.lower()
 
-    if rtype == "InstrumentDefMsg":
+    if rtype_norm == "instrumentdefmsg":
         _instruments[record.instrument_id] = {
             "raw_symbol": getattr(record, "raw_symbol", None),
             "strike": float(getattr(record, "pretty_strike_price", 0.0) or 0.0),
@@ -170,7 +176,7 @@ def _process_record(record: Any) -> None:
         _counters["last_tick_at_ns"] = time.time_ns()
         return
 
-    if rtype == "Cmbp1Msg":
+    if rtype_norm == "cmbp1msg":
         bid_px = getattr(record, "pretty_bid_px_00", None)
         ask_px = getattr(record, "pretty_ask_px_00", None)
         bid_sz = getattr(record, "bid_sz_00", None)
@@ -193,7 +199,7 @@ def _process_record(record: Any) -> None:
         _counters["last_tick_at_ns"] = time.time_ns()
         return
 
-    if rtype == "TradeMsg":
+    if rtype_norm == "trademsg":
         price = float(getattr(record, "pretty_price", 0.0) or 0.0)
         size = int(getattr(record, "size", 0) or 0)
         ts_ns = record.ts_event
@@ -206,13 +212,13 @@ def _process_record(record: Any) -> None:
         _counters["last_tick_at_ns"] = time.time_ns()
         return
 
-    if rtype == "ErrorMsg":
+    if rtype_norm == "errormsg":
         msg = getattr(record, "err", str(record))
         log.warning("server error: %s", msg)
         _counters["last_error"] = str(msg)[:240]
         return
 
-    if rtype == "SystemMsg":
+    if rtype_norm == "systemmsg":
         log.info("system: %s", getattr(record, "msg", ""))
         return
 

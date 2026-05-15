@@ -197,13 +197,11 @@ def _process_record(record: Any) -> None:
                 log.exception("first SymbolMappingMsg introspection failed")
             _logged_symmap_shape = True
 
-        raw = (
-            getattr(record, "stype_in_symbol", None)
-            or getattr(record, "raw_symbol", None)
-            or getattr(record, "stype_out_symbol", None)
-            or getattr(record, "symbol", None)
-            or getattr(record, "pretty_symbol", None)
-        )
+        # stype_out_symbol is the OPRA symbol (output of the symbology mapping).
+        # stype_in_symbol is the parent we subscribed with ("SLV.OPT" / "GLD.OPT")
+        # which is non-None and would short-circuit any `or` chain — must read
+        # stype_out_symbol directly. Per Databento DBN SymbolMapping spec.
+        raw = getattr(record, "stype_out_symbol", None)
         parsed = _parse_occ_symbol(raw) if raw else None
         if parsed:
             _instruments[record.instrument_id] = {

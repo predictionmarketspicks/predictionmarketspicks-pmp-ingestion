@@ -15,7 +15,7 @@ on:
       commodities:
         description: 'Comma-separated commodities to check (default: silver,gold,oil)'
         type: string
-        default: 'silver,gold,oil'
+        default: 'silver,gold,oil,bitcoin'
       date:
         description: 'UTC date YYYY-MM-DD (default: today)'
         type: string
@@ -40,6 +40,6 @@ jobs:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           DISCORD_BOT_TOKEN:    ${{ secrets.DISCORD_BOT_TOKEN }}
-          SOAK_COMMODITIES:     ${{ github.event.inputs.commodities || 'silver,gold,oil' }}
+          SOAK_COMMODITIES:     ${{ github.event.inputs.commodities || 'silver,gold,oil,bitcoin' }}
           SOAK_DATE:            ${{ github.event.inputs.date }}
         run: node scripts/soak-commodities.js

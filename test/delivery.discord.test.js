@@ -60,6 +60,12 @@ describe('buildCommodityEmbed', () => {
     expect(payload.embeds[0].title).toMatch(/^Copper Edge/);
   });
 
+  it('builds a brand-safe bitcoin embed', () => {
+    const payload = buildCommodityEmbed(makeMeta('bitcoin'), TOP_EDGE);
+    expect(() => assertBrandSafe(payload)).not.toThrow();
+    expect(payload.embeds[0].title).toMatch(/^Bitcoin Edge/);
+  });
+
   it('embeds the Kalshi sign-up referral URL, not a per-market deep-link', () => {
     const payload = buildCommodityEmbed(makeMeta('gold'), TOP_EDGE);
     expect(payload.embeds[0].url).toBe(KALSHI_REFERRAL_URL);

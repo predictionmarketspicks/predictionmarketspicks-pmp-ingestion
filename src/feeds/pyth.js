@@ -11,7 +11,8 @@ const HERMES_BASE = process.env.PYTH_HERMES_BASE || 'https://hermes.pyth.network
 const POLL_INTERVAL_MS = 10_000;
 
 // Verified via https://hermes.pyth.network/v2/price_feeds — the IDs Kalshi
-// names in its series settlement_sources for the silver/gold weeklies.
+// names in its series settlement_sources for the silver/gold weeklies, plus
+// the canonical Crypto.BTC/USD feed for KXBTCD.
 //
 // WTI and XCU/USD are intentionally omitted — Pyth Hermes serves WTI as
 // per-expiry futures (not continuous) and we have no validated copper feed.
@@ -20,11 +21,13 @@ const POLL_INTERVAL_MS = 10_000;
 export const FEED_IDS = {
   'XAG/USD': '0xf2fb02c32b055c805e7238d628e5e9dadef274376114eb1f012337cabe93871e',
   'XAU/USD': '0x765d2ba906dbc32ca17cc11f5310a89e9ee1f6420508c63861f2f8ba4ee34bb2',
+  'BTC/USD': '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43',
 };
 
 const SOURCE_TAGS = {
   'XAG/USD': 'pyth_xag_usd',
   'XAU/USD': 'pyth_xau_usd',
+  'BTC/USD': 'pyth_btc_usd',
   WTI: 'pyth_wti',
   'XCU/USD': 'pyth_xcu_usd',
 };

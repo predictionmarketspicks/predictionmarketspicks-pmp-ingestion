@@ -2,8 +2,9 @@
 //
 // Preferred: POST to /api/revalidate with bearer VERCEL_REVALIDATE_TOKEN —
 // targets a single tag, no full deploy. The site-side handler accepts
-// { tag: 'silver-edge' | 'gold-edge' | 'oil-edge' | 'copper-edge' } and
-// runs revalidateTag + revalidatePath for the relevant tool page + JSON API.
+// { tag: 'silver-edge' | 'gold-edge' | 'oil-edge' | 'bitcoin-edge' |
+//   'copper-edge' } and runs revalidateTag + revalidatePath for the
+// relevant tool page + JSON API.
 // Fallback: VERCEL_DEPLOY_HOOK_URL — fires a deploy. Heavier, but works if
 // the bearer endpoint is down.
 //
@@ -12,7 +13,7 @@
 
 const SITE_BASE = process.env.SITE_BASE_URL || 'https://predictionmarketspicks.com';
 
-const VALID_COMMODITIES = new Set(['silver', 'gold', 'oil', 'copper']);
+const VALID_COMMODITIES = new Set(['silver', 'gold', 'oil', 'bitcoin', 'copper']);
 
 export async function revalidateCommodityEdge(commodity) {
   if (!VALID_COMMODITIES.has(commodity)) {

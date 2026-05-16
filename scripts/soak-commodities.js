@@ -24,7 +24,7 @@ import 'dotenv/config';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 
-const COMMODITIES_TO_CHECK = (process.env.SOAK_COMMODITIES || 'silver,gold,oil')
+const COMMODITIES_TO_CHECK = (process.env.SOAK_COMMODITIES || 'silver,gold,oil,bitcoin')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);

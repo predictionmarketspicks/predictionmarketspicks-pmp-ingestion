@@ -44,6 +44,7 @@ const TITLE_PREFIX = {
   silver: 'Silver Edge',
   gold: 'Gold Edge',
   oil: 'Oil Edge',
+  bitcoin: 'Bitcoin Edge',
   copper: 'Copper Edge',
 };
 

@@ -6,13 +6,16 @@
 // reads the rest from the row passed in.
 //
 // Spot/chain feed source per commodity (May 16 2026):
-//   silver  Pyth XAG/USD  + Databento SLV.OPT  (real-time, default provider)
-//   gold    Pyth XAU/USD  + Databento GLD.OPT  (real-time)
-//   oil     Yahoo CL=F /  + Databento USO.OPT  (hybrid: Yahoo spot for
-//           CLM26.NYM                           contract-aware WTI accuracy,
-//                                               Databento for real-time IV chain)
-//   copper  Pyth XCU/USD  — UNVERIFIED, no Pyth feed ID configured. Engine
-//                           fails open when getPrice() returns null.
+//   silver   Pyth XAG/USD  + Databento SLV.OPT   (real-time, default provider)
+//   gold     Pyth XAU/USD  + Databento GLD.OPT   (real-time)
+//   oil      Yahoo CL=F /  + Databento USO.OPT   (hybrid: Yahoo spot for
+//            CLM26.NYM                            contract-aware WTI accuracy,
+//                                                 Databento for real-time IV chain)
+//   bitcoin  Pyth BTC/USD  + Databento IBIT.OPT  (Phase 4 — daily Kalshi
+//                                                 strike markets KXBTCD twice
+//                                                 per session at 9am + 5pm ET)
+//   copper   Pyth XCU/USD  — UNVERIFIED, no Pyth feed ID configured. Engine
+//                            fails open when getPrice() returns null.
 //
 // Per-commodity `useYahooSpot` flag flips the spot source in commodity-base.js
 // from Pyth to src/feeds/yahoo-oil.js. Chain always comes from the active
@@ -103,6 +106,43 @@ export const COMMODITIES = {
     // Yahoo CL=F continues to print on Globex/Asia. Writing snapshots with
     // a frozen IV smile + a moving spot would just upsert misleading rows.
     // Pairs with requiredOffHours:false on the databento_uso readiness gate.
+    pauseSnapshotsOffHours: true,
+  },
+  bitcoin: {
+    commodity: 'bitcoin',
+    // KXBTCD = "Bitcoin price Above/below" — twice-daily strike-event
+    // contracts (9am EDT + 5pm EDT close), structurally mirroring
+    // KXSILVERW/KXGOLDW but at a daily/twice-daily cadence. Strikes are
+    // floor_strike numerics (e.g. $69,500) parsed as-is by kalshi-event.js.
+    seriesTicker: 'KXBTCD',
+    // IBIT (BlackRock iShares Bitcoin Trust) — by far the most liquid US
+    // spot-BTC ETF chain; FBTC and BITB trade an order of magnitude less.
+    // OPRA NBBO via Databento sidecar (DATABENTO_SYMBOLS must include
+    // IBIT.OPT — see project memory databento-phase1-live for the secret).
+    underlyingEtf: 'IBIT',
+    // Pyth Crypto.BTC/USD — verified 2026-05-16 against Hermes
+    // (price returned $78,052 in spot check). 24/7 feed; engine still pauses
+    // snapshots off-hours because the IBIT chain is frozen overnight and
+    // running edge math against a stale smile would just chase moving spot.
+    pythSymbol: 'BTC/USD',
+    spotUnit: '$/BTC',
+    spotLabel: 'Pyth BTC/USD',
+    enabled: true,
+    // FRED skip: no daily BTC spot series on FRED; CF Benchmarks BRTI
+    // (Kalshi's settlement source) isn't on FRED either. The Massive-style
+    // cross-check that protects oil from a frozen CL=F print doesn't apply
+    // when Pyth itself is the canonical real-time feed.
+    fredSeriesId: null,
+    snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
+    snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
+    snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
+    // OPRA closes at 4pm ET. IBIT chain stops updating overnight even
+    // though BTC spot keeps moving on 24/7 venues — running edge math
+    // against a frozen IV smile + a moving Pyth spot would surface
+    // basis-mismatch artifacts, not real edges. Burst window (60min
+    // pre-close) still fires so the engine captures the final hour of
+    // pre-settlement action. Pairs with requiredOffHours:false on the
+    // databento_ibit readiness gate.
     pauseSnapshotsOffHours: true,
   },
   copper: {

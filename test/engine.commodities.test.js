@@ -11,8 +11,14 @@ import {
 } from '../src/engine/commodities.js';
 
 describe('COMMODITIES registry', () => {
-  it('has silver, gold, oil, copper', () => {
-    expect(Object.keys(COMMODITIES).sort()).toEqual(['copper', 'gold', 'oil', 'silver']);
+  it('has silver, gold, oil, bitcoin, copper', () => {
+    expect(Object.keys(COMMODITIES).sort()).toEqual([
+      'bitcoin',
+      'copper',
+      'gold',
+      'oil',
+      'silver',
+    ]);
   });
 
   it('locks the Kalshi series + ETF + Pyth symbol per commodity', () => {
@@ -31,6 +37,11 @@ describe('COMMODITIES registry', () => {
       underlyingEtf: 'USO',
       pythSymbol: 'WTI',
     });
+    expect(COMMODITIES.bitcoin).toMatchObject({
+      seriesTicker: 'KXBTCD',
+      underlyingEtf: 'IBIT',
+      pythSymbol: 'BTC/USD',
+    });
     expect(COMMODITIES.copper).toMatchObject({
       seriesTicker: 'KXCOPPERMON',
       underlyingEtf: 'CPER',
@@ -38,21 +49,29 @@ describe('COMMODITIES registry', () => {
     });
   });
 
-  it('enables silver/gold/oil, leaves copper disabled until a spot source is wired', () => {
+  it('enables silver/gold/oil/bitcoin, leaves copper disabled until a spot source is wired', () => {
     expect(COMMODITIES.silver.enabled).toBe(true);
     expect(COMMODITIES.gold.enabled).toBe(true);
     expect(COMMODITIES.oil.enabled).toBe(true);
+    expect(COMMODITIES.bitcoin.enabled).toBe(true);
     expect(COMMODITIES.copper.enabled).toBe(false);
   });
 
   it('listEnabledCommodities filters to enabled only', () => {
     const enabled = listEnabledCommodities();
-    expect(enabled.map((c) => c.commodity).sort()).toEqual(['gold', 'oil', 'silver']);
+    expect(enabled.map((c) => c.commodity).sort()).toEqual(['bitcoin', 'gold', 'oil', 'silver']);
   });
 
   it('listAllCommodities returns every config', () => {
     const all = listAllCommodities();
-    expect(all).toHaveLength(4);
+    expect(all).toHaveLength(5);
+  });
+
+  it('bitcoin pauses snapshots off-hours because IBIT chain is OPRA-only', () => {
+    // BTC spot is 24/7 via Pyth but the IBIT chain freezes at 4pm ET;
+    // running edge math against a stale IV smile + a moving spot would
+    // surface basis-mismatch artifacts. Burst window still fires.
+    expect(COMMODITIES.bitcoin.pauseSnapshotsOffHours).toBe(true);
   });
 
   it('getCommodityConfig throws on unknown', () => {

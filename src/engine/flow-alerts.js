@@ -34,7 +34,7 @@ const BLOCK_SIZE_THRESHOLD = Number(process.env.FLOW_BLOCK_SIZE || 100);
 const ZERO_DTE_BURST_SIZE = Number(process.env.FLOW_0DTE_SIZE || 50);
 const VOL_SPIKE_MULTIPLIER = Number(process.env.FLOW_SPIKE_MULT || 5);
 const COOLDOWN_MS = 30 * 60 * 1000;
-const UNDERLYINGS = ['SLV', 'GLD', 'USO'];
+const UNDERLYINGS = ['SLV', 'GLD', 'USO', 'IBIT'];
 
 const FEED_NAME = 'flow_alerts_engine';
 
@@ -43,7 +43,7 @@ let stopRequested = false;
 const lastWindowVolume = new Map(); // `${commodity}:${instrument_id}` → prior-window total
 
 function commodityFor(underlying) {
-  return { SLV: 'silver', GLD: 'gold', USO: 'oil' }[underlying] ?? underlying.toLowerCase();
+  return { SLV: 'silver', GLD: 'gold', USO: 'oil', IBIT: 'bitcoin' }[underlying] ?? underlying.toLowerCase();
 }
 
 function daysToExpiry(expirationIso, nowMs = Date.now()) {

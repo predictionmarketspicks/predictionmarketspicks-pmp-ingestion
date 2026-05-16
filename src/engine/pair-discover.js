@@ -26,12 +26,16 @@
 // typically send 30–80 pairs to the LLM. At Haiku rates that's well under
 // $0.50/run.
 
-import { fetchKalshiCandidates } from '../feeds/movers.js';
+import { fetchKalshiCandidates, kalshiGet } from '../feeds/movers.js';
 import { fetchTopMarkets } from '../feeds/polymarket-gamma.js';
 import { getClient } from '../delivery/supabase.js';
 import { matchTitles } from './lib/match.js';
 import { confirmPairsTwoPass } from './llm-pair-confirm.js';
 import { recordTick, registerFeed } from '../observability/health.js';
+
+const KALSHI_API_BASE =
+  process.env.KALSHI_API_BASE || 'https://api.elections.kalshi.com/trade-api/v2';
+const GAMMA_API_BASE = process.env.POLYMARKET_GAMMA_BASE || 'https://gamma-api.polymarket.com';
 
 const MIN_INTERVAL_MS = Number(process.env.PAIR_DISCOVER_INTERVAL_MS || 24 * 60 * 60 * 1000);
 
@@ -48,6 +52,35 @@ const MATCH_SCORE_FLOOR = 0.25;
 // Top-N Polymarket candidates considered per Kalshi market. Higher = more
 // LLM cost; 3 is enough to surface the right candidate in practice.
 const POLY_PER_KALSHI = 3;
+
+// Known Kalshi-series → Polymarket-event mappings. For markets we KNOW share
+// an underlying election/race, we skip the broad title-match path and look
+// up candidates directly via name. Resolves the "Poly top-200-by-volume
+// misses per-candidate markets" problem.
+//
+// Each mapping shares the same row shape:
+//   - kalshiSeries: Kalshi series ticker (e.g. KXPRESPERSON)
+//   - polyEventId: Polymarket Gamma event id (string)
+//   - polySlug: optional canonical slug used for mirror_slug
+//   - category: market_pairs.category for the proposed row
+//   - raceLabel: (name) => string used for the human-readable race_label
+//   - minPolyVolume: drop placeholder inner markets ("Person BG" rows with
+//                    no real volume — Gamma's event listings include them
+//                    as reserve slots)
+//   - minKalshiVolume: drop dead Kalshi candidates with no real interest
+const KNOWN_EVENT_MAPPINGS = [
+  {
+    kalshiSeries: 'KXPRESPERSON',
+    polyEventId: '31552',
+    polySlug: 'presidential-election-winner-2028',
+    category: 'political',
+    raceLabel: (name) => `2028 Pres: ${name}`,
+    minPolyVolume: 100,
+    minKalshiVolume: 100,
+  },
+];
+
+const PERSON_PLACEHOLDER_RE = /^Person [A-Z]{1,3}$/i;
 
 // Category bridges:
 //   - Kalshi feeds/movers.js KALSHI_SERIES carries Economics, Politics. We
@@ -158,13 +191,18 @@ function buildCandidates(kalshiSide, polySide, seen) {
 
 function buildPairRow({ candidate, verdict }) {
   const category = candidate.kalshi.target_category;
+  // Event-id-based candidates carry an explicit race label + outcome (the
+  // candidate name) so the row matches the curated-pair shape. Title-match
+  // candidates fall back to the Kalshi title.
+  const raceLabel = candidate._raceLabel || candidate.kalshi.title;
   return {
     anchor_platform: 'kalshi',
     anchor_id: candidate.kalshi.ticker,
     mirror_platform: 'polymarket',
     mirror_id: candidate.polymarket.condition_id,
-    mirror_slug: candidate.polymarket.slug || null,
-    race_label: candidate.kalshi.title.slice(0, 200),
+    mirror_slug: candidate._mirrorSlug || candidate.polymarket.slug || null,
+    mirror_outcome: candidate._mirrorOutcome || null,
+    race_label: raceLabel.slice(0, 200),
     category,
     resolution_match: verdict.match,
     confidence: Number(verdict.confidence.toFixed(2)),
@@ -172,6 +210,131 @@ function buildPairRow({ candidate, verdict }) {
     source: 'llm_proposed',
     active: false,
   };
+}
+
+// Pull every open market in a Kalshi series. Single page is enough for the
+// series we currently map (KXPRESPERSON has 25 markets); cursor pagination
+// is unimplemented because we never expect a registered series with > 200.
+async function fetchKalshiSeriesMarkets(series, { timeoutMs = 30_000 } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const url = `${KALSHI_API_BASE}/markets?series_ticker=${series}&status=open&limit=200`;
+    const res = await kalshiGet(url, {
+      signal: controller.signal,
+      label: 'pair-discover',
+      userAgent: 'pmp-ingestion/pair-discover',
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return Array.isArray(json?.markets) ? json.markets : [];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Pull the nested-market list for a Polymarket event by id. Includes every
+// inner candidate market — we filter the placeholder "Person XX" rows and
+// any with no real volume at the caller (see KNOWN_EVENT_MAPPINGS).
+async function fetchPolymarketEventMarkets(eventId, { timeoutMs = 30_000 } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const url = `${GAMMA_API_BASE}/events/${encodeURIComponent(eventId)}`;
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json', 'User-Agent': 'pmp-ingestion/pair-discover' },
+      signal: controller.signal,
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return Array.isArray(json?.markets) ? json.markets : [];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// For each KNOWN_EVENT_MAPPINGS row, pull Kalshi candidates from the series
+// and Polymarket inner markets from the event, then propose pairs whose
+// (Kalshi yes_sub_title) exactly matches (Poly groupItemTitle). LLM still
+// gets a final say — the prompt sees real titles and the matcher's score is
+// just 1.0 marker so these sort first when the cost ceiling kicks in.
+async function discoverByEvent(seen) {
+  const candidates = [];
+  for (const mapping of KNOWN_EVENT_MAPPINGS) {
+    const [kalshiMarkets, polyMarkets] = await Promise.all([
+      fetchKalshiSeriesMarkets(mapping.kalshiSeries),
+      fetchPolymarketEventMarkets(mapping.polyEventId),
+    ]);
+    if (kalshiMarkets.length === 0) {
+      console.warn(`[pair-discover] event-id: ${mapping.kalshiSeries} → 0 Kalshi markets`);
+      continue;
+    }
+    if (polyMarkets.length === 0) {
+      console.warn(`[pair-discover] event-id: poly event ${mapping.polyEventId} → 0 markets`);
+      continue;
+    }
+
+    // Build a name → poly-market index, filtering placeholders + dead vol.
+    const pIndex = new Map();
+    let polyAccepted = 0;
+    for (const m of polyMarkets) {
+      const groupTitle = typeof m.groupItemTitle === 'string' ? m.groupItemTitle.trim() : '';
+      if (!groupTitle) continue;
+      if (PERSON_PLACEHOLDER_RE.test(groupTitle)) continue;
+      if (m.active === false || m.closed === true) continue;
+      const vol = Number(m.volume24hr) || 0;
+      if (vol < mapping.minPolyVolume) continue;
+      pIndex.set(groupTitle.toLowerCase(), m);
+      polyAccepted += 1;
+    }
+    console.log(
+      `[pair-discover] event-id: ${mapping.kalshiSeries} → ${kalshiMarkets.length} Kalshi · ${mapping.polyEventId} → ${polyAccepted}/${polyMarkets.length} real Poly candidates`,
+    );
+
+    for (const km of kalshiMarkets) {
+      const name = typeof km.yes_sub_title === 'string' ? km.yes_sub_title.trim() : '';
+      if (!name) continue;
+      const ticker = typeof km.ticker === 'string' ? km.ticker : null;
+      if (!ticker) continue;
+      const kVol = Number(km.volume_24h_fp ?? km.volume_24h) || 0;
+      if (kVol < mapping.minKalshiVolume) continue;
+
+      const pMatch = pIndex.get(name.toLowerCase());
+      if (!pMatch) continue;
+
+      const key = `kalshi|${ticker}|polymarket|${mapping.polyEventId}`;
+      if (seen.has(key)) continue;
+
+      candidates.push({
+        kalshi: {
+          ticker,
+          title: `${name} — ${km.title || `Who will win the next presidential election?`}`,
+          target_category: mapping.category,
+          yes_price: Number(km.last_price_dollars ?? 0),
+          volume_24h: kVol,
+        },
+        polymarket: {
+          // For event-id-based pairs, mirror_id IS the event id (matches the
+          // curated-pair convention). mirror_slug + mirror_outcome are carried
+          // out-of-band on the candidate so buildPairRow can write them.
+          condition_id: mapping.polyEventId,
+          slug: mapping.polySlug,
+          question: pMatch.question || `Will ${name} win`,
+          volume_24h_usdc: Number(pMatch.volume24hr) || 0,
+        },
+        score: 1.0,
+        key,
+        _mirrorOutcome: name,
+        _mirrorSlug: mapping.polySlug,
+        _raceLabel: mapping.raceLabel(name),
+      });
+    }
+  }
+  return candidates;
 }
 
 async function upsertProposed(rows, approvedActive) {
@@ -225,7 +388,13 @@ export async function runPairDiscoverOnce({ force = false } = {}) {
     // 1. Load existing pairs and dedup keys.
     const { seen, approvedActive } = await loadSeenPairKeys();
 
-    // 2. Fetch both sides.
+    // 2a. Event-id discovery first — known Kalshi-series ↔ Poly-event maps
+    // (KXPRESPERSON ↔ 31552 today). High-confidence exact-name candidates.
+    const eventCandidates = await discoverByEvent(seen);
+    console.log(`[pair-discover] event-id discovery: ${eventCandidates.length} candidates`);
+
+    // 2b. Broad fetch + title-match fallback for everything outside the
+    // known-event maps.
     const [kalshiAll, polyAll] = await Promise.all([
       fetchKalshiCandidates({ timeoutMs: 30_000 }),
       fetchTopMarkets({ limit: 200, timeoutMs: 30_000 }),
@@ -241,17 +410,21 @@ export async function runPairDiscoverOnce({ force = false } = {}) {
       .map(asPolySide);
 
     console.log(
-      `[pair-discover] candidates: ${kalshiSide.length} Kalshi × ${polySide.length} Poly (seen=${seen.size})`,
+      `[pair-discover] broad candidates: ${kalshiSide.length} Kalshi × ${polySide.length} Poly (seen=${seen.size})`,
     );
 
-    // 3. Score + dedup + cap.
-    const allCandidates = buildCandidates(kalshiSide, polySide, seen);
-    state.seenSkipped += Math.max(0, (kalshiSide.length * POLY_PER_KALSHI) - allCandidates.length);
+    // 3. Score broad + combine with event-id candidates + dedup + cap.
+    const broadCandidates = buildCandidates(kalshiSide, polySide, seen);
+    state.seenSkipped += Math.max(0, (kalshiSide.length * POLY_PER_KALSHI) - broadCandidates.length);
+
+    // Event-id first (score=1.0), then broad. Sort tie-broken by score desc.
+    const allCandidates = [...eventCandidates, ...broadCandidates];
     if (allCandidates.length === 0) {
-      console.log('[pair-discover] no new candidates after match-floor + seen dedup');
+      console.log('[pair-discover] no new candidates after event-id + broad sweep + dedup');
       recordTick('pair_discover_engine');
       return {
         runs: state.runs,
+        eventCandidates: eventCandidates.length,
         kalshiCandidates: kalshiSide.length,
         polyCandidates: polySide.length,
         scored: 0,
@@ -265,7 +438,7 @@ export async function runPairDiscoverOnce({ force = false } = {}) {
     allCandidates.sort((a, b) => b.score - a.score);
     const capped = allCandidates.slice(0, MAX_LLM_CONFIRMATIONS_PER_RUN);
     console.log(
-      `[pair-discover] scored ${allCandidates.length} candidates → sending ${capped.length} to LLM`,
+      `[pair-discover] scored ${allCandidates.length} candidates (event=${eventCandidates.length} + broad=${broadCandidates.length}) → sending ${capped.length} to LLM`,
     );
 
     // 4. LLM two-pass.
@@ -297,7 +470,7 @@ export async function runPairDiscoverOnce({ force = false } = {}) {
 
     const log = [
       `[pair-discover] run #${state.runs} done`,
-      `kalshi=${kalshiSide.length} poly=${polySide.length} scored=${allCandidates.length}`,
+      `event=${eventCandidates.length} broad=${broadCandidates.length} scored=${allCandidates.length}`,
       `sent=${capped.length} keepers=${rows.length} written=${written} rejected_none=${rejectedNone}`,
       `dropped_approved_clash=${droppedApprovedClash} cost=$${result.costUsd.toFixed(4)}`,
       `haiku=${result.model_breakdown.haiku} sonnet=${result.model_breakdown.sonnet} aborted=${result.aborted}`,
@@ -306,6 +479,7 @@ export async function runPairDiscoverOnce({ force = false } = {}) {
 
     return {
       runs: state.runs,
+      eventCandidates: eventCandidates.length,
       kalshiCandidates: kalshiSide.length,
       polyCandidates: polySide.length,
       scored: allCandidates.length,

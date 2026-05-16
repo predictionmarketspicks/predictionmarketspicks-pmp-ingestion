@@ -216,7 +216,10 @@ function mergeLiveQuote(market) {
 // ---------- public API ----------
 
 export async function discoverEvent(config) {
-  const ev = await getNextEvent(config.seriesTicker);
+  // config.eventFilter optionally restricts candidate events before picking the
+  // soonest. Used by bitcoin to skip hourly KXBTCD settles outside the IBIT
+  // chain window; silver/gold/oil don't set a filter and pass through.
+  const ev = await getNextEvent(config.seriesTicker, { filter: config.eventFilter });
   if (!ev) return null;
   return fetchEvent(ev.event_ticker);
 }

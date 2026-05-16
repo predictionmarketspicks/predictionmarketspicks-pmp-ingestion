@@ -21,12 +21,20 @@ async function getJson(url, timeoutMs = 8000) {
 
 // Soonest-closing open event for a series. Sorts by event_ticker, which encodes
 // YYMMMDDHH date — same trick the Python engine uses.
-export async function getNextEvent(seriesTicker) {
+//
+// Optional `filter` callback (event => boolean) lets the caller restrict the
+// candidate pool before picking the soonest. Used by the bitcoin engine to
+// drop KXBTCD hourly settles that fall outside the IBIT options chain window
+// (10 AM – 4 PM ET) so the engine doesn't try to compute edge math against a
+// frozen smile + moving spot.
+export async function getNextEvent(seriesTicker, { filter } = {}) {
   const json = await getJson(`${KALSHI_API_BASE}/events?series_ticker=${seriesTicker}&status=open&limit=20`);
   const events = Array.isArray(json?.events) ? json.events : [];
   if (events.length === 0) return null;
-  events.sort((a, b) => String(a.event_ticker).localeCompare(String(b.event_ticker)));
-  return events[0];
+  const candidates = typeof filter === 'function' ? events.filter(filter) : events;
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => String(a.event_ticker).localeCompare(String(b.event_ticker)));
+  return candidates[0];
 }
 
 // Per-market REST fetch — full data (event-nested response is abbreviated).

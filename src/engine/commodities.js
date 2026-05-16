@@ -110,10 +110,13 @@ export const COMMODITIES = {
   },
   bitcoin: {
     commodity: 'bitcoin',
-    // KXBTCD = "Bitcoin price Above/below" — twice-daily strike-event
-    // contracts (9am EDT + 5pm EDT close), structurally mirroring
-    // KXSILVERW/KXGOLDW but at a daily/twice-daily cadence. Strikes are
-    // floor_strike numerics (e.g. $69,500) parsed as-is by kalshi-event.js.
+    // KXBTCD = "Bitcoin price Above/below" — HOURLY strike-event contracts
+    // settling at the top of every hour, 24/7. Settlement is a 60-second
+    // TWAP of the CF Benchmarks BRTI bitcoin reference rate over the minute
+    // leading up to the hour. (Verified 2026-05-16 via /trade-api/v2/series:
+    // frequency=hourly, tags include "Hourly", settlement_sources points to
+    // CF Benchmarks BRTI.) Strikes are floor_strike numerics (e.g. $108,000)
+    // parsed as-is by kalshi-event.js.
     seriesTicker: 'KXBTCD',
     // IBIT (BlackRock iShares Bitcoin Trust) — by far the most liquid US
     // spot-BTC ETF chain; FBTC and BITB trade an order of magnitude less.
@@ -144,6 +147,21 @@ export const COMMODITIES = {
     // pre-settlement action. Pairs with requiredOffHours:false on the
     // databento_ibit readiness gate.
     pauseSnapshotsOffHours: true,
+    // Restrict snapshots to the 7 hourly settles per weekday (10 AM through
+    // 4 PM ET) covered by a live IBIT options chain. KXBTCD event tickers
+    // encode the ET wallclock hour as the trailing 2 digits (DST-safe by
+    // construction — Kalshi always emits ET wallclock, not UTC). The other
+    // 17 daily settles + all weekend settles fall outside US equity-options
+    // hours where the model has no honest IV input on the comparison side.
+    // Aligns the engine with the public surface (article + tool page) that
+    // ships only these 7 settles. Added 2026-05-16 after Kalshi API revealed
+    // KXBTCD is hourly, not twice-daily as Phase 4 originally assumed.
+    eventFilter: (ev) => {
+      const m = String(ev.event_ticker).match(/(\d{2})$/);
+      if (!m) return false;
+      const hour = Number(m[1]);
+      return hour >= 10 && hour <= 16;
+    },
   },
   copper: {
     commodity: 'copper',

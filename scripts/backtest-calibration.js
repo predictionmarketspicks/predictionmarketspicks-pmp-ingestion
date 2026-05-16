@@ -161,59 +161,83 @@ function parseOccSymbol(occ) {
 // Per-strike price scaling on Databento JSON: divide by 1e9.
 const DBN_PRICE_SCALE = 1e9;
 
-async function loadDefsFile(filePath) {
-  const stream = fs.createReadStream(filePath);
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-  const byInstrumentId = new Map(); // int → { raw_symbol, strike, expiration, right }
-  let nLines = 0;
-  let nParsed = 0;
-  for await (const line of rl) {
-    nLines += 1;
-    if (!line.trim()) continue;
-    let rec;
-    try { rec = JSON.parse(line); } catch { continue; }
-    const iid = rec.hd?.instrument_id;
-    if (iid == null) continue;
-    // Prefer parsing the OCC OPRA symbol — it's the same shape the engine's
-    // live path uses, so any future change to the smile builder benefits both
-    // backtest and live without divergence.
-    const meta = parseOccSymbol(rec.raw_symbol);
-    if (!meta) continue;
-    byInstrumentId.set(Number(iid), meta);
-    nParsed += 1;
+// File-list helpers — both loaders take either a single path or comma-separated
+// paths. Avoids the disk-bloat concat-everything-into-one-file pattern that
+// blew up the SLV 2-year run on Fly's 7.8 GB /tmp (defs alone totaled 3 GB
+// across 10 quarterly pulls — concatenated copy + original copy fits, but
+// concatenated copy + ohlcv concat + per-quarter originals overflowed).
+function listFiles(spec) {
+  return spec.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+async function loadDefsFile(spec) {
+  const files = listFiles(spec);
+  const byInstrumentId = new Map();
+  let totalParsed = 0;
+  let totalLines = 0;
+  for (const filePath of files) {
+    const stream = fs.createReadStream(filePath);
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    let nLines = 0;
+    let nParsed = 0;
+    for await (const line of rl) {
+      nLines += 1;
+      if (!line.trim()) continue;
+      let rec;
+      try { rec = JSON.parse(line); } catch { continue; }
+      const iid = rec.hd?.instrument_id;
+      if (iid == null) continue;
+      const meta = parseOccSymbol(rec.raw_symbol);
+      if (!meta) continue;
+      byInstrumentId.set(Number(iid), meta);
+      nParsed += 1;
+    }
+    console.log(`[backtest]   defs ${filePath}: ${nParsed}/${nLines} records`);
+    totalParsed += nParsed;
+    totalLines += nLines;
   }
-  console.log(`[backtest] loaded ${nParsed}/${nLines} definitions → ${byInstrumentId.size} unique instrument_ids`);
+  console.log(`[backtest] loaded ${totalParsed}/${totalLines} definitions across ${files.length} file(s) → ${byInstrumentId.size} unique instrument_ids`);
   return byInstrumentId;
 }
 
-async function loadOhlcvFile(filePath, defsMap) {
-  const stream = fs.createReadStream(filePath);
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-  const byDate = new Map(); // 'YYYY-MM-DD' → [{ strike, expiration, right, close, instrument_id }]
-  let nLines = 0;
-  let nParsed = 0;
-  let nNoMeta = 0;
-  for await (const line of rl) {
-    nLines += 1;
-    if (!line.trim()) continue;
-    let rec;
-    try { rec = JSON.parse(line); } catch { continue; }
-    const iid = Number(rec.hd?.instrument_id);
-    if (!Number.isFinite(iid)) continue;
-    const meta = defsMap.get(iid);
-    if (!meta) { nNoMeta += 1; continue; }
-    const close = Number(rec.close) / DBN_PRICE_SCALE;
-    if (!Number.isFinite(close) || close <= 0) continue;
-    const tsNs = rec.hd?.ts_event;
-    if (!tsNs) continue;
-    const tsMs = Math.floor(Number(tsNs) / 1e6);
-    if (!Number.isFinite(tsMs)) continue;
-    const dateKey = new Date(tsMs).toISOString().slice(0, 10);
-    if (!byDate.has(dateKey)) byDate.set(dateKey, []);
-    byDate.get(dateKey).push({ ...meta, close, instrument_id: iid });
-    nParsed += 1;
+async function loadOhlcvFile(spec, defsMap) {
+  const files = listFiles(spec);
+  const byDate = new Map();
+  let totalParsed = 0;
+  let totalLines = 0;
+  let totalNoMeta = 0;
+  for (const filePath of files) {
+    const stream = fs.createReadStream(filePath);
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    let nLines = 0;
+    let nParsed = 0;
+    let nNoMeta = 0;
+    for await (const line of rl) {
+      nLines += 1;
+      if (!line.trim()) continue;
+      let rec;
+      try { rec = JSON.parse(line); } catch { continue; }
+      const iid = Number(rec.hd?.instrument_id);
+      if (!Number.isFinite(iid)) continue;
+      const meta = defsMap.get(iid);
+      if (!meta) { nNoMeta += 1; continue; }
+      const close = Number(rec.close) / DBN_PRICE_SCALE;
+      if (!Number.isFinite(close) || close <= 0) continue;
+      const tsNs = rec.hd?.ts_event;
+      if (!tsNs) continue;
+      const tsMs = Math.floor(Number(tsNs) / 1e6);
+      if (!Number.isFinite(tsMs)) continue;
+      const dateKey = new Date(tsMs).toISOString().slice(0, 10);
+      if (!byDate.has(dateKey)) byDate.set(dateKey, []);
+      byDate.get(dateKey).push({ ...meta, close, instrument_id: iid });
+      nParsed += 1;
+    }
+    console.log(`[backtest]   ohlcv ${filePath}: ${nParsed}/${nLines} records (${nNoMeta} missing defs)`);
+    totalParsed += nParsed;
+    totalLines += nLines;
+    totalNoMeta += nNoMeta;
   }
-  console.log(`[backtest] loaded ${nParsed}/${nLines} OHLCV records (${nNoMeta} missing defs) across ${byDate.size} dates`);
+  console.log(`[backtest] loaded ${totalParsed}/${totalLines} OHLCV records (${totalNoMeta} missing defs) across ${files.length} file(s) → ${byDate.size} dates`);
   return byDate;
 }
 

@@ -81,6 +81,12 @@ import {
   runWcPayloadsOnce,
 } from './engine/wc-snapshot.js';
 import { runWcMispricingsOnce } from './engine/wc-mispricings.js';
+import {
+  bootstrapPairDiscover,
+  stopPairDiscover,
+  runPairDiscoverOnce,
+  getPairDiscoverState,
+} from './engine/pair-discover.js';
 
 initSentry();
 
@@ -652,6 +658,7 @@ const server = http.createServer((req, res) => {
     snap.engine.wc_espn = getWcEspnGames();
     snap.engine.wc_mispricings = getWcMispricingsState();
     snap.engine.wc_payloads = getWcPayloadsState();
+    snap.engine.pair_discover = getPairDiscoverState();
     const status = liveness.healthy ? 200 : 503;
     res.writeHead(status, { 'content-type': 'application/json' });
     res.end(JSON.stringify(snap));
@@ -761,6 +768,23 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Manual trigger for pair-discover — useful for verifying the LLM flow and
+  // ANTHROPIC_API_KEY wiring without waiting for the 24h cadence. ?force=true
+  // bypasses the lastRunAt short-circuit.
+  if (url.pathname === '/dev/pair-discover') {
+    const force = url.searchParams.get('force') === 'true';
+    runPairDiscoverOnce({ force })
+      .then((result) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ...result }));
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err?.message || String(err) }));
+      });
+    return;
+  }
+
   // PR 5 — manual payload-rebuild trigger. Pure read+upsert (no Kalshi /
   // Polymarket fetches), safe to fire on demand for ops debugging.
   if (url.pathname === '/dev/wc-payloads') {
@@ -830,6 +854,8 @@ bootstrapGasSnapshot();
 
 bootstrapWcSnapshot();
 
+bootstrapPairDiscover();
+
 // --- shutdown ---
 
 async function shutdown(signal) {
@@ -845,6 +871,7 @@ async function shutdown(signal) {
   stopPolymarketSnapshot();
   stopGasSnapshot();
   stopWcSnapshot();
+  stopPairDiscover();
   stopKalshi();
   stopPolymarket();
   stopAllPyth();

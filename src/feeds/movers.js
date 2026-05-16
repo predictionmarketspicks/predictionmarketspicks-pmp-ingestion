@@ -46,8 +46,12 @@ export const KALSHI_SERIES = [
   // Sports — DK comparison only
   { series: 'KXNBAGAME', category: 'Sports' },
 
-  // Politics (3) — KXNEWOUTBREAK added per macro-movers.ts (Hantavirus momentum play, sunset 2026-06-15)
+  // Politics (4) — KXNEWOUTBREAK added per macro-movers.ts (Hantavirus momentum play, sunset 2026-06-15)
+  // KXPRESPERSON added 2026-05-15 — candidate-level 2028 Pres feeds pair-discover
+  // (the title 'Who will win the next presidential election?' is generic across all
+  //  25 markets, so pair-discover.js uses yes_sub_title for the matcher).
   { series: 'KXPRESPARTY',   category: 'Politics' },
+  { series: 'KXPRESPERSON',  category: 'Politics' },
   { series: 'KXIMPEACH',     category: 'Politics' },
   { series: 'KXNEWOUTBREAK', category: 'Politics' },
 
@@ -163,6 +167,10 @@ export async function fetchKalshiCandidates({ timeoutMs = 30_000 } = {}) {
           seriesOrSlug: series,
           ticker: m.ticker,
           title: m.title ?? m.subtitle ?? m.ticker,
+          // KXPRESPERSON ships a generic title plus the candidate name in
+          // yes_sub_title; surface it so pair-discover can match on candidate
+          // name. Optional everywhere else.
+          yes_sub_title: typeof m.yes_sub_title === 'string' ? m.yes_sub_title : null,
           yes_price,
           volume_24h,
           price_change_24h,

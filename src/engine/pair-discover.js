@@ -78,10 +78,17 @@ const state = {
 let stopRequested = false;
 
 // Map a Kalshi movers candidate into the shape we feed to the LLM.
+//
+// For KXPRESPERSON the candidate name lives in yes_sub_title (the title field
+// is "Who will win the next presidential election?" on every market).
+// Prepend it so matchTitles and the LLM prompt see a useful name.
 function asKalshiSide(c) {
+  const composed = c.yes_sub_title
+    ? `${c.yes_sub_title} — ${c.title}`
+    : c.title;
   return {
     ticker: c.ticker,
-    title: c.title,
+    title: composed,
     category: c.category,
     target_category: KALSHI_CATEGORY_MAP[c.category] || null,
     yes_price: c.yes_price,

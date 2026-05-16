@@ -184,9 +184,14 @@ async function main() {
     start,
     end,
   };
+  // Databento returns a bare number (USD) from metadata.get_cost and a bare
+  // number (bytes) from metadata.get_billable_size. The puller calls both so
+  // both `cost_estimated_usd` and `gb_estimated` land in databento_query_log.
   const costJson = await callMetadata('metadata.get_cost', costBody);
-  const costEstimatedUsd = Number(costJson?.cost ?? costJson?.cost_usd ?? costJson);
-  const gbEstimated = Number(costJson?.size ?? costJson?.bytes ?? 0) / (1024 ** 3) || null;
+  const sizeJson = await callMetadata('metadata.get_billable_size', costBody);
+  const costEstimatedUsd = Number(costJson?.cost ?? costJson?.cost_usd ?? costJson) || 0;
+  const sizeBytes = Number(sizeJson?.size ?? sizeJson?.bytes ?? sizeJson) || 0;
+  const gbEstimated = sizeBytes > 0 ? sizeBytes / (1024 ** 3) : null;
 
   console.log(`[databento-pull] estimate: cost=$${costEstimatedUsd.toFixed(4)}  size=${gbEstimated ? gbEstimated.toFixed(3) + ' GB' : 'unknown'}`);
 

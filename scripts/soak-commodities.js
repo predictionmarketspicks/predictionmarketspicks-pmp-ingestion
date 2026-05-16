@@ -9,14 +9,19 @@
 //   2. No rows with spot_source = 'prev_close_bridge' written before the day's
 //      first parity-sourced row landed (cold-start guard worked).
 //   3. ≥ 4 distinct snapshot_at timestamps written.
-//   4. Latest snapshot's smile has stddev_pop(options_iv) ≥ 0.05 (proves a
-//      real smile, not a flat ceiling).
+//   4. Latest snapshot's smile is non-degenerate — STDDEV_POP(options_iv) /
+//      AVG(options_iv) > MIN_SMILE_RATIO. Relative spread is self-calibrating
+//      across vol regimes (gold ~7% IV vs silver ~30% IV vs oil ~70%); the
+//      old absolute floor of 0.05 stddev caught 88–97% of healthy snapshots
+//      as false positives because low-vol commodities have naturally tight
+//      smiles. See memory: project_commodity_soak_threshold.md.
 //   5. No NON-NULL quality_flag values landed today.
 //
 // Exit code: 0 if all commodities pass, 1 if any fail. Posts a #bot-logs
 // summary either way (DISCORD_BOT_TOKEN must be set).
 
 import 'dotenv/config';
+import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 
 const COMMODITIES_TO_CHECK = (process.env.SOAK_COMMODITIES || 'silver,gold,oil')
@@ -26,8 +31,49 @@ const COMMODITIES_TO_CHECK = (process.env.SOAK_COMMODITIES || 'silver,gold,oil')
 
 const IV_HARD_CAP = 3.0;
 const MIN_SNAPSHOTS_PER_DAY = 4;
-const MIN_SMILE_STDDEV = 0.05;
+// Smile must show ≥ 0.5% relative spread (STDDEV_POP(iv) / AVG(iv) > 0.005).
+// 14-day data (2026-05-15) showed every commodity's p50 ratio comfortably
+// above this — gold 0.0154, oil 0.0182, silver 0.0345 — while every
+// stddev=0 degenerate-chain case correctly fails. Per-commodity override
+// map below is reserved for future tuning; leave empty unless one commodity
+// drifts.
+const MIN_SMILE_RATIO_DEFAULT = 0.005;
+const MIN_SMILE_RATIO_OVERRIDES = {};
 const BOT_LOGS_CHANNEL_ID = '1487857846111567952';
+
+export function minSmileRatio(commodity) {
+  return MIN_SMILE_RATIO_OVERRIDES[commodity] ?? MIN_SMILE_RATIO_DEFAULT;
+}
+
+// Pure-function smile check — exported for testability.
+//   ivs: array of options_iv values from the latest snapshot.
+//   minRatio: floor for stddev / mean.
+// Returns { ok, reason, strikes, mean, stddev, ratio }. ok=true when there
+// are < 3 strikes (skipped by upstream policy) or when ratio > minRatio.
+export function evaluateSmile(ivs, { minRatio = MIN_SMILE_RATIO_DEFAULT } = {}) {
+  const finite = (Array.isArray(ivs) ? ivs : [])
+    .map((v) => Number(v))
+    .filter((v) => Number.isFinite(v));
+  if (finite.length < 3) {
+    return { ok: true, reason: 'too_few_strikes', strikes: finite.length };
+  }
+  const mean = finite.reduce((a, b) => a + b, 0) / finite.length;
+  const variance = finite.reduce((a, b) => a + (b - mean) ** 2, 0) / finite.length;
+  const stddev = Math.sqrt(variance);
+  // Defensive — a chain that somehow logged mean <= 0 is itself degenerate.
+  if (!(mean > 0)) {
+    return { ok: false, reason: 'non_positive_mean', strikes: finite.length, mean, stddev, ratio: null };
+  }
+  const ratio = stddev / mean;
+  return {
+    ok: ratio > minRatio,
+    reason: ratio > minRatio ? 'ok' : 'smile_too_flat',
+    strikes: finite.length,
+    mean,
+    stddev,
+    ratio,
+  };
+}
 
 function sb() {
   const url = process.env.SUPABASE_URL;
@@ -104,13 +150,14 @@ async function checkCommodity(client, commodity, snapshotDate) {
       .not('options_iv', 'is', null);
     if (latestErr) {
       failures.push(`latest_smile_query: ${latestErr.message}`);
-    } else if (latestRows && latestRows.length >= 3) {
-      const ivs = latestRows.map((r) => Number(r.options_iv)).filter((v) => Number.isFinite(v));
-      const mean = ivs.reduce((a, b) => a + b, 0) / ivs.length;
-      const variance = ivs.reduce((a, b) => a + (b - mean) ** 2, 0) / ivs.length;
-      const stddev = Math.sqrt(variance);
-      if (stddev < MIN_SMILE_STDDEV) {
-        failures.push(`smile_stddev=${stddev.toFixed(4)} < ${MIN_SMILE_STDDEV}`);
+    } else {
+      const ivs = (latestRows || []).map((r) => Number(r.options_iv));
+      const verdict = evaluateSmile(ivs, { minRatio: minSmileRatio(commodity) });
+      if (!verdict.ok) {
+        const detail = verdict.ratio == null
+          ? `${verdict.reason} (strikes=${verdict.strikes})`
+          : `smile_ratio=${verdict.ratio.toFixed(4)} (stddev=${verdict.stddev.toFixed(4)}, mean=${verdict.mean.toFixed(4)}) < ${minSmileRatio(commodity)}`;
+        failures.push(detail);
       }
     }
   }
@@ -163,7 +210,12 @@ async function main() {
   process.exit(allOk ? 0 : 1);
 }
 
-main().catch((err) => {
-  console.error('[soak] fatal:', err?.message || err);
-  process.exit(1);
-});
+// Guard main() so importing this file from a test file does not invoke the
+// network round-trip or call process.exit. Standard Node ESM is-main check.
+const isMainModule = process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url);
+if (isMainModule) {
+  main().catch((err) => {
+    console.error('[soak] fatal:', err?.message || err);
+    process.exit(1);
+  });
+}

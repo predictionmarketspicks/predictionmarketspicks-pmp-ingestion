@@ -32,7 +32,7 @@ import {
 import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/options-provider.js';
 import { getPrice } from '../feeds/pyth.js';
-import { getOilSpot, getUsoChain, getContractSpot } from '../feeds/yahoo-oil.js';
+import { getOilSpot, getContractSpot } from '../feeds/yahoo-oil.js';
 import { getFredDailyClose } from '../feeds/fred.js';
 import { fetchEvent, getNextEvent } from '../feeds/kalshi-event.js';
 import { getActiveSettleContract } from '../feeds/kalshi-series.js';
@@ -224,9 +224,12 @@ export async function discoverEvent(config) {
 // Returns { meta, rows } shaped for the supabase writer. Returns null if any
 // upstream feed has no data yet (cold-start race) or a fail-open guard fires.
 export async function computeSnapshot(config, event, { now = new Date() } = {}) {
-  // Oil sources spot + chain from Yahoo (free, 15-min delayed) instead of
-  // pyth + massive. Same downstream shape; only the input feeds differ.
-  const useYahoo = config.useYahooOil === true;
+  // Oil sources spot from Yahoo (CL=F / CLM26.NYM — contract-aware WTI)
+  // instead of Pyth. Chain always comes from the options provider
+  // (Databento default, real-time via the Python sidecar). Hybrid landed
+  // 2026-05-16; Yahoo's fragile cookie+crumb chain endpoint is no longer
+  // load-bearing.
+  const useYahooSpot = config.useYahooSpot === true;
 
   // Contract-aware spot (Part B of OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13).
   // When config.useContractAwareSpot is true and the commodity is oil,
@@ -234,7 +237,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   // matching specific-month Yahoo ticker (CLM26.NYM, CLN26.NYM, ...).
   // Falls back to CL=F continuous on any resolution failure.
   let spot = null;
-  if (useYahoo && config.useContractAwareSpot === true) {
+  if (useYahooSpot && config.useContractAwareSpot === true) {
     try {
       const settle = await getActiveSettleContract(config.seriesTicker, event.closeTime);
       if (settle) {
@@ -266,13 +269,13 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   }
 
   if (!spot) {
-    spot = useYahoo ? getOilSpot() : getPrice(config.pythSymbol);
+    spot = useYahooSpot ? getOilSpot() : getPrice(config.pythSymbol);
   }
 
-  const chain = useYahoo ? getUsoChain() : getChain(config.underlyingEtf);
+  const chain = getChain(config.underlyingEtf);
   if (!spot) {
     console.warn(
-      `[${config.commodity}] no spot price (${useYahoo ? 'yahoo CL=F' : `pyth ${config.pythSymbol}`}) — skipping snapshot`,
+      `[${config.commodity}] no spot price (${useYahooSpot ? 'yahoo CL=F' : `pyth ${config.pythSymbol}`}) — skipping snapshot`,
     );
     return null;
   }

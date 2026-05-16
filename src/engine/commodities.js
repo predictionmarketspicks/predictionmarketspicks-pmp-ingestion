@@ -5,16 +5,18 @@
 // wrapper file in src/engine/. The shared compute fn in commodity-base.js
 // reads the rest from the row passed in.
 //
-// Spot/chain feed source per commodity (May 9 2026):
-//   silver  Pyth XAG/USD  + Massive SLV chain   (verified, real-time)
-//   gold    Pyth XAU/USD  + Massive GLD chain   (verified, real-time)
-//   oil     Yahoo CL=F    + Yahoo USO chain     (15-min delayed, free, fragile —
-//                                                see src/feeds/yahoo-oil.js)
+// Spot/chain feed source per commodity (May 16 2026):
+//   silver  Pyth XAG/USD  + Databento SLV.OPT  (real-time, default provider)
+//   gold    Pyth XAU/USD  + Databento GLD.OPT  (real-time)
+//   oil     Yahoo CL=F /  + Databento USO.OPT  (hybrid: Yahoo spot for
+//           CLM26.NYM                           contract-aware WTI accuracy,
+//                                               Databento for real-time IV chain)
 //   copper  Pyth XCU/USD  — UNVERIFIED, no Pyth feed ID configured. Engine
 //                           fails open when getPrice() returns null.
 //
-// Per-commodity `useYahooOil` flag flips the compute path in commodity-base.js
-// to source spot + chain from src/feeds/yahoo-oil.js instead of pyth + massive.
+// Per-commodity `useYahooSpot` flag flips the spot source in commodity-base.js
+// from Pyth to src/feeds/yahoo-oil.js. Chain always comes from the active
+// options provider (Databento default; Massive fallback via OPTIONS_PROVIDER).
 // Per-commodity `bypassWriterTag` flag exempts a feed from the WRITER_TAG
 // gate that suppresses Discord posts + Vercel revalidation. Used for oil so
 // it can post normally while silver/gold remain gated under delayed_test
@@ -74,11 +76,11 @@ export const COMMODITIES = {
     commodity: 'oil',
     seriesTicker: 'KXWTI',
     underlyingEtf: 'USO',
-    pythSymbol: 'WTI', // not used when useYahooOil is true; kept for shape parity
+    pythSymbol: 'WTI', // not used when useYahooSpot is true; kept for shape parity
     spotUnit: '$/bbl',
-    spotLabel: 'Yahoo CL=F (15-min delayed)',
+    spotLabel: 'Yahoo CL=F / CLM26.NYM (contract-aware)',
     enabled: true,
-    useYahooOil: true,
+    useYahooSpot: true,
     bypassWriterTag: true,
     // Contract-aware spot (Part B of OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13).
     // When true, resolve the active settle contract from Kalshi series
@@ -97,6 +99,11 @@ export const COMMODITIES = {
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
+    // OPRA dark off-hours: USO chain stops updating overnight even though
+    // Yahoo CL=F continues to print on Globex/Asia. Writing snapshots with
+    // a frozen IV smile + a moving spot would just upsert misleading rows.
+    // Pairs with requiredOffHours:false on the databento_uso readiness gate.
+    pauseSnapshotsOffHours: true,
   },
   copper: {
     commodity: 'copper',

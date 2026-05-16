@@ -128,21 +128,23 @@ for (const config of enabledCommodities) {
   // false-page between every poll. Pyth still polls at ~10s and is fine on
   // the global 90s/300s thresholds. Yahoo (oil) polls at 15min like Massive
   // and gets the same 17min override.
-  if (config.useYahooOil) {
+  // Chain always comes from the active options provider. Databento polls at
+  // 5s during market hours via the sidecar; OPRA is dark off-hours, the
+  // sidecar's book doesn't move, and the engine deliberately pauses writes
+  // (commodities.js → pauseSnapshotsOffHours), so we drop the feed from the
+  // readiness gate off-hours rather than false-paging on an intentionally
+  // idle source. Massive's 15min delayed poll runs 24/5, so it keeps a 17min
+  // override across both windows.
+  const chainStaleOpts = OPTIONS_PROVIDER === 'databento'
+    ? { maxStaleMs: 60 * 1000, requiredOffHours: false }
+    : { maxStaleMs: 17 * 60 * 1000 };
+  markFeedRequired(requiredFeedName(config.underlyingEtf), chainStaleOpts);
+
+  if (config.useYahooSpot) {
+    // Oil hybrid: Yahoo spot (CL=F / CLM26.NYM) + provider chain. The 15min
+    // Yahoo poll cadence gets a 17min stale window. No Pyth feed for oil.
     markFeedRequired('yahoo_cl_f_spot', { maxStaleMs: 17 * 60 * 1000 });
-    markFeedRequired('yahoo_uso_chain', { maxStaleMs: 17 * 60 * 1000 });
   } else {
-    // Databento polls at 5s during market hours via the sidecar. Off-hours
-    // OPRA is dark, the sidecar's book doesn't move, and the engine
-    // deliberately pauses writes (commodities.js → pauseSnapshotsOffHours),
-    // so we drop the feed from the readiness gate off-hours rather than
-    // false-paging on an intentionally idle source. Massive's 15min delayed
-    // poll runs 24/5, so it keeps its single 17min override across both
-    // windows.
-    const staleOpts = OPTIONS_PROVIDER === 'databento'
-      ? { maxStaleMs: 60 * 1000, requiredOffHours: false }
-      : { maxStaleMs: 17 * 60 * 1000 };
-    markFeedRequired(requiredFeedName(config.underlyingEtf), staleOpts);
     markFeedRequired(`pyth_${config.pythSymbol.replace(/[/]/g, '_').toLowerCase()}`);
   }
   registerFeed(`${config.commodity}_engine`);
@@ -381,15 +383,17 @@ function scheduleSnapshot(state) {
 
 async function bootstrapEngine(state) {
   await refreshEvent(state);
-  if (state.config.useYahooOil) {
+  // Chain always comes from the options provider. Oil also starts the Yahoo
+  // spot poller (CL=F + contract-aware CLM26.NYM); silver/gold get their spot
+  // from Pyth via startPyth() in bootstrapAll.
+  startOptionsFeed(state);
+  if (state.config.useYahooSpot) {
     startYahooOil(state.expirationDateRef);
-  } else {
-    startOptionsFeed(state);
   }
-  // Wait briefly so feeds have data on the first snapshot. Yahoo's first
-  // chain fetch is ~3 round-trips (cookie → crumb → options); 15s leaves
-  // headroom over the 8s silver/gold path.
-  const firstSnapshotDelayMs = state.config.useYahooOil ? 15_000 : 8_000;
+  // 8s is enough for the sidecar to deliver a populated chain on a warm
+  // restart. Yahoo's spot poller is a single v8 chart call and resolves well
+  // inside that window too.
+  const firstSnapshotDelayMs = 8_000;
   setTimeout(async () => {
     await runSnapshotOnce(state);
     scheduleSnapshot(state);
@@ -405,7 +409,7 @@ async function bootstrapAll() {
   const pythSymbols = Array.from(
     new Set(
       enabledCommodities
-        .filter((c) => !c.useYahooOil)
+        .filter((c) => !c.useYahooSpot)
         .map((c) => c.pythSymbol)
         .filter((s) => PYTH_FEED_IDS[s]),
     ),

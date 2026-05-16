@@ -1,21 +1,18 @@
-// Yahoo Finance feed — CL=F continuous WTI spot + USO options chain.
+// Yahoo Finance feed — CL=F continuous WTI spot + (dormant) USO options chain.
 //
-// Replaces the legacy yfinance + GH Actions cron retired 2026-05-04. Free,
-// 15-min delayed, unofficial. Yahoo will eventually break this — when it does,
-// /health surfaces yahoo_cl_f_spot or yahoo_uso_chain disconnected and the
-// operator pivots to a paid feed (Polygon / Databento / EODHD / IBKR).
+// HYBRID 2026-05-16: USO options chain moved to Databento (USO.OPT subscription).
+// This module now serves spot only: CL=F continuous + contract-aware CLM26.NYM
+// for WTI accuracy. The chain code below (refreshSession, fetchChainOnce,
+// pollChainOnce, scheduleChain, getUsoChain, normalizeYahooContract) is left
+// in place dormant — no caller, no scheduler, no /health registration. It's
+// kept for one window so a quick rollback (re-introduce useYahooChain flag,
+// re-register feed, re-start scheduler) is one diff. Session 2 deletes.
 //
-// UA quirk (verified 2026-05-09): Yahoo's bot defense 429s the full
-// "Mozilla/5.0 (Macintosh; ...) Chrome/124" UA across every endpoint, but
-// responds 200 to a bare "Mozilla/5.0". Spot (v8 chart) works UA-only; the
-// options chain endpoint requires a cookie+crumb session (GET fc.yahoo.com
-// for cookies, GET /v1/test/getcrumb for the crumb token, then attach both
-// to the v7 options call). Crumb rotates infrequently — refresh on 401/403.
+// Spot endpoint stays load-bearing. UA quirk: Yahoo 429s the full
+// "Mozilla/5.0 (Macintosh; ...) Chrome/124" UA but accepts bare "Mozilla/5.0".
+// Spot is the v8 chart endpoint — no cookie/crumb needed.
 //
-// Cadence: 15min during US options market hours, 1h off-hours. Matches the
-// massive.js pattern; both poll at 15min so option-chain freshness is
-// equivalent. Spot endpoint is cheap (no session) so we run it on the same
-// schedule rather than tighter.
+// Cadence: 15min during US options market hours, 1h off-hours.
 
 import { setFeedStatus, recordTick } from '../observability/health.js';
 import {
@@ -316,11 +313,14 @@ function scheduleChain(expirationDateRef) {
 
 // --- public API ---
 
-export function startYahooOil(expirationDateRef) {
+export function startYahooOil(_expirationDateRef) {
+  // Hybrid 2026-05-16: spot poller only. The unused arg is kept so the
+  // call site in src/index.js (which still owns state.expirationDateRef
+  // for the chain poller) stays signature-compatible if the chain code
+  // is ever resurrected.
   stopRequested = false;
   pollSpotOnce().then(() => scheduleSpot());
-  pollChainOnce(expirationDateRef).then(() => scheduleChain(expirationDateRef));
-  console.log('[yahoo-oil] started spot + chain pollers');
+  console.log('[yahoo-oil] started spot poller (chain dormant on Databento)');
 }
 
 export function stopYahooOil() {
@@ -335,6 +335,11 @@ export function getOilSpot() {
   return spotCache;
 }
 
+// Dormant since 2026-05-16. No callers; chain comes from feeds/databento.js
+// via feeds/options-provider.js. Kept for one window in case rollback is
+// needed. Session 2 deletes this and all the cookie+crumb session machinery
+// above (refreshSession/parseSetCookie/ensureSession + fetchChainOnce +
+// pollChainOnce + scheduleChain + normalizeYahooContract + CHAIN_FEED).
 export function getUsoChain() {
   return chainCache;
 }

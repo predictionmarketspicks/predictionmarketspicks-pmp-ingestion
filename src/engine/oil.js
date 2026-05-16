@@ -1,13 +1,12 @@
-// Oil Edge engine — Pyth WTI spot + Massive USO chain + Kalshi KXWTI.
-// Same compute path as silver via commodity-base.js.
+// Oil Edge engine — Yahoo CL=F / CLM26.NYM spot + Databento USO.OPT chain
+// + Kalshi KXWTI. Same compute path as silver/gold via commodity-base.js;
+// only the spot source differs (useYahooSpot flag in commodities.js).
 //
-// SPOT FEED CAVEAT — see docs/COMMODITY_FEEDS.md for full notes:
-//   - Pyth Hermes serves per-expiry WTI futures (WTIM6, …), not a continuous
-//     feed. The placeholder ID is unverified and will likely 404 against the
-//     live API. Engine fails open: when getPrice('WTI') returns null, the
-//     snapshot is skipped (logged warn, no DB write).
-//   - COMMODITIES.oil.enabled is false until the spot path is resolved. The
-//     engine still imports cleanly and tests run against fixtures.
+// Pyth Hermes serves WTI as per-expiry futures (WTIM6, ...), not a continuous
+// feed, so it's not viable for our 24/5 spot loop. Yahoo CL=F covers
+// Globex/Asia overnight; contract-aware CLM26.NYM pins the IV smile to the
+// specific CME contract Kalshi KXWTI markets settle on. Chain moved off
+// Yahoo onto Databento USO.OPT on 2026-05-16 (hybrid migration).
 
 import { computeSnapshot, discoverEvent } from './commodity-base.js';
 import { COMMODITIES } from './commodities.js';

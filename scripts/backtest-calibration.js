@@ -23,19 +23,24 @@
 // Usage:
 //   node scripts/backtest-calibration.js \
 //     --commodity silver \
-//     --ohlcv-file ./pulls/SLV.OPT-ohlcv-1d-2024.json \
+//     --ohlcv-file ./pulls/SLV-ohlcv.json \
+//     --defs-file  ./pulls/SLV-defs.json \
 //     --from 2024-01-02 \
 //     --to   2024-12-31 \
 //     [--strikes 0.95,0.98,1.00,1.02,1.05] \
 //     [--horizon-days 7] \
 //     [--query-id <uuid from databento_query_log>]
 //
-// Smoke test (cheap, ~$0.05):
+// Smoke test (cheap, ~$0.05 total, runs on Fly via `fly ssh console`):
+//   node scripts/databento-pull.js --schema definition --dataset OPRA.PILLAR \
+//     --symbols SLV.OPT --stype-in parent --start 2024-05-01 --end 2024-05-08 \
+//     --out /tmp/slv-defs.json --encoding json
 //   node scripts/databento-pull.js --schema ohlcv-1d --dataset OPRA.PILLAR \
 //     --symbols SLV.OPT --stype-in parent --start 2024-05-01 --end 2024-05-08 \
-//     --out ./pulls/slv-may2024.json --encoding json
+//     --out /tmp/slv-ohlcv.json --encoding json
 //   node scripts/backtest-calibration.js --commodity silver \
-//     --ohlcv-file ./pulls/slv-may2024.json --from 2024-05-01 --to 2024-05-08
+//     --ohlcv-file /tmp/slv-ohlcv.json --defs-file /tmp/slv-defs.json \
+//     --from 2024-05-01 --to 2024-05-08
 
 import 'dotenv/config';
 import fs from 'node:fs';
@@ -144,37 +149,71 @@ function parseOccSymbol(occ) {
   };
 }
 
-async function loadOhlcvFile(filePath) {
-  // Stream-parse NDJSON so a 100MB file doesn't blow memory. Bucket records
-  // by date so the replay loop can pull a single day's chain in O(1).
+// Databento JSON encoding details:
+//   - Records are NDJSON, one per line.
+//   - ts_event is inside the `hd` envelope, as a string of nanos-since-epoch.
+//   - Prices (close, strike_price) are fixed-point integers with 9 decimals.
+//   - OHLCV-1d records do NOT carry the OPRA OCC symbol — only instrument_id.
+//     Must pre-load a definition schema pull to map instrument_id → raw_symbol
+//     → (strike, expiration, right) via parseOccSymbol. Sentinel "biggest int64"
+//     values (9223372036854775807) mean "not applicable" for that field.
+//
+// Per-strike price scaling on Databento JSON: divide by 1e9.
+const DBN_PRICE_SCALE = 1e9;
+
+async function loadDefsFile(filePath) {
   const stream = fs.createReadStream(filePath);
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-  const byDate = new Map(); // 'YYYY-MM-DD' → [{ symbol, close, strike, expiration, right }]
+  const byInstrumentId = new Map(); // int → { raw_symbol, strike, expiration, right }
   let nLines = 0;
   let nParsed = 0;
   for await (const line of rl) {
     nLines += 1;
     if (!line.trim()) continue;
     let rec;
-    try {
-      rec = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const sym = rec.symbol;
-    const meta = parseOccSymbol(sym);
+    try { rec = JSON.parse(line); } catch { continue; }
+    const iid = rec.hd?.instrument_id;
+    if (iid == null) continue;
+    // Prefer parsing the OCC OPRA symbol — it's the same shape the engine's
+    // live path uses, so any future change to the smile builder benefits both
+    // backtest and live without divergence.
+    const meta = parseOccSymbol(rec.raw_symbol);
     if (!meta) continue;
-    const close = Number(rec.close);
+    byInstrumentId.set(Number(iid), meta);
+    nParsed += 1;
+  }
+  console.log(`[backtest] loaded ${nParsed}/${nLines} definitions → ${byInstrumentId.size} unique instrument_ids`);
+  return byInstrumentId;
+}
+
+async function loadOhlcvFile(filePath, defsMap) {
+  const stream = fs.createReadStream(filePath);
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const byDate = new Map(); // 'YYYY-MM-DD' → [{ strike, expiration, right, close, instrument_id }]
+  let nLines = 0;
+  let nParsed = 0;
+  let nNoMeta = 0;
+  for await (const line of rl) {
+    nLines += 1;
+    if (!line.trim()) continue;
+    let rec;
+    try { rec = JSON.parse(line); } catch { continue; }
+    const iid = Number(rec.hd?.instrument_id);
+    if (!Number.isFinite(iid)) continue;
+    const meta = defsMap.get(iid);
+    if (!meta) { nNoMeta += 1; continue; }
+    const close = Number(rec.close) / DBN_PRICE_SCALE;
     if (!Number.isFinite(close) || close <= 0) continue;
-    // ts_event nanos since epoch
-    const tsMs = Math.floor(Number(rec.ts_event) / 1e6);
+    const tsNs = rec.hd?.ts_event;
+    if (!tsNs) continue;
+    const tsMs = Math.floor(Number(tsNs) / 1e6);
     if (!Number.isFinite(tsMs)) continue;
     const dateKey = new Date(tsMs).toISOString().slice(0, 10);
     if (!byDate.has(dateKey)) byDate.set(dateKey, []);
-    byDate.get(dateKey).push({ ...meta, close, symbol: sym });
+    byDate.get(dateKey).push({ ...meta, close, instrument_id: iid });
     nParsed += 1;
   }
-  console.log(`[backtest] loaded ${nParsed}/${nLines} OHLCV records across ${byDate.size} dates`);
+  console.log(`[backtest] loaded ${nParsed}/${nLines} OHLCV records (${nNoMeta} missing defs) across ${byDate.size} dates`);
   return byDate;
 }
 
@@ -258,6 +297,7 @@ async function main() {
   const args = parseArgs(process.argv);
   const commodity = ensure(args, 'commodity');
   const ohlcvFile = ensure(args, 'ohlcv-file');
+  const defsFile = ensure(args, 'defs-file');
   const fromIso = ensure(args, 'from');
   const toIso = ensure(args, 'to');
   const strikes = (args.strikes || DEFAULT_STRIKES.join(','))
@@ -278,7 +318,8 @@ async function main() {
   const spotMap = await fetchYahooDaily(etf, fromIso, spotHorizonEnd);
   console.log(`[backtest] yahoo ${etf} returned ${spotMap.size} daily closes`);
 
-  const byDate = await loadOhlcvFile(ohlcvFile);
+  const defsMap = await loadDefsFile(defsFile);
+  const byDate = await loadOhlcvFile(ohlcvFile, defsMap);
 
   const supabase = supabaseClient();
   const evalDates = eachTradingDate(fromIso, toIso);

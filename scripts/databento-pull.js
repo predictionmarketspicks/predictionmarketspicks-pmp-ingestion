@@ -147,6 +147,17 @@ async function logQuery(supabase, row) {
   return data?.query_id || null;
 }
 
+async function updateQueryLog(supabase, queryId, patch) {
+  if (!supabase || !queryId) return;
+  const { error } = await supabase
+    .from('databento_query_log')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('query_id', queryId);
+  if (error) {
+    console.error('[databento-pull] log update failed:', error.message);
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv);
 
@@ -179,22 +190,26 @@ async function main() {
 
   console.log(`[databento-pull] estimate: cost=$${costEstimatedUsd.toFixed(4)}  size=${gbEstimated ? gbEstimated.toFixed(3) + ' GB' : 'unknown'}`);
 
+  const supabase = supabaseClient();
+  const baseRow = {
+    schema_name: schema,
+    dataset,
+    symbols,
+    stype_in: stypeIn,
+    start_at: new Date(start).toISOString(),
+    end_at: new Date(end).toISOString(),
+    gb_estimated: gbEstimated,
+    cost_estimated_usd: costEstimatedUsd,
+    forced: !!force,
+    notes,
+  };
+
   // ---- Step 2: budget gate ----
   if (costEstimatedUsd > budgetUsd && !force) {
-    const supabase = supabaseClient();
     await logQuery(supabase, {
-      schema,
-      dataset,
-      symbols,
-      start_ts: new Date(start).toISOString(),
-      end_ts: new Date(end).toISOString(),
-      gb_estimated: gbEstimated,
-      cost_estimated_usd: costEstimatedUsd,
-      gb_actual: null,
-      cost_actual_usd: null,
-      forced: false,
-      ran_by: process.env.USER || null,
-      notes: `BUDGET_BLOCK: estimate $${costEstimatedUsd.toFixed(4)} > cap $${budgetUsd.toFixed(2)}. Pass --force to override.${notes ? ' notes=' + notes : ''}`,
+      ...baseRow,
+      pull_status: 'blocked',
+      error_message: `BUDGET_BLOCK: estimate $${costEstimatedUsd.toFixed(4)} > cap $${budgetUsd.toFixed(2)}. Pass --force to override.`,
     });
     console.error(
       `[databento-pull] BUDGET BLOCK: estimate $${costEstimatedUsd.toFixed(4)} > cap $${budgetUsd.toFixed(2)}.`,
@@ -203,33 +218,33 @@ async function main() {
     process.exit(2);
   }
 
-  // ---- Step 3: pull + log ----
+  // Log the submit attempt up front so a download crash still leaves a row.
+  const queryId = await logQuery(supabase, { ...baseRow, pull_status: 'submitted' });
+  if (queryId) console.log(`[databento-pull] logged query_id=${queryId}`);
+
+  // ---- Step 3: pull ----
   console.log(`[databento-pull] pulling → ${out} (encoding=${encoding}) ...`);
-  const bytes = await streamTimeseries({ ...costBody, encoding }, out);
+  let bytes;
+  try {
+    bytes = await streamTimeseries({ ...costBody, encoding }, out);
+  } catch (err) {
+    await updateQueryLog(supabase, queryId, {
+      pull_status: 'error',
+      error_message: (err?.message || String(err)).slice(0, 500),
+    });
+    throw err;
+  }
   const gbActual = bytes / (1024 ** 3);
-  // Actual cost == estimate * (actual_gb / estimated_gb) when sizes match;
-  // when they don't (rare), use the estimate as a conservative recording.
   const costActualUsd =
     gbEstimated && gbEstimated > 0 ? costEstimatedUsd * (gbActual / gbEstimated) : costEstimatedUsd;
 
   console.log(`[databento-pull] pulled ${gbActual.toFixed(3)} GB → ~$${costActualUsd.toFixed(4)}`);
 
-  const supabase = supabaseClient();
-  const queryId = await logQuery(supabase, {
-    schema,
-    dataset,
-    symbols,
-    start_ts: new Date(start).toISOString(),
-    end_ts: new Date(end).toISOString(),
-    gb_estimated: gbEstimated,
-    cost_estimated_usd: costEstimatedUsd,
+  await updateQueryLog(supabase, queryId, {
+    pull_status: 'completed',
     gb_actual: gbActual,
     cost_actual_usd: costActualUsd,
-    forced: force,
-    ran_by: process.env.USER || null,
-    notes,
   });
-  if (queryId) console.log(`[databento-pull] logged query_id=${queryId}`);
 }
 
 main().catch((err) => {

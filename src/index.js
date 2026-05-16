@@ -30,6 +30,7 @@ import {
 } from './feeds/polymarket.js';
 import { computeSnapshot, discoverEvent } from './engine/commodity-base.js';
 import { listAllCommodities, listEnabledCommodities } from './engine/commodities.js';
+import { startFlowAlerts } from './engine/flow-alerts.js';
 import { ARB_MAPPINGS, getPolymarketYesTokenIds } from './engine/arb-mappings.js';
 import { evaluateAll as evaluateArbAll } from './engine/comparator.js';
 import { ARB_COMPARE_INTERVAL_MS } from './engine/arb-thresholds.js';
@@ -420,6 +421,16 @@ async function bootstrapAll() {
       console.error(`[${state.config.commodity}] bootstrap failed`, err);
       Sentry.captureException(err);
     });
+  }
+
+  // Flow-alerts engine — polls the sidecar's /trades/recent every 5 min and
+  // posts unusual-options-activity embeds to #bot-logs. Off-hours it ticks
+  // but no-ops (OPRA dark). Gated by FLOW_ALERTS_ENABLED so we can flip it
+  // off without a redeploy if the first soak is too noisy.
+  if (process.env.FLOW_ALERTS_ENABLED !== 'false') {
+    startFlowAlerts();
+  } else {
+    console.log('[flow-alerts] disabled via FLOW_ALERTS_ENABLED=false');
   }
 }
 

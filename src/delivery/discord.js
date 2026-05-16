@@ -204,4 +204,24 @@ export async function postBotLog(content) {
   });
 }
 
+// Embed variant for engines (flow-alerts) that build their own rich payloads.
+// content is optional. Sanitization applies to title/description/footer
+// because Discord renders embed text from user input.
+export async function postBotLogEmbed(embed, { content = '' } = {}) {
+  if (!embed) return false;
+  const safe = {
+    ...embed,
+    title: embed.title ? sanitize(String(embed.title), 256) : embed.title,
+    description: embed.description ? sanitize(String(embed.description), 4000) : embed.description,
+    footer: embed.footer?.text
+      ? { ...embed.footer, text: sanitize(String(embed.footer.text), 2000) }
+      : embed.footer,
+  };
+  return postToChannel(CHANNEL_ID.BOT_LOGS, {
+    content: content ? sanitize(String(content), 1900) : '',
+    embeds: [safe],
+    allowed_mentions: { parse: [] },
+  });
+}
+
 export { KALSHI_REFERRAL_URL, CHANNEL_ID };

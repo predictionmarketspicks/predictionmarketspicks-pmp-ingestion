@@ -97,7 +97,10 @@ log = logging.getLogger("databento-sidecar")
 _lock = threading.Lock()
 _instruments: dict[int, dict[str, Any]] = {}
 _book: dict[int, dict[str, Any]] = {}
-_trade_history: dict[int, deque[tuple[int, int]]] = defaultdict(deque)
+# (ts_ns, size, price) — price added 2026-05-16 so the flow-alerts engine can
+# render trade prints in Discord without a second round-trip. None means
+# print arrived without pretty_price (rare; we just drop those rows downstream).
+_trade_history: dict[int, deque[tuple[int, int, float | None]]] = defaultdict(deque)
 _record_queue: queue.SimpleQueue = queue.SimpleQueue()
 # Pre-filter passlist. Written by the worker when it classifies an instrument
 # from its SymbolMappingMsg/InstrumentDefMsg (expiry beyond MAX_EXPIRY_DAYS).
@@ -144,7 +147,7 @@ def _ns_to_iso(ns: int) -> str | None:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ns / 1_000_000_000))
 
 
-def _evict_old_trades(history: deque[tuple[int, int]], cutoff_ns: int) -> None:
+def _evict_old_trades(history: deque[tuple[int, int, float | None]], cutoff_ns: int) -> None:
     while history and history[0][0] < cutoff_ns:
         history.popleft()
 
@@ -154,7 +157,7 @@ def _rolling_volume(instrument_id: int, now_ns: int) -> int:
     if not history:
         return 0
     _evict_old_trades(history, now_ns - VOLUME_WINDOW_NS)
-    return sum(size for _, size in history)
+    return sum(size for _, size, _price in history)
 
 
 # --- record callback (hot path) ----------------------------------------
@@ -286,7 +289,7 @@ def _process_record(record: Any) -> None:
         if price > 0:
             slot["last"] = price
         history = _trade_history[record.instrument_id]
-        history.append((ts_ns, size))
+        history.append((ts_ns, size, price if price > 0 else None))
         _counters["trades"] += 1
         _counters["last_tick_at_ns"] = time.time_ns()
         return
@@ -499,6 +502,28 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, payload)
             return
 
+        # /trades/recent/<underlying>?since_ms=<unix-ms>
+        # Returns trade prints since the cutoff with resolved (strike, expiry,
+        # right) metadata. Consumed by the flow-alerts engine. since_ms defaults
+        # to now - 15min; max look-back is the 24h VOLUME_WINDOW so heavily
+        # backlogged consumers get truncated rather than scanning beyond the
+        # eviction window.
+        if self.path.startswith("/trades/recent/"):
+            path_no_q, _, qs = self.path.partition("?")
+            underlying = path_no_q[len("/trades/recent/"):].upper()
+            since_ms = None
+            for kv in qs.split("&"):
+                if kv.startswith("since_ms="):
+                    try:
+                        since_ms = int(kv.split("=", 1)[1])
+                    except ValueError:
+                        since_ms = None
+            if since_ms is None:
+                since_ms = int(time.time() * 1000) - 15 * 60 * 1000
+            payload = build_recent_trades_response(underlying, since_ms)
+            self._send_json(200, payload)
+            return
+
         self._send_json(404, {"error": "not_found", "path": self.path})
 
 
@@ -539,6 +564,47 @@ def build_chain_response(underlying: str) -> dict[str, Any]:
         "underlying": underlying,
         "contract_count": len(contracts),
         "contracts": contracts,
+    }
+
+
+def build_recent_trades_response(underlying: str, since_ms: int) -> dict[str, Any]:
+    """Trade prints since `since_ms` (unix-ms) for instruments under `underlying`.
+
+    Consumed by the Node flow-alerts engine. Each row is a single print
+    (ts_ms, size, price) joined with the instrument's strike/expiry/right so
+    Discord embeds can render without a second lookup. Trades older than the
+    24h VOLUME_WINDOW have already been evicted from `_trade_history`, so
+    queries beyond that window return nothing — by design.
+    """
+    cutoff_ns = since_ms * 1_000_000
+    trades: list[dict[str, Any]] = []
+    with _lock:
+        for iid, history in _trade_history.items():
+            meta = _instruments.get(iid)
+            if not meta:
+                continue
+            if meta.get("underlying") != underlying and meta.get("underlying") != underlying.split(".", 1)[0]:
+                continue
+            for ts_ns, size, price in history:
+                if ts_ns < cutoff_ns:
+                    continue
+                trades.append({
+                    "instrument_id": iid,
+                    "raw_symbol": meta.get("raw_symbol"),
+                    "contract_type": meta.get("contract_type"),
+                    "strike": meta.get("strike"),
+                    "expiration": meta.get("expiration"),
+                    "ts_ms": ts_ns // 1_000_000,
+                    "size": size,
+                    "price": price,
+                })
+    trades.sort(key=lambda t: t["ts_ms"])
+    return {
+        "fetched_at": _now_iso(),
+        "underlying": underlying,
+        "since_ms": since_ms,
+        "trade_count": len(trades),
+        "trades": trades,
     }
 
 

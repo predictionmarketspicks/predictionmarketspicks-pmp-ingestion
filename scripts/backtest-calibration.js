@@ -200,44 +200,39 @@ async function loadDefsFile(spec) {
   return byInstrumentId;
 }
 
-async function loadOhlcvFile(spec, defsMap) {
-  const files = listFiles(spec);
+// Per-file OHLCV loader. Returns the byDate Map for just this file. Caller
+// is responsible for running the replay on the returned Map and discarding
+// it before loading the next file. This streaming-per-quarter pattern keeps
+// peak memory under ~50 MB (Fly machine has 985 MB total and the engine
+// + sidecar already use ~400 MB, so we have ~500 MB to play with).
+async function loadOhlcvFileSingle(filePath, defsMap) {
+  const stream = fs.createReadStream(filePath);
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
   const byDate = new Map();
-  let totalParsed = 0;
-  let totalLines = 0;
-  let totalNoMeta = 0;
-  for (const filePath of files) {
-    const stream = fs.createReadStream(filePath);
-    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-    let nLines = 0;
-    let nParsed = 0;
-    let nNoMeta = 0;
-    for await (const line of rl) {
-      nLines += 1;
-      if (!line.trim()) continue;
-      let rec;
-      try { rec = JSON.parse(line); } catch { continue; }
-      const iid = Number(rec.hd?.instrument_id);
-      if (!Number.isFinite(iid)) continue;
-      const meta = defsMap.get(iid);
-      if (!meta) { nNoMeta += 1; continue; }
-      const close = Number(rec.close) / DBN_PRICE_SCALE;
-      if (!Number.isFinite(close) || close <= 0) continue;
-      const tsNs = rec.hd?.ts_event;
-      if (!tsNs) continue;
-      const tsMs = Math.floor(Number(tsNs) / 1e6);
-      if (!Number.isFinite(tsMs)) continue;
-      const dateKey = new Date(tsMs).toISOString().slice(0, 10);
-      if (!byDate.has(dateKey)) byDate.set(dateKey, []);
-      byDate.get(dateKey).push({ ...meta, close, instrument_id: iid });
-      nParsed += 1;
-    }
-    console.log(`[backtest]   ohlcv ${filePath}: ${nParsed}/${nLines} records (${nNoMeta} missing defs)`);
-    totalParsed += nParsed;
-    totalLines += nLines;
-    totalNoMeta += nNoMeta;
+  let nLines = 0;
+  let nParsed = 0;
+  let nNoMeta = 0;
+  for await (const line of rl) {
+    nLines += 1;
+    if (!line.trim()) continue;
+    let rec;
+    try { rec = JSON.parse(line); } catch { continue; }
+    const iid = Number(rec.hd?.instrument_id);
+    if (!Number.isFinite(iid)) continue;
+    const meta = defsMap.get(iid);
+    if (!meta) { nNoMeta += 1; continue; }
+    const close = Number(rec.close) / DBN_PRICE_SCALE;
+    if (!Number.isFinite(close) || close <= 0) continue;
+    const tsNs = rec.hd?.ts_event;
+    if (!tsNs) continue;
+    const tsMs = Math.floor(Number(tsNs) / 1e6);
+    if (!Number.isFinite(tsMs)) continue;
+    const dateKey = new Date(tsMs).toISOString().slice(0, 10);
+    if (!byDate.has(dateKey)) byDate.set(dateKey, []);
+    byDate.get(dateKey).push({ ...meta, close, instrument_id: iid });
+    nParsed += 1;
   }
-  console.log(`[backtest] loaded ${totalParsed}/${totalLines} OHLCV records (${totalNoMeta} missing defs) across ${files.length} file(s) → ${byDate.size} dates`);
+  console.log(`[backtest]   ohlcv ${filePath}: ${nParsed}/${nLines} records (${nNoMeta} missing defs) → ${byDate.size} dates`);
   return byDate;
 }
 
@@ -342,87 +337,91 @@ async function main() {
   const spotMap = await fetchYahooDaily(etf, fromIso, spotHorizonEnd);
   console.log(`[backtest] yahoo ${etf} returned ${spotMap.size} daily closes`);
 
+  // Defs all-in-memory (small: 1 row per instrument_id, ~50 bytes each).
+  // OHLCV streamed per-file because a single quarter can hold 700k+ records
+  // and the Fly machine only has ~500 MB free.
   const defsMap = await loadDefsFile(defsFile);
-  const byDate = await loadOhlcvFile(ohlcvFile, defsMap);
+  const ohlcvFiles = listFiles(ohlcvFile);
 
   const supabase = supabaseClient();
-  const evalDates = eachTradingDate(fromIso, toIso);
+  const fromMs = new Date(fromIso + 'T00:00:00Z').getTime();
+  const toMs = new Date(toIso + 'T00:00:00Z').getTime();
 
   let written = 0;
   let skipped = 0;
+  let datesProcessed = 0;
 
-  for (const evalDate of evalDates) {
-    const spot = spotMap.get(evalDate);
-    if (!spot) {
-      skipped += 1;
-      continue;
-    }
-    const dayContracts = byDate.get(evalDate);
-    if (!dayContracts || dayContracts.length === 0) {
-      skipped += 1;
-      continue;
-    }
-    const smile = buildSmile(dayContracts, spot, evalDate);
-    if (!smile) {
-      skipped += 1;
-      continue;
-    }
+  for (const ohlcvPath of ohlcvFiles) {
+    const byDate = await loadOhlcvFileSingle(ohlcvPath, defsMap);
+    const dates = Array.from(byDate.keys()).sort().filter((d) => {
+      const t = new Date(d + 'T00:00:00Z').getTime();
+      return t >= fromMs && t <= toMs;
+    });
+    for (const evalDate of dates) {
+      const spot = spotMap.get(evalDate);
+      if (!spot) { skipped += 1; continue; }
+      const dayContracts = byDate.get(evalDate);
+      if (!dayContracts || dayContracts.length === 0) { skipped += 1; continue; }
+      const smile = buildSmile(dayContracts, spot, evalDate);
+      if (!smile) { skipped += 1; continue; }
 
-    const horizonDate = addBusinessDays(evalDate, horizonDays);
-    const realizedSpot = spotMap.get(horizonDate);
+      const horizonDate = addBusinessDays(evalDate, horizonDays);
+      const realizedSpot = spotMap.get(horizonDate);
 
-    const rows = [];
-    for (const strikePct of strikes) {
-      const strike = spot * strikePct;
-      const iv = smile.ivAt(strike);
-      if (!Number.isFinite(iv) || iv <= 0) continue;
-      const T = horizonDays / 365.25;
-      const prob = probAboveStrike(spot, strike, T, RISK_FREE_RATE, DIVIDEND_YIELD, iv);
-      if (!Number.isFinite(prob)) continue;
-      const evaluatedAt = `${evalDate}T15:00:00Z`; // 10am ET ~= 15:00 UTC (EDT) / 14:00 (EST). Close enough for daily.
-      const horizonAt = `${horizonDate}T20:00:00Z`;
-      let outcome = null;
-      if (realizedSpot != null) {
-        outcome = realizedSpot > strike ? 'YES_HIT' : 'NO_HIT';
+      const rows = [];
+      for (const strikePct of strikes) {
+        const strike = spot * strikePct;
+        const iv = smile.ivAt(strike);
+        if (!Number.isFinite(iv) || iv <= 0) continue;
+        const T = horizonDays / 365.25;
+        const prob = probAboveStrike(spot, strike, T, RISK_FREE_RATE, DIVIDEND_YIELD, iv);
+        if (!Number.isFinite(prob)) continue;
+        const evaluatedAt = `${evalDate}T15:00:00Z`;
+        const horizonAt = `${horizonDate}T20:00:00Z`;
+        let outcome = null;
+        if (realizedSpot != null) {
+          outcome = realizedSpot > strike ? 'YES_HIT' : 'NO_HIT';
+        }
+        rows.push({
+          evaluated_at: evaluatedAt,
+          commodity,
+          strike: Number(strike.toFixed(4)),
+          strike_pct: Number(strikePct.toFixed(4)),
+          horizon_days: horizonDays,
+          horizon_at: horizonAt,
+          spot_price: Number(spot.toFixed(4)),
+          spot_source: `yahoo_${etf.toLowerCase()}_daily`,
+          underlying_etf: etf,
+          underlying_price: Number(spot.toFixed(4)),
+          options_iv: Number(iv.toFixed(4)),
+          options_iv_speculative: false,
+          options_prob: Number(prob.toFixed(4)),
+          realized_spot: realizedSpot != null ? Number(realizedSpot.toFixed(4)) : null,
+          outcome,
+          settled_at: realizedSpot != null ? horizonAt : null,
+          databento_query_id: queryId,
+          is_backtest: true,
+        });
       }
-      rows.push({
-        evaluated_at: evaluatedAt,
-        commodity,
-        strike: Number(strike.toFixed(4)),
-        strike_pct: Number(strikePct.toFixed(4)),
-        horizon_days: horizonDays,
-        horizon_at: horizonAt,
-        spot_price: Number(spot.toFixed(4)),
-        spot_source: `yahoo_${etf.toLowerCase()}_daily`,
-        underlying_etf: etf,
-        underlying_price: Number(spot.toFixed(4)),
-        options_iv: Number(iv.toFixed(4)),
-        options_iv_speculative: false,
-        options_prob: Number(prob.toFixed(4)),
-        realized_spot: realizedSpot != null ? Number(realizedSpot.toFixed(4)) : null,
-        outcome,
-        settled_at: realizedSpot != null ? horizonAt : null,
-        databento_query_id: queryId,
-        is_backtest: true,
-      });
+      if (rows.length === 0) { skipped += 1; continue; }
+      const { error } = await supabase
+        .from('commodity_edge_backtest_signals')
+        .upsert(rows, { onConflict: 'commodity,evaluated_date,strike,horizon_days' });
+      if (error) {
+        console.error(`[backtest] ${evalDate} upsert failed: ${error.message}`);
+        skipped += 1;
+        continue;
+      }
+      written += rows.length;
+      datesProcessed += 1;
     }
-    if (rows.length === 0) {
-      skipped += 1;
-      continue;
-    }
-    const { error } = await supabase
-      .from('commodity_edge_backtest_signals')
-      .upsert(rows, { onConflict: 'commodity,evaluated_date,strike,horizon_days' });
-    if (error) {
-      console.error(`[backtest] ${evalDate} upsert failed: ${error.message}`);
-      skipped += 1;
-      continue;
-    }
-    written += rows.length;
-    console.log(`[backtest] ${evalDate} spot=${spot.toFixed(2)} → ${rows.length} rows (T=${horizonDays}d ${realizedSpot != null ? 'resolved' : 'pending'})`);
+    console.log(`[backtest] file done: ${ohlcvPath} → ${dates.length} dates in window, running total written=${written}`);
+    // Hint v8 to release the byDate Map between files. Not strictly necessary
+    // (next iteration's reassignment makes it eligible), but explicit.
+    byDate.clear();
   }
 
-  console.log(`[backtest] done. written=${written} skipped=${skipped} dates=${evalDates.length}`);
+  console.log(`[backtest] done. written=${written} skipped=${skipped} dates_processed=${datesProcessed}`);
 }
 
 main().catch((err) => {

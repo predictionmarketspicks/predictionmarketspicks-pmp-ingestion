@@ -88,18 +88,36 @@ async function settleCommodity(supabase, commodity, dryRun) {
   const spotMap = await fetchYahooDaily(etf, minDate, padEnd.toISOString().slice(0, 10));
   console.log(`[settle] ${commodity}: ${pending.length} pending, yahoo returned ${spotMap.size} daily closes (${minDate} → ${padEnd.toISOString().slice(0, 10)})`);
 
+  // Horizon dates may fall on a US market holiday that Yahoo skips
+  // (MLK Day, July 4, etc.). Walk forward up to 5 days to find the next
+  // trading day's close — that's the de facto settle in a real Kalshi
+  // market too, since the contract resolves on the next available print.
+  function nextSpot(startIso) {
+    const d = new Date(startIso + 'T00:00:00Z');
+    for (let i = 0; i <= 5; i++) {
+      const key = d.toISOString().slice(0, 10);
+      const px = spotMap.get(key);
+      if (px != null) return { price: px, date: key };
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+    return null;
+  }
+
   const updates = [];
   let skipped = 0;
   for (const r of pending) {
     const horizonDate = r.horizon_at.slice(0, 10);
-    const realized = spotMap.get(horizonDate);
-    if (realized == null) { skipped += 1; continue; }
-    const outcome = realized > Number(r.strike) ? 'YES_HIT' : 'NO_HIT';
+    const hit = nextSpot(horizonDate);
+    if (!hit) { skipped += 1; continue; }
+    const outcome = hit.price > Number(r.strike) ? 'YES_HIT' : 'NO_HIT';
     updates.push({
       id: r.id,
-      realized_spot: Number(realized.toFixed(4)),
+      realized_spot: Number(hit.price.toFixed(4)),
       outcome,
-      settled_at: r.horizon_at,
+      // settled_at points to the actual settle date Yahoo gave us, not the
+      // theoretical horizon (which may have been a holiday). One column has
+      // to win — Kalshi-style "next-trading-day" semantics win.
+      settled_at: `${hit.date}T20:00:00Z`,
     });
   }
 

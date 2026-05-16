@@ -29,6 +29,7 @@ RUN pip install --no-cache-dir -r python/requirements.txt
 COPY src ./src
 COPY data ./data
 COPY python ./python
+COPY scripts ./scripts
 COPY python/supervisord.conf /etc/supervisor/conf.d/pmp-ingestion.conf
 
 ENV NODE_ENV=production

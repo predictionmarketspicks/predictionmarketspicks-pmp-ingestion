@@ -355,7 +355,15 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     let rationale = null;
 
     if (edge == null) {
-      rationale = `Missing IV (could not interpolate from ${config.underlyingEtf} chain)`;
+      // Edge is null for two distinct reasons; before today both collapsed
+      // to "Missing IV" which masked the more common cause (no Kalshi bid
+      // on a thin strike). kalshiYesImpliedProb returns 0 when there is
+      // neither a two-sided book nor a recent in-band last print.
+      if (optProb == null) {
+        rationale = `Missing IV (could not interpolate from ${config.underlyingEtf} chain)`;
+      } else {
+        rationale = 'No Kalshi quote (zero bid, no recent print)';
+      }
     } else if (Math.abs(edge) < MIN_EDGE_PP) {
       confidence = 'low';
       rationale = `Edge ${(edge * 100).toFixed(1)}pp below ${(MIN_EDGE_PP * 100).toFixed(0)}pp threshold`;

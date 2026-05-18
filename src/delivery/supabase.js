@@ -33,17 +33,61 @@ function writerTag() {
 // (commodity, snapshot_date, event_ticker, strike). snapshot_date is generated
 // from snapshot_at server-side. Intraday writes during the same UTC day update
 // the row in place rather than appending.
+//
+// Write-throttle (handoffs/COST_AND_NEWSLETTER_TEARDOWN_2026-05-18.md §2.4):
+// drop rows where (commodity, event_ticker, strike) was last persisted <30s
+// ago AND edge moved <0.5pp from the persisted value. The in-memory state
+// served to readers stays real-time — only the DB write rate is throttled.
+// Caps Supabase write IO on the 5s real-time poll cadence without dropping
+// any actionable signal.
+const _lastWritePerKey = new Map(); // key → { ts, edgePp }
+const WRITE_MIN_INTERVAL_MS = 30_000;
+const WRITE_MIN_EDGE_DELTA = 0.005; // 0.5pp (edge_pp is a fraction)
+
+function _shouldPersist(row) {
+  const key = `${row.commodity}|${row.event_ticker}|${row.strike}`;
+  const prev = _lastWritePerKey.get(key);
+  const now = Date.now();
+  const edge = row.edge_pp;
+  if (!prev) return { write: true, key };
+  if (now - prev.ts >= WRITE_MIN_INTERVAL_MS) return { write: true, key };
+  if (edge != null && prev.edgePp != null && Math.abs(edge - prev.edgePp) >= WRITE_MIN_EDGE_DELTA) {
+    return { write: true, key };
+  }
+  if (edge != null && prev.edgePp == null) return { write: true, key };
+  return { write: false, key };
+}
+
 export async function upsertCommodityEdgeRows(rows) {
   if (!rows || rows.length === 0) return { count: 0 };
   const tag = writerTag();
-  const stamped = rows.map((r) => ({ ...r, snapshot_type: tag }));
+  const toWrite = [];
+  let throttled = 0;
+  for (const r of rows) {
+    const { write, key } = _shouldPersist(r);
+    if (write) {
+      toWrite.push({ ...r, snapshot_type: tag, _throttleKey: key });
+    } else {
+      throttled++;
+    }
+  }
+  if (toWrite.length === 0) {
+    return { count: 0, tag, throttled };
+  }
+  // Strip the internal throttle key from the rows before upsert.
+  const stamped = toWrite.map(({ _throttleKey, ...r }) => r);
   const sb = getClient();
   const { data, error } = await sb
     .from('commodity_edge_signals')
     .upsert(stamped, { onConflict: 'commodity,snapshot_date,event_ticker,strike' })
     .select('id');
   if (error) throw new Error(`commodity_edge_signals upsert: ${error.message}`);
-  return { count: data?.length ?? 0, tag };
+  // Record successful writes for the throttle window.
+  const writeTs = Date.now();
+  for (const r of toWrite) {
+    _lastWritePerKey.set(r._throttleKey, { ts: writeTs, edgePp: r.edge_pp ?? null });
+  }
+  return { count: data?.length ?? 0, tag, throttled };
 }
 
 // Daily dealer-gamma snapshot. UNIQUE (commodity, snapshot_date) — intraday

@@ -192,6 +192,23 @@ async function refreshEvent(state) {
   try {
     const ev = await discoverEvent(config);
     if (!ev) {
+      // Defensive: if discoverEvent returned null but we already have a
+      // currentEvent that hasn't expired yet, keep it. discoverEvent can
+      // legitimately fail transiently (Kalshi API hiccup, catalog rollover
+      // window where the just-closed event drops out before the next
+      // listing opens, bitcoin's eventFilter rejecting every visible
+      // candidate around hour boundaries). Snapshots can keep firing
+      // against the prior event until it actually expires; the next call
+      // to refreshEvent or runSnapshotOnce-driven retry will pick up the
+      // real next event when one becomes available.
+      const prior = state.currentEvent;
+      const priorClose = prior ? new Date(prior.closeTime).getTime() : 0;
+      if (prior && priorClose > Date.now()) {
+        console.warn(
+          `[${config.commodity}] no open ${config.seriesTicker} candidate — keeping prior ${prior.eventTicker} (closes ${prior.closeTime})`,
+        );
+        return;
+      }
       console.warn(`[${config.commodity}] no open ${config.seriesTicker} event — likely weekend; will retry`);
       state.currentEvent = null;
       return;
@@ -210,6 +227,17 @@ async function refreshEvent(state) {
 
 async function runSnapshotOnce(state) {
   const { config } = state;
+  // On-demand event refresh. The 30-min setInterval is too coarse for
+  // commodities with frequently-rotating events (bitcoin's hourly KXBTCD).
+  // If currentEvent is missing or already past its close time, try one
+  // synchronous refresh before giving up on this snapshot — this collapses
+  // the recovery window from 30 min to one snapshot interval.
+  const closeMs = state.currentEvent
+    ? new Date(state.currentEvent.closeTime).getTime()
+    : 0;
+  if (!state.currentEvent || closeMs <= Date.now()) {
+    await refreshEvent(state);
+  }
   if (!state.currentEvent) {
     console.warn(`[${config.commodity}] no event — skipping snapshot`);
     return;

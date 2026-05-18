@@ -243,11 +243,28 @@ async function pollOnce(underlying) {
       return;
     }
 
-    // Push strike-range bounds to the sidecar so it can drop far-OTM
-    // contracts at the SDK callback layer. Fire-and-forget; sidecar applies
-    // bounds asynchronously and reclassifies existing instruments. Internal
-    // re-push throttle gates network traffic.
-    pushStrikeBounds(underlying, spotResolution.price);
+    // Strike-bounds push intentionally disabled (2026-05-18).
+    //
+    // The PC-parity spot derivation in deriveEtfSpotByParity is unreliable
+    // for low-liquidity chains — it can pick a deep-OTM strike with sparse
+    // quotes and return a wildly wrong spot (observed: USO derived $153 vs
+    // real ETF spot ~$80, which dropped every real USO contract from the
+    // sidecar and silenced oil snapshots for 13+ minutes).
+    //
+    // The IV smile in commodity-base.js tolerates a bad parity spot because
+    // it builds a 75–125% range around it and just degrades gracefully on
+    // missing strikes. The sidecar's strike-bounds filter is harsher — it
+    // drops the entire contract — so it needs a more reliable spot source
+    // before it can be re-enabled. Two viable paths:
+    //   (a) take spot from the Node-side Pyth/Yahoo feeds (commodity spot)
+    //       and translate via a known ETF ratio
+    //   (b) fix deriveEtfSpotByParity to reject low-quality joint books
+    //
+    // Until either lands, the sidecar still benefits from MAX_EXPIRY_DAYS
+    // and per-instrument quote decimation — strike filtering is the third
+    // lever, opt-in.
+    // pushStrikeBounds(underlying, spotResolution.price);
+    void pushStrikeBounds;
 
     const contracts = [];
     for (const c of rawContracts) {

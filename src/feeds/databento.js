@@ -57,6 +57,40 @@ const chainCache = new Map(); // underlying → { fetchedAt, expirationDate, con
 const timers = new Map(); // underlying → setTimeout id
 let stopRequested = false;
 
+// Sidecar strike-bounds push state. Bounds are spot × [STRIKE_LO_FRAC, STRIKE_HI_FRAC]
+// — wider than the IV smile range (commodity-base.js uses 0.75/1.25) so the
+// sidecar admits a small buffer of contracts around the smile edges. Re-push
+// only when spot moves >STRIKE_REPUSH_PCT from the last value we pushed.
+const STRIKE_LO_FRAC = 0.70;
+const STRIKE_HI_FRAC = 1.30;
+const STRIKE_REPUSH_PCT = 0.02; // 2% drift — re-push when spot moves enough to shift bounds
+const _lastPushedSpot = new Map(); // underlying → spot used at last push
+
+async function pushStrikeBounds(underlying, etfSpot) {
+  if (!underlying || !(etfSpot > 0)) return;
+  const prev = _lastPushedSpot.get(underlying);
+  if (prev != null && Math.abs(etfSpot - prev) / prev < STRIKE_REPUSH_PCT) return;
+  const lo = etfSpot * STRIKE_LO_FRAC;
+  const hi = etfSpot * STRIKE_HI_FRAC;
+  try {
+    const res = await fetch(`${SIDECAR_BASE}/strike-bounds`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [underlying]: [lo, hi] }),
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!res.ok) {
+      console.warn(`[databento] strike-bounds push ${underlying} returned ${res.status}`);
+      return;
+    }
+    _lastPushedSpot.set(underlying, etfSpot);
+  } catch (err) {
+    // Sidecar may be cold-starting or briefly unreachable; this is fire-and-
+    // forget so the snapshot path doesn't block. Next pollOnce retries.
+    console.warn(`[databento] strike-bounds push ${underlying} failed: ${err?.message || err}`);
+  }
+}
+
 function num(v) {
   if (v == null) return null;
   const n = typeof v === 'number' ? v : Number.parseFloat(v);
@@ -208,6 +242,12 @@ async function pollOnce(underlying) {
       setFeedStatus(feedName, { connected: true, lastError: 'no_spot' });
       return;
     }
+
+    // Push strike-range bounds to the sidecar so it can drop far-OTM
+    // contracts at the SDK callback layer. Fire-and-forget; sidecar applies
+    // bounds asynchronously and reclassifies existing instruments. Internal
+    // re-push throttle gates network traffic.
+    pushStrikeBounds(underlying, spotResolution.price);
 
     const contracts = [];
     for (const c of rawContracts) {

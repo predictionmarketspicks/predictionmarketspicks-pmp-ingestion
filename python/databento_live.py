@@ -77,6 +77,14 @@ VOLUME_WINDOW_NS = 24 * 60 * 60 * 1_000_000_000
 QUEUE_BATCH = 512
 QUEUE_DRAIN_IDLE_SLEEP_S = 0.001
 
+# Per-instrument quote decimation. First record per instrument_id always
+# lands; subsequent records arriving within QUOTE_MIN_INTERVAL_NS are dropped
+# in the SDK callback hot path. The Node engine samples the chain once per
+# snapshot (60s in burst mode, 5min otherwise) so we don't need every NBBO
+# update — collapsing intra-window chatter is the cheapest way to keep
+# Databento from flagging us as a slow client. Tunable via DATABENTO_DECIMATE_MS.
+QUOTE_MIN_INTERVAL_NS = int(os.environ.get("DATABENTO_DECIMATE_MS", "500")) * 1_000_000
+
 
 # --- logging -----------------------------------------------------------
 
@@ -103,11 +111,26 @@ _book: dict[int, dict[str, Any]] = {}
 _trade_history: dict[int, deque[tuple[int, int, float | None]]] = defaultdict(deque)
 _record_queue: queue.SimpleQueue = queue.SimpleQueue()
 # Pre-filter passlist. Written by the worker when it classifies an instrument
-# from its SymbolMappingMsg/InstrumentDefMsg (expiry beyond MAX_EXPIRY_DAYS).
+# from its SymbolMappingMsg/InstrumentDefMsg (expiry beyond MAX_EXPIRY_DAYS,
+# or strike outside the Node-pushed _strike_bounds for the underlying).
 # Read lock-free by the SDK callback so it can drop matching records before
 # they enter the queue. set.__contains__ is a single C-level hash lookup —
 # atomic w.r.t. concurrent .add() in CPython, so no lock is needed.
 _drop_instrument: set[int] = set()
+
+# Per-instrument last-record arrival time (monotonic ns). Read+written in
+# the SDK callback hot path under GIL atomic dict ops. Used for quote
+# decimation — first record per iid passes, subsequent within
+# QUOTE_MIN_INTERVAL_NS get dropped. Bounded in size because iids dropped
+# via _drop_instrument never reach this dict (callback short-circuits earlier).
+_last_record_ns: dict[int, int] = {}
+
+# Strike-range bounds per underlying root (e.g., "SLV", "GLD", "USO", "IBIT").
+# Pushed by the Node engine via POST /strike-bounds whenever it has a fresh
+# ETF spot; sidecar uses bounds to classify far-OTM instruments into
+# _drop_instrument so their NBBO chatter never enters the queue. None until
+# the first push arrives — instruments aren't strike-filtered before then.
+_strike_bounds: dict[str, tuple[float, float]] = {}
 # rtype name → count. Tracks every distinct record class name the SDK
 # delivers so we can see when (e.g.) Cmbp1Msg gets renamed by an SDK
 # upgrade or when we're getting unexpected message types.
@@ -125,6 +148,8 @@ _counters = {
     "processed": 0,
     "queue_depth_peak": 0,
     "callback_dropped": 0,
+    "decimated": 0,
+    "strike_filtered": 0,
     "last_tick_at_ns": 0,
     "last_error": None,
     "connected_at_ns": 0,
@@ -169,16 +194,32 @@ def on_record(record: Any) -> None:
     fast enough that the gateway never declares us a slow client on high-vol
     days (OPEX, FOMC, etc).
 
-    Pre-filter: instruments classified for drop by the worker (far-dated
-    expiries) short-circuit here. set.__contains__ is atomic in CPython —
-    safe to read concurrent with worker .add(). Counter increment is also
-    a single bytecode hot enough to skip the lock; a few lost increments
-    under contention is acceptable for an observability counter.
+    Pre-filters (cheapest first):
+      1. instrument_id in _drop_instrument → drop (far-dated expiry OR
+         strike outside Node-pushed bounds for the underlying)
+      2. last record for this iid was <QUOTE_MIN_INTERVAL_NS ago → drop
+         (per-instrument decimation; first record per iid always passes)
+
+    set.__contains__ and dict.get/set are atomic in CPython (single C-level
+    bytecode), safe to read+write concurrent with the worker without a lock.
+    Counter increments may drop a few under contention — acceptable for
+    observability-only counters.
     """
     iid = getattr(record, "instrument_id", None)
-    if iid is not None and iid in _drop_instrument:
+    if iid is None:
+        # Records without an instrument id (system/error msgs) bypass both
+        # filters and land in the worker for handling.
+        _record_queue.put(record)
+        return
+    if iid in _drop_instrument:
         _counters["callback_dropped"] += 1
         return
+    now_ns = time.monotonic_ns()
+    last_ns = _last_record_ns.get(iid)
+    if last_ns is not None and (now_ns - last_ns) < QUOTE_MIN_INTERVAL_NS:
+        _counters["decimated"] += 1
+        return
+    _last_record_ns[iid] = now_ns
     _record_queue.put(record)
 
 
@@ -209,14 +250,21 @@ def _process_record(record: Any) -> None:
 
     if rtype_norm == "instrumentdefmsg":
         expiration = _format_expiration(record)
+        strike = float(getattr(record, "pretty_strike_price", 0.0) or 0.0)
+        underlying = getattr(record, "underlying", None)
         _instruments[record.instrument_id] = {
             "raw_symbol": getattr(record, "raw_symbol", None),
-            "strike": float(getattr(record, "pretty_strike_price", 0.0) or 0.0),
+            "strike": strike,
             "expiration": expiration,
             "contract_type": _format_contract_type(record),
-            "underlying": getattr(record, "underlying", None),
+            "underlying": underlying,
         }
-        _classify_instrument_drop(record.instrument_id, expiration)
+        _classify_instrument_drop(
+            record.instrument_id,
+            expiration,
+            strike=strike,
+            underlying=underlying,
+        )
         _counters["definitions"] += 1
         _counters["last_tick_at_ns"] = time.time_ns()
         return
@@ -253,7 +301,12 @@ def _process_record(record: Any) -> None:
                 "contract_type": parsed["contract_type"],
                 "underlying": parsed["underlying"],
             }
-            _classify_instrument_drop(record.instrument_id, parsed["expiration"])
+            _classify_instrument_drop(
+                record.instrument_id,
+                parsed["expiration"],
+                strike=parsed["strike"],
+                underlying=parsed["underlying"],
+            )
             _counters["definitions"] += 1
             _counters["last_tick_at_ns"] = time.time_ns()
         return
@@ -378,17 +431,81 @@ def _days_to_expiry(expiry_iso: str | None, now_ns: int | None = None) -> int | 
     return int((exp_epoch - now_s) / 86400)
 
 
-def _classify_instrument_drop(instrument_id: int, expiry_iso: str | None) -> None:
+def _classify_instrument_drop(
+    instrument_id: int,
+    expiry_iso: str | None,
+    strike: float | None = None,
+    underlying: str | None = None,
+) -> None:
     """Decide whether to drop quotes for this instrument. Called from the
     worker when an InstrumentDefMsg or SymbolMappingMsg lands.
 
-    Anything more than MAX_EXPIRY_DAYS out (or already expired, or with
-    unparseable expiry) is added to _drop_instrument. Subsequent Cmbp1Msg /
-    TradeMsg records for that id are short-circuited at the SDK callback.
+    Two filters:
+      1. Expiry: anything more than MAX_EXPIRY_DAYS out (or already expired,
+         or with unparseable expiry) is dropped.
+      2. Strike: if Node has pushed bounds for this underlying via
+         POST /strike-bounds, drop instruments whose strike falls outside
+         [lo, hi]. Bounds are typically 70%–130% of current ETF spot.
+
+    Subsequent Cmbp1Msg / TradeMsg records for a dropped id are short-
+    circuited at the SDK callback (single atomic set lookup).
     """
     days = _days_to_expiry(expiry_iso)
     if days is None or days < 0 or days > MAX_EXPIRY_DAYS:
         _drop_instrument.add(instrument_id)
+        return
+    if strike is None or strike <= 0 or not underlying:
+        return
+    bounds = _strike_bounds.get(underlying.upper())
+    if bounds is None:
+        return
+    lo, hi = bounds
+    if strike < lo or strike > hi:
+        _drop_instrument.add(instrument_id)
+
+
+def _reclassify_for_bounds(updated_underlyings: set[str]) -> None:
+    """Walk known instruments and recompute their drop status for
+    underlyings whose strike bounds just changed. Caller must hold _lock.
+
+    Adds far-OTM instruments to _drop_instrument and removes previously-
+    dropped instruments whose strikes are now in range AND whose expiry
+    still qualifies. _last_record_ns entries for newly-dropped iids are
+    left in place — they're tiny and don't affect correctness, and they
+    get cleaned up implicitly the next time the dict gets pruned.
+    """
+    added = 0
+    removed = 0
+    for iid, meta in _instruments.items():
+        underlying = (meta.get("underlying") or "").upper()
+        if underlying not in updated_underlyings:
+            continue
+        strike = meta.get("strike")
+        if strike is None or strike <= 0:
+            continue
+        bounds = _strike_bounds.get(underlying)
+        if bounds is None:
+            continue
+        lo, hi = bounds
+        out_of_range = strike < lo or strike > hi
+        in_drop = iid in _drop_instrument
+        if out_of_range and not in_drop:
+            _drop_instrument.add(iid)
+            added += 1
+        elif not out_of_range and in_drop:
+            # Only un-drop if the instrument was dropped for strike, not
+            # expiry. Check expiry independently before re-admitting.
+            days = _days_to_expiry(meta.get("expiration"))
+            if days is not None and 0 <= days <= MAX_EXPIRY_DAYS:
+                _drop_instrument.discard(iid)
+                removed += 1
+    if added or removed:
+        log.info(
+            "strike-bounds reclassify: added=%d removed=%d bounds=%s",
+            added,
+            removed,
+            {k: _strike_bounds[k] for k in updated_underlyings if k in _strike_bounds},
+        )
 
 
 def _parse_occ_symbol(symbol: str) -> dict[str, Any] | None:
@@ -488,8 +605,12 @@ class Handler(BaseHTTPRequestHandler):
                     "queue_depth": _record_queue.qsize(),
                     "queue_depth_peak": _counters["queue_depth_peak"],
                     "callback_dropped": _counters["callback_dropped"],
+                    "decimated": _counters["decimated"],
+                    "decimate_ms": QUOTE_MIN_INTERVAL_NS // 1_000_000,
                     "drop_filter_size": len(_drop_instrument),
+                    "tracked_iids": len(_last_record_ns),
                     "max_expiry_days": MAX_EXPIRY_DAYS,
+                    "strike_bounds": {k: list(v) for k, v in _strike_bounds.items()},
                     "last_error": _counters["last_error"],
                     "now": _now_iso(),
                 }
@@ -524,6 +645,51 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, payload)
             return
 
+        self._send_json(404, {"error": "not_found", "path": self.path})
+
+    def do_POST(self):  # noqa: N802
+        # POST /strike-bounds — Node engine pushes {underlying: [lo, hi]}
+        # whenever it has a fresh ETF spot. Sidecar then drops far-OTM
+        # instruments at the SDK callback layer, dramatically cutting
+        # OPRA firehose load. Bounds are typically 70%–130% of spot.
+        if self.path == "/strike-bounds":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            if length <= 0 or length > 4096:
+                self._send_json(400, {"error": "invalid_content_length"})
+                return
+            try:
+                body = self.rfile.read(length).decode("utf-8")
+                data = json.loads(body)
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                self._send_json(400, {"error": "invalid_json"})
+                return
+            if not isinstance(data, dict):
+                self._send_json(400, {"error": "expected_object"})
+                return
+            updates: dict[str, tuple[float, float]] = {}
+            for raw_underlying, raw_bounds in data.items():
+                if not isinstance(raw_underlying, str):
+                    continue
+                if not isinstance(raw_bounds, (list, tuple)) or len(raw_bounds) != 2:
+                    continue
+                try:
+                    lo = float(raw_bounds[0])
+                    hi = float(raw_bounds[1])
+                except (TypeError, ValueError):
+                    continue
+                if not (lo > 0 and hi > lo):
+                    continue
+                updates[raw_underlying.upper()] = (lo, hi)
+            if not updates:
+                self._send_json(400, {"error": "no_valid_bounds"})
+                return
+            with _lock:
+                _strike_bounds.update(updates)
+                _reclassify_for_bounds(set(updates.keys()))
+                snapshot = {k: list(v) for k, v in _strike_bounds.items()}
+                drop_size = len(_drop_instrument)
+            self._send_json(200, {"ok": True, "bounds": snapshot, "drop_filter_size": drop_size})
+            return
         self._send_json(404, {"error": "not_found", "path": self.path})
 
 
@@ -675,7 +841,8 @@ def _run_heartbeat() -> None:
             type_breakdown = ", ".join(f"{k}={v}" for k, v in _type_counts.most_common(10))
             log.info(
                 "heartbeat defs=%d quotes=%d trades=%d stats=%d oi=%d processed=%d "
-                "queue_depth=%d peak=%d callback_dropped=%d drop_filter=%d types=[%s] last_err=%s",
+                "queue_depth=%d peak=%d cb_dropped=%d decimated=%d drop_filter=%d "
+                "tracked_iids=%d types=[%s] last_err=%s",
                 _counters["definitions"],
                 _counters["quotes"],
                 _counters["trades"],
@@ -685,7 +852,9 @@ def _run_heartbeat() -> None:
                 _record_queue.qsize(),
                 _counters["queue_depth_peak"],
                 _counters["callback_dropped"],
+                _counters["decimated"],
                 len(_drop_instrument),
+                len(_last_record_ns),
                 type_breakdown,
                 (_counters["last_error"] or "none")[:120],
             )

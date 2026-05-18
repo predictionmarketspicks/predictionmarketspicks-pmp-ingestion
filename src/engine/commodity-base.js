@@ -283,6 +283,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     return null;
   }
   if (!chain || !chain.contracts || chain.contracts.length === 0) {
+    console.warn(
+      `[${config.commodity}] empty chain — skipping snapshot (chain=${chain ? 'present' : 'null'}, contracts=${chain?.contracts?.length ?? 0})`,
+    );
     return null;
   }
 
@@ -297,12 +300,22 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       return null;
     }
   }
-  if (!etfPrice || etfPrice <= 0 || spotPrice <= 0) return null;
+  if (!etfPrice || etfPrice <= 0 || spotPrice <= 0) {
+    console.warn(
+      `[${config.commodity}] bad spot/etf — skipping snapshot (etfPrice=${etfPrice}, spotPrice=${spotPrice})`,
+    );
+    return null;
+  }
 
   const ratio = etfPrice / spotPrice;
   const closeMs = new Date(event.closeTime).getTime();
   const T = yearFraction(now.getTime() / 1000, closeMs / 1000);
-  if (T <= 0) return null;
+  if (T <= 0) {
+    console.warn(
+      `[${config.commodity}] event already expired — skipping snapshot (closeTime=${event.closeTime}, T=${T})`,
+    );
+    return null;
+  }
 
   const smile = buildIvSmile(chain.contracts, etfPrice);
 

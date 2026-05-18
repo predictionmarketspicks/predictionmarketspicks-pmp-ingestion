@@ -66,6 +66,19 @@ MAX_EXPIRY_DAYS = int(os.environ.get("DATABENTO_MAX_EXPIRY_DAYS", "60"))
 # print rates — older entries get evicted lazily on read.
 VOLUME_WINDOW_NS = 24 * 60 * 60 * 1_000_000_000
 
+# Volume-counter warmup. The rolling sum only represents trades observed
+# *since the sidecar process started* — it's an artificially low estimate
+# of true 24h volume until the sidecar has been running for the full window.
+# Below this uptime threshold, _rolling_volume returns None so downstream
+# quality filters (Node passesQualityFilters dropping strikes with
+# volume24h < OPTION_QUALITY_MIN_VOLUME) treat the value as unknown via
+# their null-passthrough branch. Without this, every fresh restart silently
+# empties the filtered chain for ~30–60 min until volume accumulates above
+# the threshold, which kept gold/oil/silver/bitcoin from writing rows
+# post-deploy. 1 hour gives the rolling window enough trade flow to
+# distinguish active strikes from dust without being overly conservative.
+VOLUME_WARMUP_NS = 60 * 60 * 1_000_000_000
+
 # Worker batching. The SDK callback thread enqueues raw records onto
 # _record_queue and returns immediately — this is the only thing that keeps
 # Databento from declaring us a "slow client" on peak-volume days (OPEX, etc).
@@ -177,7 +190,18 @@ def _evict_old_trades(history: deque[tuple[int, int, float | None]], cutoff_ns: 
         history.popleft()
 
 
-def _rolling_volume(instrument_id: int, now_ns: int) -> int:
+def _rolling_volume(instrument_id: int, now_ns: int) -> int | None:
+    """Trade-volume sum in the rolling window. Returns None during the
+    VOLUME_WARMUP_NS window after the sidecar first connected — the
+    counter only reflects trades observed since process start, so it
+    severely under-counts true 24h volume early in the sidecar's lifetime.
+    Downstream Node-side filters use the null-passthrough branch in
+    passesQualityFilters to skip the volume gate while the counter is
+    warming up.
+    """
+    connected_ns = _counters.get("connected_at_ns") or 0
+    if connected_ns and (now_ns - connected_ns) < VOLUME_WARMUP_NS:
+        return None
     history = _trade_history.get(instrument_id)
     if not history:
         return 0

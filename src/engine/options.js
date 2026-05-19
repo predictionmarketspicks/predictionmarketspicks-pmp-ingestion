@@ -91,6 +91,26 @@ export function probAboveStrike(S, K, T, r, q, sigma) {
   return normCdf(d2);
 }
 
+// Physical-measure P(S_T > K). Same BS d2 form, but uses an empirically
+// estimated drift μ instead of risk-neutral (r-q). For binary forecast
+// applications (does spot exceed strike?), the physical measure is the
+// correct one — risk-neutral is a pricing artifact carrying the market's
+// risk premium.
+//
+// μ_physical comes from src/engine/drift.js — a Bayesian blend of rolling
+// realized log-return and (Phase 2) futures-curve slope. Round-trips with
+// probAboveStrike when μ = r − q.
+export function probAboveStrikePhysical(S, K, T, mu, sigma) {
+  if (T <= 0) return S > K ? 1 : 0;
+  if (sigma <= 0) {
+    const fwd = S * Math.exp(mu * T);
+    return fwd > K ? 1 : 0;
+  }
+  const volT = sigma * Math.sqrt(T);
+  const d2 = (Math.log(S / K) + (mu - 0.5 * sigma * sigma) * T) / volT;
+  return normCdf(d2);
+}
+
 // ---------- Brent's method root finder ----------
 // Standard implementation — converges cubically near the root. ~50 lines vs.
 // pulling a dependency. Tolerance and maxIter match the Python defaults.

@@ -15,8 +15,10 @@
 // reusing Massive's server-side IV/Greeks (the Python path back-solves IV from
 // Yahoo, which has known quantization issues; the engine doesn't).
 
-import { probAboveStrike, yearFraction } from './options.js';
+import { probAboveStrike, probAboveStrikePhysical, yearFraction } from './options.js';
 import { computeDealerGamma } from './gamma.js';
+import { estimateDrift } from './drift.js';
+import { warmVolCache, estimateVol } from './vol.js';
 import {
   MIN_EDGE_PP,
   MIN_VOL_FOR_LIVE_PRICE,
@@ -210,6 +212,10 @@ function mergeLiveQuote(market) {
     lastPrice: live.price ?? market.lastPrice,
     volume24h: market.volume24h,
     openInterest: live.openInt ?? market.openInterest,
+    // V2 Phase 1: surface the WS frame's ts (ms epoch) for quote_age_seconds.
+    // applyTickerMsg in src/feeds/kalshi.js stores it as `ts` on the cached
+    // entry. Cold-start REST seed sets ts = Date.now() in seedFromMarket.
+    quoteTsMs: live.ts ?? null,
   };
 }
 
@@ -319,6 +325,27 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 
   const smile = buildIvSmile(chain.contracts, etfPrice);
 
+  // V2 physical-measure inputs — drift + realized vol estimated once per
+  // snapshot, then applied per-strike alongside the legacy risk-neutral path.
+  // Both drift and vol estimators are cached internally; warmVolCache populates
+  // the synchronous cache estimateVol() reads from when iterating strikes.
+  // Failures fall back to mu=0 / vol=iv (i.e. v2 collapses to v1 behaviour
+  // for that snapshot) — never throws.
+  let driftEst = null;
+  try {
+    driftEst = await estimateDrift(config.commodity, { now });
+  } catch (err) {
+    console.warn(`[${config.commodity}] drift estimate failed: ${err?.message || err}`);
+  }
+  try {
+    await warmVolCache(config.commodity, { now });
+  } catch (err) {
+    console.warn(`[${config.commodity}] vol cache warm failed: ${err?.message || err}`);
+  }
+  const muUsed = driftEst?.mu ?? null;
+  const muSource = driftEst?.source ?? 'fallback_zero';
+  const muConfidence = driftEst?.confidence ?? 'low';
+
   // FRED Phase 5 cross-check — once per snapshot. Compares realtime spot
   // (Pyth or Yahoo) against the FRED daily close. >150bp divergence flags
   // the realtime feed as likely stale; per-row tier/confidence get
@@ -352,9 +379,23 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     const iv = ivResult?.iv ?? null;
     const ivSpeculative = !!ivResult?.speculative;
 
-    let optProb = null;
+    let optProb = null;             // v1 risk-neutral
+    let probPhysical = null;        // v2 physical-measure
+    let volEst = null;
+    let sigmaBlendVal = null;
+    let sigmaIvVal = null;
+    let sigmaRv20Val = null;
+    let sigmaSource = null;
     if (iv != null && iv > 0 && T > 0) {
       optProb = probAboveStrike(spotPrice, kSpot, T, RISK_FREE_RATE, DIVIDEND_YIELD, iv);
+      volEst = estimateVol(iv, config.commodity);
+      const sigmaForPhysical = volEst?.sigma_blend ?? iv;
+      sigmaBlendVal = volEst?.sigma_blend ?? null;
+      sigmaIvVal = volEst?.sigma_iv ?? iv;
+      sigmaRv20Val = volEst?.sigma_rv20 ?? null;
+      sigmaSource = volEst?.source ?? 'iv_only';
+      const muForPhysical = muUsed != null ? muUsed : (RISK_FREE_RATE - DIVIDEND_YIELD);
+      probPhysical = probAboveStrikePhysical(spotPrice, kSpot, T, muForPhysical, sigmaForPhysical);
     }
 
     const kalshiProb = kalshiYesImpliedProb(market);
@@ -362,6 +403,15 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 
     let edge = null;
     if (optProb != null && kalshiProb > 0) edge = optProb - kalshiProb;
+    let physicalEdge = null;
+    if (probPhysical != null && kalshiProb > 0) physicalEdge = probPhysical - kalshiProb;
+
+    // Quote age — Kalshi WS frames carry a `ts` (ms epoch) on the merged
+    // market object via mergeLiveQuote / kalshi.js applyTickerMsg. Falls
+    // back to null when only the REST seed is present (no live frame yet).
+    const quoteTsMs = market.quoteTsMs ?? null;
+    const quoteAgeSeconds =
+      quoteTsMs != null ? Math.max(0, Math.round((now.getTime() - quoteTsMs) / 1000)) : null;
 
     let direction = 'PASS';
     let confidence = 'skip';
@@ -455,6 +505,21 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       underlying_price: etfPrice,
       fred_divergence_bp: fredDivergenceBp,
       divergence_warning: divergenceWarning,
+      // V2 physical-measure parallel writes (Phase 1). Direction/confidence
+      // still derive from the v1 edge during Phase 1; model_version reflects
+      // which model owns the chosen direction/confidence, NOT which prob
+      // columns are populated.
+      prob_physical: probPhysical,
+      physical_edge_pp: physicalEdge,
+      mu_used: muUsed,
+      mu_source: muSource,
+      mu_confidence: muConfidence,
+      sigma_blend: sigmaBlendVal,
+      sigma_iv: sigmaIvVal,
+      sigma_rv20: sigmaRv20Val,
+      sigma_source: sigmaSource,
+      quote_age_seconds: quoteAgeSeconds,
+      model_version: 'v1_riskneutral',
     });
   }
 

@@ -5,8 +5,11 @@
 //   - legacy `confidence` ('high' | 'medium' | 'low' | 'skip') — front-end uses this
 //   - fused `fused_confidence` ('STRONG' | 'MODERATE' | 'SPECULATIVE' | 'NO_EDGE')
 //     — Phase A COT/gamma fusion column, populated by the Python nightly job
-// Phase 1 engine writes the legacy column. Fusion fields stay NULL until the
-// nightly redundancy job runs (preserves Python pipeline invariant).
+// Phase 1 engine writes both the legacy `confidence` column AND
+// `fused_confidence` / `fused_edge_pp`. The nightly Python redundancy job was
+// retired 2026-05-04; this engine is now the sole writer. `cot_*` and
+// `gamma_*` fusion columns remain NULL — see
+// handoffs/FUSED_CONFIDENCE_WIRE_UP_2026-05-19.md.
 
 // Minimum |edge| (in fraction, not pp) we'll surface as actionable.
 export const MIN_EDGE_PP = 0.05;

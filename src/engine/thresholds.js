@@ -17,6 +17,15 @@ export const MIN_EDGE_PP = 0.05;
 // Minimum 24h Kalshi volume to trust last_price as fair (else stale print).
 export const MIN_VOL_FOR_LIVE_PRICE = 50;
 
+// V2 Phase 2 liquidity gates (handoffs/COMMODITY_EDGE_V2_PHYSICAL_MEASURE_REBUILD_2026-05-19.md
+// Layer 4). Enforced on every actionable (high/medium) confidence assignment
+// in commodity-base.js — wider spread or staler quote demotes to 'low' with
+// rationale append. May 2026 backtest found 26 silver alerts shipped on
+// markets with kalshi_volume_24h=0; this is the source-of-truth gate that
+// would have suppressed them.
+export const MAX_BID_ASK_SPREAD = 0.15;   // 15 cents on a $1 contract
+export const MAX_QUOTE_AGE_SEC = 30 * 60; // 30 minutes
+
 // Risk-free rate + dividend yield used in BS pricing. ETF carries ~zero divs.
 export const RISK_FREE_RATE = 0.045;
 export const DIVIDEND_YIELD = 0.0;

@@ -22,6 +22,8 @@ import { warmVolCache, estimateVol } from './vol.js';
 import {
   MIN_EDGE_PP,
   MIN_VOL_FOR_LIVE_PRICE,
+  MAX_BID_ASK_SPREAD,
+  MAX_QUOTE_AGE_SEC,
   RISK_FREE_RATE,
   DIVIDEND_YIELD,
   fusedTier,
@@ -128,6 +130,44 @@ function kalshiYesImpliedProb(market) {
   }
   if (lastPrice != null && lastPrice > 0 && lastPrice < 1) return lastPrice;
   return 0;
+}
+
+// V2 Phase 2 liquidity gate. Returns { ok, reason } — `ok=true` means the
+// market is liquid enough that an actionable confidence is trustworthy.
+// Failures are recorded so the rationale can name the specific gate that
+// tripped. Null quote age passes (cold-start before any live WS frame has
+// landed); engine cannot tell the difference between "fresh REST seed" and
+// "stale WS quote that happens to still match the REST snapshot". Aligns with
+// applyTickerMsg behaviour where seedFromMarket stamps ts_ms = Date.now().
+function passesLiquidityGate(market) {
+  if (!market) return { ok: false, reason: 'no_market' };
+  const vol = market.volume24h ?? 0;
+  if (vol < MIN_VOL_FOR_LIVE_PRICE) {
+    return { ok: false, reason: `volume_24h ${Math.round(vol)} < ${MIN_VOL_FOR_LIVE_PRICE}` };
+  }
+  const bid = market.yesBid ?? 0;
+  const ask = market.yesAsk ?? 0;
+  if (bid > 0 && ask > 0) {
+    const spread = ask - bid;
+    // 1e-9 epsilon absorbs float-rounding noise at the boundary (Kalshi quotes
+    // are $0.01 granular, so "spread > 0.15" semantically means $0.16+).
+    if (spread > MAX_BID_ASK_SPREAD + 1e-9) {
+      return {
+        ok: false,
+        reason: `bid-ask spread $${spread.toFixed(2)} > $${MAX_BID_ASK_SPREAD.toFixed(2)}`,
+      };
+    }
+  }
+  // quoteTsMs surfaced in mergeLiveQuote (V2 Phase 1). Null = no live frame yet
+  // → fail open. Stale frame (>30min) → demote.
+  const quoteTsMs = market.quoteTsMs;
+  if (quoteTsMs != null) {
+    const ageSec = Math.max(0, Math.round((Date.now() - quoteTsMs) / 1000));
+    if (ageSec > MAX_QUOTE_AGE_SEC) {
+      return { ok: false, reason: `quote ${ageSec}s stale (> ${MAX_QUOTE_AGE_SEC}s)` };
+    }
+  }
+  return { ok: true, reason: null };
 }
 
 function classifyKalshiView(market) {
@@ -461,6 +501,18 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
         confidence = 'low';
         rationale += ' (caveat: thin options volume on contributing strikes — IV may be unreliable)';
       }
+      // V2 Phase 2 liquidity gate: any 'high'/'medium' assignment that fails
+      // the explicit (volume, spread, quote age) gate gets demoted to 'low'.
+      // Source-of-truth check that catches the 26 silver alerts that shipped
+      // on kalshi_volume_24h=0 in May 2026 — the legacy kalshiView=tight_book
+      // path didn't enforce a min-volume floor.
+      if (confidence === 'high' || confidence === 'medium') {
+        const gate = passesLiquidityGate(market);
+        if (!gate.ok) {
+          confidence = 'low';
+          rationale += ` (caveat: liquidity gate failed — ${gate.reason})`;
+        }
+      }
     }
 
     let fusedTierStr = edge != null ? fusedTier(Math.abs(edge)) : 'NO_EDGE';
@@ -603,6 +655,7 @@ export const __test__ = {
   buildIvSmile,
   kalshiYesImpliedProb,
   classifyKalshiView,
+  passesLiquidityGate,
   validateSnapshot,
   smileCoherenceCheck,
   IV_HARD_CAP,

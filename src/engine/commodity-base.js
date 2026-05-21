@@ -427,14 +427,19 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     let sigmaRv20Val = null;
     let sigmaSource = null;
     if (iv != null && iv > 0 && T > 0) {
-      optProb = probAboveStrike(spotPrice, kSpot, T, RISK_FREE_RATE, DIVIDEND_YIELD, iv);
+      // Per-commodity dividend yield: silver/gold/oil/bitcoin all inherit the
+      // global 0.0 (commodities + spot-BTC pay no cash dividend); SPX sets
+      // 0.013 explicitly in commodities.js because SPY's ~1.3% dividend yield
+      // materially shifts the risk-neutral drift for sub-hour expiries.
+      const q = config.dividendYield ?? DIVIDEND_YIELD;
+      optProb = probAboveStrike(spotPrice, kSpot, T, RISK_FREE_RATE, q, iv);
       volEst = estimateVol(iv, config.commodity);
       const sigmaForPhysical = volEst?.sigma_blend ?? iv;
       sigmaBlendVal = volEst?.sigma_blend ?? null;
       sigmaIvVal = volEst?.sigma_iv ?? iv;
       sigmaRv20Val = volEst?.sigma_rv20 ?? null;
       sigmaSource = volEst?.source ?? 'iv_only';
-      const muForPhysical = muUsed != null ? muUsed : (RISK_FREE_RATE - DIVIDEND_YIELD);
+      const muForPhysical = muUsed != null ? muUsed : (RISK_FREE_RATE - q);
       probPhysical = probAboveStrikePhysical(spotPrice, kSpot, T, muForPhysical, sigmaForPhysical);
     }
 
@@ -618,7 +623,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     etfSpot: etfPrice,
     T,
     riskFreeRate: RISK_FREE_RATE,
-    dividendYield: DIVIDEND_YIELD,
+    dividendYield: config.dividendYield ?? DIVIDEND_YIELD,
   });
 
   // FRED divergence demotes meta.topTier the same way per-row tiers were

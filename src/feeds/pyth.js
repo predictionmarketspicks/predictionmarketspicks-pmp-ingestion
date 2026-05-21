@@ -18,16 +18,25 @@ const POLL_INTERVAL_MS = 10_000;
 // per-expiry futures (not continuous) and we have no validated copper feed.
 // The Phase 2A engines for oil/copper fail open when getPrice() returns null;
 // see docs/COMMODITY_FEEDS.md for the resolution path.
+// SPY/USD is Pyth's regular-session SPY ETF feed (Equity.US.SPY/USD), schedule
+// 0930-1600 ET — exactly the KXINXU trading window per Kalshi contract terms,
+// so we don't need the .PRE / .POST / .ON session-gated variants. Last-trade
+// verified 2026-05-21 16:00 ET via Hermes ($740.95). The SPX engine's edge
+// calc uses SPY as the spot; commodity-base.js's `ratio = etfPrice / spotPrice`
+// (line ~356) auto-handles the ~3-5bp SPY-ETF ↔ .INX-cash basis the same way
+// BTC's bridge from BTC/USD to IBIT strikes already does.
 export const FEED_IDS = {
   'XAG/USD': '0xf2fb02c32b055c805e7238d628e5e9dadef274376114eb1f012337cabe93871e',
   'XAU/USD': '0x765d2ba906dbc32ca17cc11f5310a89e9ee1f6420508c63861f2f8ba4ee34bb2',
   'BTC/USD': '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43',
+  'SPY/USD': '0x19e09bb805456ada3979a7d1cbb4b6d63babc3a0f8e8a9509f68afa5c4c11cd5',
 };
 
 const SOURCE_TAGS = {
   'XAG/USD': 'pyth_xag_usd',
   'XAU/USD': 'pyth_xau_usd',
   'BTC/USD': 'pyth_btc_usd',
+  'SPY/USD': 'pyth_spy_usd',
   WTI: 'pyth_wti',
   'XCU/USD': 'pyth_xcu_usd',
 };

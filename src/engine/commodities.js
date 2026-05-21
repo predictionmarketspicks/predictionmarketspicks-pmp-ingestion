@@ -163,6 +163,62 @@ export const COMMODITIES = {
       return hour >= 10 && hour <= 16;
     },
   },
+  spx: {
+    commodity: 'spx',
+    // KXINXU = S&P 500 above/below — HOURLY strike-event contracts settling
+    // at the top of every hour 9:30 AM–4 PM ET (7 settles/weekday: H1000
+    // through H1600). Underlying is the .INX cash index; per the Kalshi
+    // contract terms PDF (kalshi-public-docs.s3.../INX.pdf, verified
+    // 2026-05-21) the Source Agency is Kalshi itself, so no S&P DJI license
+    // is required to trade or analyze. Strikes are floor_strike numerics
+    // at $25-wide increments (~60 strikes/event, 6600–8075 in current
+    // regime). 24h volume on a single event around 26k contracts as of
+    // 2026-05-21 — second-highest non-crypto Kalshi series after KXBTCD.
+    seriesTicker: 'KXINXU',
+    // SPY ETF — by 10× the most liquid OPRA-listed equity options chain.
+    // Must add `SPY` to DATABENTO_SYMBOLS Fly secret BEFORE flipping
+    // enabled:true (handoffs/SP500_EDGE_ENGINE_2026-05-21.md §Phase 0).
+    underlyingEtf: 'SPY',
+    // Pyth Equity.US.SPY/USD regular-session feed. Schedule (Hermes
+    // attribute) is exactly 0930-1600 ET — drops out off-hours by design,
+    // which lines up with KXINXU's locked trading window. We deliberately
+    // skip the .PRE/.POST/.ON session-gated variants because the contract
+    // doesn't trade outside RTH. SPY-ETF vs .INX-cash basis (~3-5bp)
+    // auto-handled by commodity-base.js's `ratio = etfPrice / spotPrice`
+    // — same mechanism that bridges Pyth BTC/USD to IBIT strikes.
+    pythSymbol: 'SPY/USD',
+    spotUnit: 'index pts',
+    spotLabel: 'Pyth SPY/USD (S&P 500 ETF)',
+    enabled: false, // FLIP TRUE after Phase 0 Databento SPY soak passes
+    // FRED Phase 5: S&P 500 daily close. EOD only — catches Pyth/Databento
+    // staleness at the next-morning open the same way DCOILWTICO protects
+    // the WTI engine.
+    fredSeriesId: 'SP500',
+    snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
+    snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
+    snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
+    // OPRA closes 4pm ET, .INX cash session closes 4pm ET, Pyth SPY/USD
+    // regular-session feed drops out at 4pm ET — all three feeds converge
+    // on the same window with no basis-mismatch risk (unlike Bitcoin where
+    // Pyth keeps moving overnight while IBIT chain freezes). Keep pause
+    // so we don't upsert stale rows on weekends.
+    pauseSnapshotsOffHours: true,
+    // Restrict snapshots to the 7 hourly settles 10am–4pm ET. KXINXU event
+    // tickers encode the ET wallclock hour as `H1000` through `H1600` (e.g.
+    // KXINXU-26MAY21H1600). Out-of-hours phantom events get filtered out
+    // defensively. Mirrors the BTC eventFilter pattern in commodities.bitcoin.
+    eventFilter: (ev) => {
+      const m = String(ev.event_ticker).match(/H(\d{4})$/);
+      if (!m) return false;
+      const hour = Number(m[1].slice(0, 2));
+      return hour >= 10 && hour <= 16;
+    },
+    // SPY trailing 12-month dividend yield ~1.3% (2026-Q1). Matters for the
+    // risk-neutral drift on sub-hour expiries; commodity-base.js reads this
+    // via `config.dividendYield ?? DIVIDEND_YIELD` so silver/gold/oil/bitcoin
+    // keep the global 0.0 default.
+    dividendYield: 0.013,
+  },
   copper: {
     commodity: 'copper',
     seriesTicker: 'KXCOPPERMON',

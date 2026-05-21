@@ -32,6 +32,8 @@ import {
   downgradeLegacyConfidence,
   FRED_DIVERGENCE_BP_THRESHOLD,
   FRED_MAX_AGE_HOURS,
+  OPTION_QUALITY_MIN_VOLUME,
+  OPTION_QUALITY_MIN_OI,
 } from './thresholds.js';
 import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/options-provider.js';
@@ -42,6 +44,18 @@ import { fetchEvent, getNextEvent } from '../feeds/kalshi-event.js';
 import { getActiveSettleContract } from '../feeds/kalshi-series.js';
 import { isOptionsMarketOpen } from '../feeds/massive.js';
 import { recordGuardRejection, recordGuardOk } from '../observability/health.js';
+
+// Kalshi-side suppression thresholds (2026-05-21 unified bitcoin-edge fix).
+// Stale-print divergence: when classifyKalshiView returns 'stale_print' AND
+// the live options-implied prob disagrees with the Kalshi side by more than
+// this much, suppress the row. The 8c-vs-60c artifact lived in stale-print
+// rows whose bid/ask happened to bracket an ancient lastPrice from a prior
+// spot regime.
+const STALE_PRINT_DIVERGENCE_CEILING = 0.25; // 25pp
+// Thin-book large-edge ceiling: when passesLiquidityGate fails (volume_24h
+// floor or quote-age) AND |edge| > this, suppress. Below the ceiling the row
+// still ships as LOW with the gate-failed caveat in the rationale.
+const THIN_BOOK_EDGE_CEILING = 0.10; // 10pp
 
 // Snapshot-write guards. Hardening added after the 2026-05-15 Databento cutover
 // surfaced a cold-start IV-solver bail-out (handoff: SILVER_EDGE_GUARDS_2026-05-15).
@@ -203,32 +217,78 @@ function buildIvSmile(contracts, etfSpot) {
   // Each entry is [strike, iv, speculative] so ivAt can flag interpolations
   // that lean on thin-volume contracts (handoff §2.3). The row's confidence is
   // capped to 'low' downstream when smile contributors are speculative.
+  //
+  // Liquidity hard-floor (2026-05-21): the upstream passesQualityFilters in
+  // feeds/massive.js + feeds/databento.js uses null-passthrough for cold-start
+  // protection on off-hours snapshots. For bitcoin (OPRA-hours-only + paused
+  // off-hours) we should never be in cold-start during writes — and on May 21
+  // a single thin contract entering the smile as spot drifted made ATM IV
+  // jump 33→66% on a $34 BTC move. Hard-reject contracts whose volume/OI
+  // can't be confirmed above the floor, falling back to unfiltered only if
+  // the filter would zero out the chain entirely.
+  const filterLiquid = (c) =>
+    c.iv != null &&
+    c.strike != null &&
+    c.iv >= 0.1 &&
+    c.iv <= 1.5 &&
+    (c.volume24h ?? 0) >= OPTION_QUALITY_MIN_VOLUME &&
+    (c.openInterest ?? 0) >= OPTION_QUALITY_MIN_OI;
+  const filterLoose = (c) =>
+    c.iv != null && c.strike != null && c.iv >= 0.1 && c.iv <= 1.5;
+  const liquidContracts = contracts.filter(filterLiquid);
+  const atmPool = liquidContracts.length > 0 ? liquidContracts : contracts.filter(filterLoose);
+
   const clean = [];
-  for (const c of contracts) {
-    if (c.iv == null || c.strike == null) continue;
+  for (const c of atmPool) {
     if (c.strike < lo || c.strike > hi) continue;
-    if (c.iv < 0.1 || c.iv > 1.5) continue;
     if (c.strike >= etfSpot && c.contractType === 'call') clean.push([c.strike, c.iv, !!c.speculative]);
     else if (c.strike < etfSpot && c.contractType === 'put') clean.push([c.strike, c.iv, !!c.speculative]);
   }
   clean.sort((a, b) => a[0] - b[0]);
 
+  // ATM IV: average put + call at the closest strike where both legs exist,
+  // filtered for liquidity. Put-call parity says the two should match; if
+  // they disagree by >10% absolute, flag speculative (something is off on
+  // one leg). Falls back to single-leg + speculative when no paired strike
+  // exists at all. Was previously single closest contract with no liquidity
+  // floor — meaning a thin strike could become ATM IV whenever spot crossed
+  // a boundary, causing the May 21 13-min 33→66→39% IV swing.
   let atmIv = null;
   let atmSpeculative = false;
-  if (contracts.length > 0) {
-    let best = null;
-    let bestDist = Infinity;
-    for (const c of contracts) {
-      if (c.iv == null || c.strike == null) continue;
-      const d = Math.abs(c.strike - etfSpot);
-      if (d < bestDist) {
-        bestDist = d;
-        best = c;
+  if (atmPool.length > 0) {
+    const byStrike = new Map(); // strike → { call, put }
+    for (const c of atmPool) {
+      const existing = byStrike.get(c.strike) || {};
+      if (c.contractType === 'call') existing.call = c;
+      else if (c.contractType === 'put') existing.put = c;
+      byStrike.set(c.strike, existing);
+    }
+    let bestPaired = null;
+    let bestPairedDist = Infinity;
+    let bestSingle = null;
+    let bestSingleDist = Infinity;
+    for (const [strike, legs] of byStrike) {
+      const d = Math.abs(strike - etfSpot);
+      if (legs.call && legs.put && d < bestPairedDist) {
+        bestPairedDist = d;
+        bestPaired = legs;
+      }
+      if ((legs.call || legs.put) && d < bestSingleDist) {
+        bestSingleDist = d;
+        bestSingle = legs.call || legs.put;
       }
     }
-    if (best) {
-      atmIv = best.iv;
-      atmSpeculative = !!best.speculative;
+    if (bestPaired) {
+      const ivCall = bestPaired.call.iv;
+      const ivPut = bestPaired.put.iv;
+      atmIv = (ivCall + ivPut) / 2;
+      atmSpeculative =
+        !!bestPaired.call.speculative ||
+        !!bestPaired.put.speculative ||
+        Math.abs(ivCall - ivPut) > 0.10;
+    } else if (bestSingle) {
+      atmIv = bestSingle.iv;
+      atmSpeculative = true; // single-leg ATM is always speculative
     }
   }
 
@@ -534,12 +594,57 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       // Source-of-truth check that catches the 26 silver alerts that shipped
       // on kalshi_volume_24h=0 in May 2026 — the legacy kalshiView=tight_book
       // path didn't enforce a min-volume floor.
-      if (confidence === 'high' || confidence === 'medium') {
-        const gate = passesLiquidityGate(market);
-        if (!gate.ok) {
-          confidence = 'low';
-          rationale += ` (caveat: liquidity gate failed — ${gate.reason})`;
-        }
+      const gate = passesLiquidityGate(market);
+      if ((confidence === 'high' || confidence === 'medium') && !gate.ok) {
+        confidence = 'low';
+        rationale += ` (caveat: liquidity gate failed — ${gate.reason})`;
+      }
+
+      // 2026-05-21 unified bitcoin-edge fix (handoffs/BITCOIN_EDGE_KALSHI_STALE_QUOTE_FIX_2026-05-21.md).
+      //
+      // Edit D — Stale-print divergence ceiling. classifyKalshiView returns
+      // 'stale_print' when there's a lastPrice but no live two-sided book +
+      // recent volume. The options-implied prob is computed live from spot +
+      // chain every snapshot — it cannot be stale by construction. A >25pp
+      // gap is the signature of the 8c-vs-60c artifact: an ancient lastPrice
+      // from a prior spot regime sitting on a thin or one-sided book. The
+      // row stays in the table for audit; the quality_flag hides it from the
+      // public surface (site reader filters quality_flag IS NULL).
+      if (
+        kalshiView === 'stale_print' &&
+        optProb != null &&
+        kalshiProb != null &&
+        Math.abs(optProb - kalshiProb) > STALE_PRINT_DIVERGENCE_CEILING
+      ) {
+        qualityFlag = 'kalshi_stale_divergence';
+        direction = 'PASS';
+        confidence = 'skip';
+        rationale =
+          `kalshi: stale print ${(kalshiProb * 100).toFixed(0)}c diverges ` +
+          `${(Math.abs(optProb - kalshiProb) * 100).toFixed(1)}pp from live ` +
+          `options ${(optProb * 100).toFixed(0)}% — likely stale lastPrice from prior spot regime`;
+      }
+
+      // Edit E — Thin-book large-edge ceiling. passesLiquidityGate.ok=false
+      // with a still-live bid/ask (kalshiView 'tight_book' or 'live') means
+      // the MM is quoting both sides but volume_24h is below the floor — the
+      // mid we computed against was a quote that may not have repriced since
+      // the last actual trade. An |edge| above 10pp on a market that hasn't
+      // traded is more likely a stale-MM-quote artifact than a real edge.
+      // Sub-10pp edges remain visible as LOW (the existing demotion ran above).
+      // Skip if Edit D already flagged the row.
+      if (
+        qualityFlag == null &&
+        !gate.ok &&
+        edge != null &&
+        Math.abs(edge) > THIN_BOOK_EDGE_CEILING
+      ) {
+        qualityFlag = 'kalshi_thin_book_large_edge';
+        direction = 'PASS';
+        confidence = 'skip';
+        rationale =
+          `kalshi: ${gate.reason} + |edge|=${(Math.abs(edge) * 100).toFixed(1)}pp ` +
+          `— thin-book mid likely stale relative to live options-implied prob`;
       }
     }
 

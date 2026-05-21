@@ -566,7 +566,10 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       event_ticker: event.eventTicker,
       event_close_at: new Date(closeMs).toISOString(),
       strike: kSpot,
-      kalshi_yes: kalshiProb,
+      // kalshi_yes column is NOT NULL — persist 0 when there is no usable
+      // price; quality_flag='kalshi_no_book' (set above) tells the site reader
+      // to suppress the row even though it exists for audit.
+      kalshi_yes: kalshiProb ?? 0,
       kalshi_yes_bid: market.yesBid ?? null,
       kalshi_yes_ask: market.yesAsk ?? null,
       kalshi_volume_24h: Math.round(market.volume24h ?? 0),

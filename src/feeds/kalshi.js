@@ -31,8 +31,13 @@ const KALSHI_WS_PATH = '/trade-api/ws/v2';
 // Series → max markets to subscribe per series. Phase 1 is silver-focused but
 // gold/oil stay subscribed so /health stays multi-series and Phase 2 has
 // observation history when GLD/USO/CPER engines come online.
-const PHASE_1_SERIES = ['KXSILVERW', 'KXGOLDW', 'KXWTI'];
-const MAX_MARKETS_PER_SERIES = 25;
+// KXBTCD added 2026-05-21 — bitcoin was missed during the 2026-05-04 Massive
+// real-time cutover and was reading Kalshi only via per-snapshot REST.
+const PHASE_1_SERIES = ['KXSILVERW', 'KXGOLDW', 'KXWTI', 'KXBTCD'];
+// KXBTCD has ~30-40 strikes per active event vs ~12-15 for the weekly metals,
+// and the engine ticks on one event at a time — so the slice cap is wider
+// AND we filter KXBTCD to the soonest in-window event before slicing.
+const MAX_MARKETS_PER_SERIES = 50;
 
 // Log the raw message shape for the first few ticks per process so future debug
 // has ground truth without redeploying with new logs.
@@ -123,7 +128,34 @@ async function discoverMarkets() {
   for (const series of PHASE_1_SERIES) {
     try {
       const markets = await fetchMarketsForSeries(series);
-      const sliced = markets.slice(0, MAX_MARKETS_PER_SERIES);
+      // KXBTCD returns ALL open hourly events at once (7+ settles inside the
+      // current trading window). Without filtering we'd subscribe to 200+
+      // bitcoin markets and starve the cap. Narrow to the soonest in-window
+      // event — that's the only one the engine ticks on.
+      let candidates = markets;
+      if (series === 'KXBTCD') {
+        const inWindow = markets.filter((m) => {
+          const ev = m.event_ticker || toEventTicker(m.ticker);
+          const hm = String(ev).match(/(\d{2})$/);
+          if (!hm) return false;
+          const hour = Number(hm[1]);
+          return hour >= 10 && hour <= 16;
+        });
+        // event_ticker encodes YYMMMDDHH — lexical sort ⇒ chronological.
+        inWindow.sort((a, b) =>
+          String(a.event_ticker || '').localeCompare(String(b.event_ticker || '')),
+        );
+        const soonestEvent = inWindow[0]?.event_ticker || null;
+        candidates = soonestEvent
+          ? inWindow.filter((m) => m.event_ticker === soonestEvent)
+          : [];
+        if (candidates.length === 0) {
+          console.warn(`[kalshi] KXBTCD no in-window event found — skipping WS subscribe`);
+        } else {
+          console.log(`[kalshi] KXBTCD active event ${soonestEvent} → ${candidates.length} strikes`);
+        }
+      }
+      const sliced = candidates.slice(0, MAX_MARKETS_PER_SERIES);
       const tickers = sliced
         .map((m) => ({ ticker: m.ticker, eventTicker: m.event_ticker || toEventTicker(m.ticker) }))
         .filter((m) => m.ticker);
@@ -265,9 +297,40 @@ async function connect() {
   });
 }
 
+// KXBTCD events rotate hourly. Without a periodic re-discover, the WS stays
+// subscribed to the prior event's strikes after it settles and the next
+// event's strikes never get added. Fire once per hour at HH:00:30 ET — 30s
+// after the bitcoin event close so Kalshi's open-markets list has rotated.
+let btcResubscribeTimer = null;
+
+function scheduleHourlyBtcResubscribe() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setUTCMinutes(0, 30, 0);
+  if (next <= now) next.setUTCHours(now.getUTCHours() + 1);
+  const delay = next.getTime() - now.getTime();
+  btcResubscribeTimer = setTimeout(async () => {
+    btcResubscribeTimer = null;
+    if (stopRequested) return;
+    try {
+      console.log('[kalshi] hourly KXBTCD resubscribe tick');
+      if (ws) {
+        try { ws.close(); } catch { /* ignore */ }
+        ws = null;
+      }
+      await connect();
+    } catch (err) {
+      console.warn('[kalshi] hourly KXBTCD resubscribe failed', err?.message || err);
+    } finally {
+      scheduleHourlyBtcResubscribe();
+    }
+  }, delay);
+}
+
 export async function startKalshi() {
   stopRequested = false;
   await connect();
+  scheduleHourlyBtcResubscribe();
 }
 
 export function stopKalshi() {
@@ -275,6 +338,10 @@ export function stopKalshi() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
+  }
+  if (btcResubscribeTimer) {
+    clearTimeout(btcResubscribeTimer);
+    btcResubscribeTimer = null;
   }
   if (ws) {
     try {

@@ -128,8 +128,21 @@ function kalshiYesImpliedProb(market) {
     }
     return mid;
   }
-  if (lastPrice != null && lastPrice > 0 && lastPrice < 1) return lastPrice;
-  return 0;
+  // No live two-sided book — only trust lastPrice when there's recent volume.
+  // Without a quote ts we can't verify recency directly; volume_24h is the
+  // proxy — a strike with ≥ MIN_VOL_FOR_LIVE_PRICE in the last 24h has at
+  // least one recent trade, which is much better than a single ancient print
+  // on a $0 book. Returning null signals the caller ('cannot price this
+  // strike'); caller writes a quality_flag row instead of a phantom edge.
+  if (
+    lastPrice != null &&
+    lastPrice > 0 &&
+    lastPrice < 1 &&
+    (volume24h ?? 0) >= MIN_VOL_FOR_LIVE_PRICE
+  ) {
+    return lastPrice;
+  }
+  return null;
 }
 
 // V2 Phase 2 liquidity gate. Returns { ok, reason } — `ok=true` means the
@@ -445,11 +458,19 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 
     const kalshiProb = kalshiYesImpliedProb(market);
     const kalshiView = classifyKalshiView(market);
+    // Row-level suppression flag. Set when the Kalshi side has no usable
+    // price (no live two-sided book + insufficient recent volume to trust
+    // any standing print). Site reader filters quality_flag IS NULL, so a
+    // flagged row exists in the table for audit but never reaches the UI —
+    // kills the 8¢/60¢ phantom-edge artifact at the source instead of
+    // shipping kalshi_yes=0 + a fake edge against the options-implied prob.
+    let qualityFlag = null;
+    if (kalshiProb == null) qualityFlag = 'kalshi_no_book';
 
     let edge = null;
-    if (optProb != null && kalshiProb > 0) edge = optProb - kalshiProb;
+    if (optProb != null && kalshiProb != null && kalshiProb > 0) edge = optProb - kalshiProb;
     let physicalEdge = null;
-    if (probPhysical != null && kalshiProb > 0) physicalEdge = probPhysical - kalshiProb;
+    if (probPhysical != null && kalshiProb != null && kalshiProb > 0) physicalEdge = probPhysical - kalshiProb;
 
     // Quote age — Kalshi WS frames carry a `ts` (ms epoch) on the merged
     // market object via mergeLiveQuote / kalshi.js applyTickerMsg. Falls
@@ -465,10 +486,12 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     if (edge == null) {
       // Edge is null for two distinct reasons; before today both collapsed
       // to "Missing IV" which masked the more common cause (no Kalshi bid
-      // on a thin strike). kalshiYesImpliedProb returns 0 when there is
-      // neither a two-sided book nor a recent in-band last print.
+      // on a thin strike). kalshiYesImpliedProb now returns null when
+      // there is neither a two-sided book nor a recent in-band last print.
       if (optProb == null) {
         rationale = `Missing IV (could not interpolate from ${config.underlyingEtf} chain)`;
+      } else if (kalshiProb == null) {
+        rationale = 'No Kalshi quote (no live book + insufficient recent volume)';
       } else {
         rationale = 'No Kalshi quote (zero bid, no recent print)';
       }
@@ -556,6 +579,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       confidence,
       fused_confidence: fusedTierStr,
       rationale,
+      quality_flag: qualityFlag,
       spot_price: spotPrice,
       spot_source: spot.source,
       underlying_etf: config.underlyingEtf,

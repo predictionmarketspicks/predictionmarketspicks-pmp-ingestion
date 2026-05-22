@@ -39,6 +39,7 @@ import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/options-provider.js';
 import { getPrice } from '../feeds/pyth.js';
 import { getOilSpot, getContractSpot } from '../feeds/yahoo-oil.js';
+import { synthesizeWtiSpot } from '../feeds/uso-synthetic.js';
 import { getFredDailyClose } from '../feeds/fred.js';
 import { fetchEvent, getNextEvent } from '../feeds/kalshi-event.js';
 import { getActiveSettleContract } from '../feeds/kalshi-series.js';
@@ -346,20 +347,59 @@ export async function discoverEvent(config) {
 // Returns { meta, rows } shaped for the supabase writer. Returns null if any
 // upstream feed has no data yet (cold-start race) or a fail-open guard fires.
 export async function computeSnapshot(config, event, { now = new Date() } = {}) {
-  // Oil sources spot from Yahoo (CL=F / CLM26.NYM — contract-aware WTI)
-  // instead of Pyth. Chain always comes from the options provider
-  // (Databento default, real-time via the Python sidecar). Hybrid landed
-  // 2026-05-16; Yahoo's fragile cookie+crumb chain endpoint is no longer
-  // load-bearing.
+  // Spot source ladder (oil-specific path is the most complex):
+  //   silver/gold/bitcoin → Pyth via getPrice(config.pythSymbol)
+  //   oil PRIMARY        → USO-synthetic (Databento USO mid × FRED anchor)
+  //   oil SECONDARY      → contract-aware Yahoo (CLM26.NYM etc.)
+  //   oil TERTIARY       → Yahoo CL=F continuous (getOilSpot)
+  // USO-synthetic landed 2026-05-22 as Phase B of the V2 cutover plan;
+  // Yahoo paths are preserved as fallbacks so any synthetic failure mode
+  // is covered without a deploy. See src/feeds/uso-synthetic.js.
+  const useUsoSynthetic = config.useUsoSynthetic === true;
   const useYahooSpot = config.useYahooSpot === true;
 
-  // Contract-aware spot (Part B of OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13).
-  // When config.useContractAwareSpot is true and the commodity is oil,
-  // resolve the active settle contract from Kalshi /series and pull the
-  // matching specific-month Yahoo ticker (CLM26.NYM, CLN26.NYM, ...).
-  // Falls back to CL=F continuous on any resolution failure.
+  // Chain must be fetched before spot when useUsoSynthetic is on — the
+  // synthetic needs the live USO mid that already rides on every chain
+  // contract as underlyingPrice. For Pyth/Yahoo paths the order doesn't
+  // matter, so we always fetch chain first to keep one code path.
+  const chain = getChain(config.underlyingEtf);
+
   let spot = null;
-  if (useYahooSpot && config.useContractAwareSpot === true) {
+
+  // PRIMARY (oil only): USO-synthetic. Derives WTI spot from live USO mid
+  // off the chain × daily wti/uso ratio anchored to FRED DCOILWTICO.
+  if (useUsoSynthetic && chain?.contracts?.length > 0) {
+    const usoLive = chain.contracts.find((c) => c.underlyingPrice != null)?.underlyingPrice;
+    if (usoLive > 0) {
+      try {
+        const synthetic = await synthesizeWtiSpot(usoLive);
+        if (synthetic) {
+          spot = synthetic;
+          console.log(
+            `[${config.commodity}] USO-synthetic spot: USO $${usoLive.toFixed(2)} × ${synthetic.anchor.wti_per_uso.toFixed(4)} = $${synthetic.price.toFixed(2)} WTI (anchor ${synthetic.anchor.as_of})`,
+          );
+        } else {
+          console.warn(
+            `[${config.commodity}] USO-synthetic returned null (anchor unavailable) — falling back to contract-aware Yahoo`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `[${config.commodity}] USO-synthetic threw: ${err?.message || err} — falling back to contract-aware Yahoo`,
+        );
+      }
+    } else {
+      console.warn(
+        `[${config.commodity}] no underlyingPrice on chain contracts — falling back to contract-aware Yahoo`,
+      );
+    }
+  }
+
+  // SECONDARY (oil only): contract-aware Yahoo (Part B of
+  // OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13). Resolve the active settle
+  // contract from Kalshi /series and pull the matching specific-month
+  // Yahoo ticker (CLM26.NYM, CLN26.NYM, ...).
+  if (!spot && useYahooSpot && config.useContractAwareSpot === true) {
     try {
       const settle = await getActiveSettleContract(config.seriesTicker, event.closeTime);
       if (settle) {
@@ -371,7 +411,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
             source: cSpot.source, // e.g. 'yahoo_clm26_nym'
           };
           console.log(
-            `[${config.commodity}] using contract-aware spot ${settle.contract} (${cSpot.symbol}) = $${cSpot.price.toFixed(2)}`,
+            `[${config.commodity}] FALLBACK contract-aware spot ${settle.contract} (${cSpot.symbol}) = $${cSpot.price.toFixed(2)}`,
           );
         } else {
           console.warn(
@@ -390,11 +430,14 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     }
   }
 
+  // TERTIARY: silver/gold/bitcoin = Pyth; oil = Yahoo CL=F continuous.
   if (!spot) {
     spot = useYahooSpot ? getOilSpot() : getPrice(config.pythSymbol);
+    if (spot && useYahooSpot) {
+      console.log(`[${config.commodity}] TERTIARY spot ${spot.source} = $${spot.price.toFixed(2)}`);
+    }
   }
 
-  const chain = getChain(config.underlyingEtf);
   if (!spot) {
     console.warn(
       `[${config.commodity}] no spot price (${useYahooSpot ? 'yahoo CL=F' : `pyth ${config.pythSymbol}`}) — skipping snapshot`,

@@ -89,22 +89,27 @@ export const COMMODITIES = {
     underlyingEtf: 'USO',
     pythSymbol: 'WTI', // not used when useYahooSpot is true; kept for shape parity
     spotUnit: '$/bbl',
-    spotLabel: 'Yahoo CL=F / CLM26.NYM (contract-aware)',
+    spotLabel: 'USO-synthetic (Databento USO × FRED DCOILWTICO daily anchor)',
     enabled: true,
     // V2 cutover — see commodities.silver.useV2Cutover note.
     useV2Cutover: true,
+    // USO-synthetic primary path (Phase B of COMMODITY_EDGE_CUTOVER_PLAN_
+    // 2026-05-21). Derives WTI spot from the real-time USO mid the chain
+    // already carries × a daily wti/uso ratio anchored to FRED DCOILWTICO.
+    // Replaces Yahoo CL=F as the latency-sensitive anchor; Yahoo paths
+    // below stay wired as tertiary fallback (contract-aware first, then
+    // continuous CL=F) so any synthetic failure mode is covered without
+    // a deploy. See src/feeds/uso-synthetic.js.
+    useUsoSynthetic: true,
     useYahooSpot: true,
     bypassWriterTag: true,
     // Contract-aware spot (Part B of OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13).
-    // When true, resolve the active settle contract from Kalshi series
-    // metadata and pull the matching Yahoo specific-month spot
-    // (CLM26.NYM etc.) instead of CL=F continuous. Falls back to CL=F
-    // continuous if Kalshi or Yahoo declines.
-    // Flipped ON 2026-05-13 immediately after Part B landed — operator
-    // accepts the small live-bake risk. Once Fly logs show
-    // `using contract-aware spot ...` and commodity_edge_signals.spot_source
-    // reads `yahoo_clm26_nym` (or current contract), the page-side rollover
-    // guard in lib/tools/oil-edge.ts becomes structurally redundant.
+    // SECONDARY fallback after Phase B 2026-05-22. When useUsoSynthetic
+    // can't anchor (FRED outage, USO prev_close fetch failure, empty
+    // chain so no live USO mid), we drop to this path: resolve the active
+    // settle contract from Kalshi series metadata and pull the matching
+    // Yahoo specific-month spot (CLM26.NYM etc.). Tertiary is CL=F
+    // continuous via getOilSpot below.
     useContractAwareSpot: true,
     // FRED Phase 5: WTI Cushing daily close. Critical given the Yahoo CL=F
     // path is the most fragile of the four feeds.

@@ -173,21 +173,30 @@ export const COMMODITIES = {
     // pre-settlement action. Pairs with requiredOffHours:false on the
     // databento_ibit readiness gate.
     pauseSnapshotsOffHours: true,
-    // Settlement-window guard 2026-05-22. KXBTCD settles on a 60-second TWAP
-    // of CF Benchmarks BRTI over the minute leading up to the hour. Inside
-    // that window the point-in-time BS prob collapses to 0/1 (T → 0 with
-    // IV-implied std-dev of ~$5 on a $76k spot) while real BTC routinely
-    // moves $200-500 in 60s. Result observed today (handoff:
-    // BITCOIN_TWAP_GUARD_2026-05-22): 100% of actionable signals fired in
-    // the final 1.6 minutes, multiple in the final 60 seconds, with model
-    // probabilities of exactly 0.00 or 1.00 against strikes ±$100 of spot.
-    // Several "in the money" STRONG positions lost to last-minute moves
-    // that the TWAP absorbed. Force PASS/skip on any actionable row where
-    // hoursToClose < 5/60 (= 5 minutes). Implemented in commodity-base.js
-    // computeSnapshot. Other commodities leave this null (daily settles,
-    // not TWAP-windowed). Revisit when we replace point-in-time BS prob
-    // with realized-vol-aware TWAP model.
-    minMinutesToClose: 5,
+    // Settlement-window guard 2026-05-22 (widened from 5 → 15 min same
+    // session). KXBTCD settles on a 60-second TWAP of CF Benchmarks BRTI
+    // over the minute leading up to the hour. The deeper problem: BS prob
+    // at sub-hour T cannot represent BTC's empirical realized vol. IV-
+    // implied 1-sigma at T=7min ≈ $142 on a $76k spot, but BTC routinely
+    // moves $300-800 inside 7 minutes when trending. Inside that window
+    // the model collapses to 0.00/1.00 for any strike >$200 from spot
+    // while Kalshi (humans + market makers reading order flow + trend) is
+    // pricing the same strike at 90c+. Engine confidently flags BUY NO
+    // against the trend; positions lose.
+    //
+    // Today observed live at t-7.4min on KXBTCD-26MAY2216 (BTC rising):
+    //   $75,900 strike — Kalshi YES 0.94, model 0.01, engine "BUY NO STRONG -92pp"
+    //   $76,100 strike — Kalshi YES 0.67, model 0.00, engine "BUY NO STRONG -66pp"
+    //   spot $75,695 and rising. Engine wanted to fade the entire uptrend.
+    //
+    // 15 min covers the empirically observed bad-signal window (all
+    // actionable bitcoin signals today fired in the last 1.6min, plus this
+    // 7.4min sighting). KXBTCD is hourly so this kills the last 25% of
+    // each event — acceptable given >99% of signals in that window have
+    // been false positives. Revisit when we replace BS prob with a
+    // realized-vol-aware TWAP model that respects the 60s settle
+    // averaging window AND short-horizon trend.
+    minMinutesToClose: 15,
     // Restrict snapshots to the 7 hourly settles per weekday (10 AM through
     // 4 PM ET) covered by a live IBIT options chain. KXBTCD event tickers
     // encode the ET wallclock hour as the trailing 2 digits (DST-safe by

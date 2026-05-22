@@ -34,7 +34,7 @@ Verify with: `git diff src/engine/commodities.js` — should show only the oil b
 
 Files: `src/engine/commodities.js` + `src/engine/commodity-base.js`
 
-**`commodities.js`** — added `minMinutesToClose: 5` to the bitcoin config with a long comment explaining the TWAP-window collapse pattern.
+**`commodities.js`** — added `minMinutesToClose: 15` (widened from 5 → 15 same session after a live t-7.4min sighting on KXBTCD-26MAY2216 produced engine "BUY NO STRONG -92pp" while BTC was rising and Kalshi correctly priced the strike YES at 94c) to the bitcoin config with a long comment explaining the TWAP-window collapse pattern.
 
 **`commodity-base.js`** — added a guard block immediately after the `let direction = 'PASS'; let confidence = 'skip'; let rationale = null;` initialization inside the per-market loop in `computeSnapshot`. When `config.minMinutesToClose != null` and `minutesToClose < config.minMinutesToClose`, the row is pushed with `direction='PASS' confidence='skip' fused_confidence='NO_EDGE' quality_flag='twap_settle_window'` and the loop `continue`s — bypassing all the edge/confidence/tier math below.
 
@@ -55,9 +55,23 @@ git diff src/engine/commodities.js src/engine/commodity-base.js
 
 Look for:
 - `useUsoSynthetic: false` (was `true`) in the oil block
-- `minMinutesToClose: 5` added to the bitcoin block
+- `minMinutesToClose: 15` (widened from 5 → 15 same session after a live t-7.4min sighting on KXBTCD-26MAY2216 produced engine "BUY NO STRONG -92pp" while BTC was rising and Kalshi correctly priced the strike YES at 94c) added to the bitcoin block
 - A new guard block in `commodity-base.js` right after the per-market `let direction = 'PASS' ...` initialization, BEFORE the existing `if (chosenEdge == null)` branch
 - No accidental edits anywhere else
+
+### Live evidence at t-7.4min that forced the widening (KXBTCD-26MAY2216, observed 19:52 UTC)
+
+BTC spot $75,695 and rising. Engine flagged:
+
+| Strike | Above spot | Kalshi YES | Model prob | Engine direction | Edge |
+|---|---|---|---|---|---|
+| $75,700 | +$5 | 0.98 | 0.48 | BUY NO STRONG | -51pp |
+| $75,900 | +$205 | 0.94 | 0.01 | BUY NO STRONG | -92pp |
+| $76,100 | +$405 | 0.67 | 0.00 | BUY NO STRONG | -66pp |
+| $76,200 | +$505 | 0.45 | 0.00 | BUY NO STRONG | -44pp |
+| $76,400 | +$705 | 0.09 | 0.00 | BUY NO MODERATE | -8pp |
+
+Kalshi (i.e. the market reading the uptrend) pricing $75,900 YES at 94c. Engine wanted to fade the entire move. The 5-minute guard would not have caught this. 15-min does.
 
 ### 2. Write unit tests for both guards
 

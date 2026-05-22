@@ -173,29 +173,40 @@ export const COMMODITIES = {
     // pre-settlement action. Pairs with requiredOffHours:false on the
     // databento_ibit readiness gate.
     pauseSnapshotsOffHours: true,
-    // TWAP-aware probability model (shipped same session as the guard, 2026-
-    // 05-22). Replaces point-in-time BS prob for KXBTCD with probAboveTwap
-    // — see the rationale block on probAboveTwap in options.js. Two fixes:
+    // TWAP-aware probability model + Pyth-tick-grounded σ/μ (final form,
+    // 2026-05-22). Two compounding fixes layered on top of standard BS:
     //
-    //   1. Settlement is an average, not a point. KXBTCD settles on a 60-
-    //      second TWAP of CF Benchmarks BRTI. The geometric-average variance
-    //      σ²(T - 2τ/3) collapses gracefully near the window instead of
-    //      σ²T → 0 producing the 0/1 prob artifact.
-    //   2. Smile σ underestimates BTC realized vol at sub-hour scales by
-    //      ~2-3×. shortHorizonVolScale linearly inflates σ from 1× at
-    //      T = shortHorizonVolCapHours down to 3.5× at T → 0. Empirical
-    //      fit on the 2026-05-22 t-7.4min observation: with scale=3.5 the
-    //      engine's $75,900-strike prob moves from 0.01 (the bad number
-    //      that mid-trend produced "BUY NO STRONG -92pp") to ~0.33, which
-    //      vs Kalshi 0.94 is still a -61pp edge but a defensible one.
+    //   1. Settlement is an average, not a point. probAboveTwap integrates
+    //      the geometric-average variance σ²(T - 2τ/3) and drift period
+    //      (T - τ/2). Tiny correction at τ << T but non-zero, and the
+    //      math collapses gracefully near the averaging window instead of
+    //      blowing up.
+    //   2. σ and μ come from a 15-min Pyth tick buffer
+    //      (src/engine/short-horizon-vol.js) — not from the IBIT IV smile
+    //      (calibrated to weekly+ expiries; under-represents BTC's sub-hour
+    //      realized vol by 2-3×) and not from the 60-day annualized drift
+    //      (too slow to see intra-hour momentum). When the buffer is cold
+    //      (first ~5 min after a Fly redeploy), the engine falls back to
+    //      σ × shortHorizonVolScale and tags rows quality_flag='cold_buffer'.
     twapWindowSeconds: 60,
-    shortHorizonVolScale: 3.5,
+    useShortHorizonRv: true,
+    shortHorizonLookbackMin: 15,
+    shortHorizonVolScale: 3.5,        // cold-buffer fallback only
     shortHorizonVolCapHours: 1,
-    // Final-window backstop kept at 2 min — covers the literal TWAP
-    // averaging window (60s) with a 60s buffer for clock skew + tick
-    // staleness. The model fix above lets us drop from the 15-min
-    // conservative band-aid the earlier patch needed.
-    minMinutesToClose: 2,
+    // Graduated tier ceiling by minutes-to-close. Encodes calibration
+    // realism: even with a better σ + μ, the engine's binary prob is less
+    // reliable than Kalshi's order-flow-aware price as T shrinks. STRONG
+    // requires ≥30min, MODERATE requires ≥10min, SPECULATIVE requires
+    // ≥2min. Inside the 2-min averaging window, every row goes PASS with
+    // quality_flag='twap_settle_window'. Replaces the old hard
+    // minMinutesToClose guard.
+    tierCeilingByMinutes: { STRONG: 30, MODERATE: 10, SPECULATIVE: 2 },
+    // Event-level Spearman correlation between engine prob and Kalshi
+    // prob across strikes. corr < 0.5 suppresses every row in the event;
+    // 0.5 ≤ corr < 0.7 demotes each tier one notch. Catches "the engine's
+    // surface doesn't even look like the market's" — fundamental model
+    // failure for the event, not a tradeable edge.
+    smileKalshiCorrCheck: true,
     // Restrict snapshots to the 7 hourly settles per weekday (10 AM through
     // 4 PM ET) covered by a live IBIT options chain. KXBTCD event tickers
     // encode the ET wallclock hour as the trailing 2 digits (DST-safe by

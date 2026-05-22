@@ -26,28 +26,49 @@ import { probAboveTwap, probAboveStrike, effectiveVolShortHorizon } from '../src
 const HOUR_YR = 1 / (365 * 24);
 const MIN_YR = 1 / (365 * 24 * 60);
 
-describe('Bitcoin TWAP-aware prob + backstop config', () => {
+describe('Bitcoin TWAP-aware prob + short-horizon RV + tier ceiling config', () => {
   it('bitcoin.twapWindowSeconds === 60 (KXBTCD settles on 60s TWAP)', () => {
     expect(COMMODITIES.bitcoin.twapWindowSeconds).toBe(60);
   });
 
-  it('bitcoin.shortHorizonVolScale === 3.5 (empirical BTC sub-hour IV→RV gap)', () => {
+  it('bitcoin.useShortHorizonRv === true (Pyth-tick-grounded σ/μ)', () => {
+    expect(COMMODITIES.bitcoin.useShortHorizonRv).toBe(true);
+  });
+
+  it('bitcoin.shortHorizonLookbackMin === 15', () => {
+    expect(COMMODITIES.bitcoin.shortHorizonLookbackMin).toBe(15);
+  });
+
+  it('bitcoin.shortHorizonVolScale === 3.5 (cold-buffer fallback only)', () => {
+    // Empirical multiplier retained for the σ×scale fallback path that runs
+    // when the Pyth buffer is cold (first ~5 min after a Fly redeploy).
+    // Once warm, σ comes from realized data and this constant is unused.
     expect(COMMODITIES.bitcoin.shortHorizonVolScale).toBe(3.5);
   });
 
-  it('bitcoin.minMinutesToClose === 2 (final TWAP averaging window only)', () => {
-    expect(COMMODITIES.bitcoin.minMinutesToClose).toBe(2);
+  it('bitcoin.tierCeilingByMinutes: STRONG 30 / MODERATE 10 / SPECULATIVE 2', () => {
+    expect(COMMODITIES.bitcoin.tierCeilingByMinutes).toEqual({
+      STRONG: 30,
+      MODERATE: 10,
+      SPECULATIVE: 2,
+    });
   });
 
-  it('silver / gold / oil / spx / copper opt out of TWAP path (daily settles)', () => {
-    expect(COMMODITIES.silver.twapWindowSeconds ?? null).toBe(null);
-    expect(COMMODITIES.gold.twapWindowSeconds ?? null).toBe(null);
-    expect(COMMODITIES.oil.twapWindowSeconds ?? null).toBe(null);
-    expect(COMMODITIES.spx.twapWindowSeconds ?? null).toBe(null);
-    expect(COMMODITIES.copper.twapWindowSeconds ?? null).toBe(null);
-    expect(COMMODITIES.silver.minMinutesToClose ?? null).toBe(null);
-    expect(COMMODITIES.gold.minMinutesToClose ?? null).toBe(null);
-    expect(COMMODITIES.oil.minMinutesToClose ?? null).toBe(null);
+  it('bitcoin.smileKalshiCorrCheck === true', () => {
+    expect(COMMODITIES.bitcoin.smileKalshiCorrCheck).toBe(true);
+  });
+
+  it('bitcoin.minMinutesToClose is gone (subsumed by tierCeilingByMinutes.SPECULATIVE)', () => {
+    expect(COMMODITIES.bitcoin.minMinutesToClose).toBeUndefined();
+  });
+
+  it('silver / gold / oil / spx / copper opt out of every TWAP/short-horizon knob', () => {
+    for (const c of ['silver', 'gold', 'oil', 'spx', 'copper']) {
+      expect(COMMODITIES[c].twapWindowSeconds ?? null).toBe(null);
+      expect(COMMODITIES[c].useShortHorizonRv ?? null).toBe(null);
+      expect(COMMODITIES[c].tierCeilingByMinutes ?? null).toBe(null);
+      expect(COMMODITIES[c].smileKalshiCorrCheck ?? null).toBe(null);
+    }
   });
 });
 
@@ -167,8 +188,8 @@ describe('probAboveTwap — replicates live KXBTCD pathology', () => {
   });
 });
 
-describe('Guard block presence in commodity-base.js (smoke)', () => {
-  it('commodity-base.js still references config.minMinutesToClose + twapWindowSeconds', async () => {
+describe('commodity-base.js wiring (smoke)', () => {
+  it('still references the new TWAP + tier-ceiling + smile-kalshi machinery', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const url = await import('node:url');
@@ -177,9 +198,44 @@ describe('Guard block presence in commodity-base.js (smoke)', () => {
       path.resolve(path.dirname(here), '..', 'src', 'engine', 'commodity-base.js'),
       'utf8',
     );
-    expect(src).toMatch(/config\.minMinutesToClose/);
+    expect(src).toMatch(/config\.tierCeilingByMinutes/);
     expect(src).toMatch(/twap_settle_window/);
     expect(src).toMatch(/config\.twapWindowSeconds/);
     expect(src).toMatch(/probAboveTwap/);
+    expect(src).toMatch(/config\.useShortHorizonRv/);
+    expect(src).toMatch(/smile_kalshi_diverged/);
+    expect(src).toMatch(/spearmanCorr/);
+    expect(src).toMatch(/cold_buffer/);
+  });
+});
+
+describe('spearmanCorr — event-level surface sanity', () => {
+  it('returns ~1 for monotone-increasing pairs', async () => {
+    const { __test__ } = await import('../src/engine/commodity-base.js');
+    const corr = __test__.spearmanCorr([1, 2, 3, 4, 5], [0.1, 0.3, 0.5, 0.7, 0.9]);
+    expect(corr).toBeCloseTo(1, 6);
+  });
+
+  it('returns ~-1 for monotone-decreasing pairs (engine vs Kalshi inverted)', async () => {
+    const { __test__ } = await import('../src/engine/commodity-base.js');
+    const corr = __test__.spearmanCorr([0.1, 0.3, 0.5, 0.7, 0.9], [0.9, 0.7, 0.5, 0.3, 0.1]);
+    expect(corr).toBeCloseTo(-1, 6);
+  });
+
+  it('returns null when arrays have a constant variable (degenerate)', async () => {
+    const { __test__ } = await import('../src/engine/commodity-base.js');
+    expect(__test__.spearmanCorr([1, 1, 1, 1], [0.1, 0.3, 0.5, 0.9])).toBe(null);
+  });
+
+  it('returns null on length mismatch', async () => {
+    const { __test__ } = await import('../src/engine/commodity-base.js');
+    expect(__test__.spearmanCorr([1, 2, 3], [0.1, 0.3])).toBe(null);
+  });
+
+  it('handles ties via average rank', async () => {
+    const { __test__ } = await import('../src/engine/commodity-base.js');
+    // [1, 1, 2, 3] vs [0.1, 0.2, 0.3, 0.4] — ties on the first array.
+    const corr = __test__.spearmanCorr([1, 1, 2, 3], [0.1, 0.2, 0.3, 0.4]);
+    expect(corr).toBeGreaterThan(0.9);
   });
 });

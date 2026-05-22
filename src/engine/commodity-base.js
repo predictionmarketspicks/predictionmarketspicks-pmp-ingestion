@@ -19,6 +19,7 @@ import { probAboveStrike, probAboveStrikePhysical, probAboveTwap, yearFraction }
 import { computeDealerGamma } from './gamma.js';
 import { estimateDrift } from './drift.js';
 import { warmVolCache, estimateVol } from './vol.js';
+import { getShortHorizonStats } from './short-horizon-vol.js';
 import {
   MIN_EDGE_PP,
   MIN_VOL_FOR_LIVE_PRICE,
@@ -77,6 +78,45 @@ function maybeResetSessionFlags(now = new Date()) {
     firstSnapshotWritten.clear();
   }
   prevMarketOpen = open;
+}
+
+// Spearman rank correlation between two numeric arrays of equal length.
+// Used by the event-level smile-vs-Kalshi sanity pass. Returns null on
+// degenerate inputs (length < 2 or zero variance after ranking).
+function spearmanCorr(xs, ys) {
+  const n = xs.length;
+  if (n !== ys.length || n < 2) return null;
+  const rank = (arr) => {
+    const indexed = arr.map((v, i) => ({ v, i }));
+    indexed.sort((a, b) => a.v - b.v);
+    const r = new Array(n);
+    let i = 0;
+    while (i < n) {
+      let j = i;
+      while (j + 1 < n && indexed[j + 1].v === indexed[i].v) j++;
+      const avg = (i + j + 2) / 2; // 1-based average rank for ties
+      for (let k = i; k <= j; k++) r[indexed[k].i] = avg;
+      i = j + 1;
+    }
+    return r;
+  };
+  const xr = rank(xs);
+  const yr = rank(ys);
+  const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
+  const mx = mean(xr);
+  const my = mean(yr);
+  let num = 0;
+  let dx = 0;
+  let dy = 0;
+  for (let k = 0; k < n; k++) {
+    const a = xr[k] - mx;
+    const b = yr[k] - my;
+    num += a * b;
+    dx += a * a;
+    dy += b * b;
+  }
+  if (dx === 0 || dy === 0) return null;
+  return num / Math.sqrt(dx * dy);
 }
 
 function smileCoherenceCheck(rows) {
@@ -502,6 +542,30 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   const muSource = driftEst?.source ?? 'fallback_zero';
   const muConfidence = driftEst?.confidence ?? 'low';
 
+  // Short-horizon σ + μ estimator (Pyth tick buffer). When config.use-
+  // ShortHorizonRv is true, the per-strike vol blender below uses these
+  // realized estimates instead of the σ × shortHorizonVolScale ramp. The
+  // ramp stays wired as a cold-buffer fallback only — on the first ~5min
+  // after a Fly redeploy or when the Pyth feed is stale, shStats is null
+  // and rows go out with quality_flag='cold_buffer'.
+  let shStats = null;
+  let eventColdBuffer = false;
+  if (config.useShortHorizonRv === true) {
+    shStats = getShortHorizonStats(config.commodity, {
+      lookbackMin: config.shortHorizonLookbackMin ?? 15,
+      now,
+    });
+    if (shStats == null) eventColdBuffer = true;
+  }
+  // α(T) blend factor — full short-horizon RV at T → 0, full IV smile at
+  // T ≥ shortHorizonVolCapHours. Linear ramp in between. Computed once
+  // per snapshot since T is constant across the strikes of an event.
+  const shortHorizonCapHours = config.shortHorizonVolCapHours ?? 1;
+  const T_hours = T * 365 * 24;
+  const alphaShortHorizon = shortHorizonCapHours > 0
+    ? Math.max(0, Math.min(1, 1 - T_hours / shortHorizonCapHours))
+    : 0;
+
   // FRED Phase 5 cross-check — once per snapshot. Compares realtime spot
   // (Pyth or Yahoo) against the FRED daily close. >150bp divergence flags
   // the realtime feed as likely stale; per-row tier/confidence get
@@ -549,49 +613,67 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       // materially shifts the risk-neutral drift for sub-hour expiries.
       const q = config.dividendYield ?? DIVIDEND_YIELD;
       volEst = estimateVol(iv, config.commodity);
-      const sigmaForPhysical = volEst?.sigma_blend ?? iv;
+      const sigmaIvBlend = volEst?.sigma_blend ?? iv;
       sigmaBlendVal = volEst?.sigma_blend ?? null;
       sigmaIvVal = volEst?.sigma_iv ?? iv;
       sigmaRv20Val = volEst?.sigma_rv20 ?? null;
       sigmaSource = volEst?.source ?? 'iv_only';
       const muForPhysical = muUsed != null ? muUsed : (RISK_FREE_RATE - q);
-      // TWAP-aware probability for sub-hour TWAP-settled markets (KXBTCD: 60s
-      // TWAP of BRTI). When config.twapWindowSeconds is set the engine uses
-      // probAboveTwap, which (a) integrates the geometric-average variance
-      // σ²(T - 2τ/3) instead of σ²T and (b) inflates σ on a short-horizon
-      // linear ramp via config.shortHorizonVolScale to repair the IV→
-      // realized-vol gap that BS inherits at minute-scale T. See the long
-      // rationale block on probAboveTwap in options.js. Both v1 (risk-
-      // neutral) and v2 (physical) paths use the same TWAP function — only
-      // the drift differs. Commodities without the config flag (silver/
-      // gold/oil/spx/copper — daily settles, no TWAP averaging) continue
-      // through the standard probAboveStrike + probAboveStrikePhysical path.
+      // Sub-hour TWAP-settled commodities (KXBTCD): route through
+      // probAboveTwap which integrates the Asian-window variance σ²(T-2τ/3)
+      // and the drift period (T-τ/2). The σ + μ inputs differ depending on
+      // whether we have a warm Pyth tick buffer:
+      //
+      //   • Warm buffer + config.useShortHorizonRv:
+      //       σ_eff = α(T) × σ_rv_short + (1-α) × σ_iv_blend
+      //       μ_eff = shStats.mu_annual  (RV-based intra-hour drift)
+      //       probAboveTwap called with scale=1 — boost is folded into σ_eff.
+      //
+      //   • Cold buffer (eventColdBuffer): fall back to the σ × shortHorizon-
+      //       VolScale ramp inside probAboveTwap. Rows downstream get
+      //       quality_flag='cold_buffer' so the site reader can suppress.
+      //
+      //   • No twapWindowSeconds: silver/gold/oil/spx/copper — daily settles,
+      //       standard probAboveStrike + probAboveStrikePhysical path.
       if (config.twapWindowSeconds != null) {
-        const scale = config.shortHorizonVolScale ?? 1;
-        const capHours = config.shortHorizonVolCapHours ?? 1;
+        let sigmaRiskNeutral = iv;
+        let sigmaPhysical = sigmaIvBlend;
+        let muPhysicalForTwap = muForPhysical;
+        let twapScale = 1;
+        const twapCapHours = shortHorizonCapHours;
+        if (shStats != null) {
+          sigmaRiskNeutral = alphaShortHorizon * shStats.sigma_annual + (1 - alphaShortHorizon) * iv;
+          sigmaPhysical    = alphaShortHorizon * shStats.sigma_annual + (1 - alphaShortHorizon) * sigmaIvBlend;
+          muPhysicalForTwap = shStats.mu_annual;
+          sigmaSource = `pyth_short_horizon_alpha_${alphaShortHorizon.toFixed(2)}`;
+        } else if (eventColdBuffer) {
+          // Cold-buffer fallback: use the old σ × shortHorizonVolScale ramp
+          // inside probAboveTwap. scale > 1 only matters until T = capHours.
+          twapScale = config.shortHorizonVolScale ?? 1;
+        }
         optProb = probAboveTwap(
           spotPrice,
           kSpot,
           T,
           RISK_FREE_RATE - q,
-          iv,
+          sigmaRiskNeutral,
           config.twapWindowSeconds,
-          scale,
-          capHours,
+          twapScale,
+          twapCapHours,
         );
         probPhysical = probAboveTwap(
           spotPrice,
           kSpot,
           T,
-          muForPhysical,
-          sigmaForPhysical,
+          muPhysicalForTwap,
+          sigmaPhysical,
           config.twapWindowSeconds,
-          scale,
-          capHours,
+          twapScale,
+          twapCapHours,
         );
       } else {
         optProb = probAboveStrike(spotPrice, kSpot, T, RISK_FREE_RATE, q, iv);
-        probPhysical = probAboveStrikePhysical(spotPrice, kSpot, T, muForPhysical, sigmaForPhysical);
+        probPhysical = probAboveStrikePhysical(spotPrice, kSpot, T, muForPhysical, sigmaIvBlend);
       }
     }
 
@@ -605,6 +687,10 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     // shipping kalshi_yes=0 + a fake edge against the options-implied prob.
     let qualityFlag = null;
     if (kalshiProb == null) qualityFlag = 'kalshi_no_book';
+    // Cold-buffer flag: short-horizon RV was requested but Pyth buffer was
+    // empty / stale this tick. Row uses the σ × shortHorizonVolScale fallback
+    // — site reader suppresses these so the public surface stays clean.
+    if (eventColdBuffer && qualityFlag == null) qualityFlag = 'cold_buffer';
 
     let edge = null;
     if (optProb != null && kalshiProb != null && kalshiProb > 0) edge = optProb - kalshiProb;
@@ -635,62 +721,11 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     let confidence = 'skip';
     let rationale = null;
 
-    // TWAP settlement-window guard 2026-05-22. For commodities with a
-    // hourly/sub-hourly TWAP settle (bitcoin: CF Benchmarks BRTI 60s TWAP),
-    // the point-in-time BS prob collapses to 0/1 inside the final few minutes
-    // because T → 0 makes IV-implied std-dev meaningless ($5 on a $76k BTC
-    // when real BTC moves $200-500 in 60s). config.minMinutesToClose forces
-    // the row to PASS before any direction/confidence math runs, regardless
-    // of how big the apparent edge is. Null = no guard (silver/gold/oil
-    // daily settles don't need it). See handoffs/BITCOIN_TWAP_GUARD_2026-
-    // 05-22.md for the empirical pattern that motivated this.
+    // (The old TWAP hard-guard block was removed 2026-05-22. The graduated
+    // tier-ceiling logic further down — `config.tierCeilingByMinutes` —
+    // demotes near-settlement signals through the existing tier ladder
+    // instead of force-suppressing every row at a single threshold.)
     const minutesToClose = (closeMs - now.getTime()) / 60000;
-    if (
-      config.minMinutesToClose != null &&
-      minutesToClose < config.minMinutesToClose
-    ) {
-      rationale = `TWAP settle window — ${minutesToClose.toFixed(1)}min to close < ${config.minMinutesToClose}min guard. ` +
-        `Point-in-time BS prob unreliable inside the settle averaging window; row suppressed.`;
-      rows.push({
-        snapshot_at: now.toISOString(),
-        commodity: config.commodity,
-        event_ticker: event.eventTicker,
-        event_close_at: new Date(closeMs).toISOString(),
-        strike: kSpot,
-        kalshi_yes: kalshiProb ?? 0,
-        kalshi_yes_bid: market.yesBid ?? null,
-        kalshi_yes_ask: market.yesAsk ?? null,
-        kalshi_volume_24h: Math.round(market.volume24h ?? 0),
-        kalshi_open_int: Math.round(market.openInterest ?? 0),
-        options_iv: iv ?? null,
-        options_prob: optProb ?? null,
-        edge_pp: edge ?? null,
-        fused_edge_pp: chosenEdge ?? null,
-        direction: 'PASS',
-        confidence: 'skip',
-        fused_confidence: 'NO_EDGE',
-        rationale,
-        quality_flag: 'twap_settle_window',
-        spot_price: spotPrice,
-        spot_source: spot.source,
-        underlying_etf: config.underlyingEtf,
-        underlying_price: etfPrice,
-        fred_divergence_bp: fredDivergenceBp,
-        divergence_warning: divergenceWarning,
-        prob_physical: probPhysical,
-        physical_edge_pp: physicalEdge,
-        mu_used: muUsed,
-        mu_source: muSource,
-        mu_confidence: muConfidence,
-        sigma_blend: sigmaBlendVal,
-        sigma_iv: sigmaIvVal,
-        sigma_rv20: sigmaRv20Val,
-        sigma_source: sigmaSource,
-        quote_age_seconds: quoteAgeSeconds,
-        model_version: activeModelVersion,
-      });
-      continue;
-    }
 
     if (chosenEdge == null) {
       // Edge is null for two distinct reasons; before today both collapsed
@@ -800,6 +835,40 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     let fusedTierStr = chosenEdge != null ? fusedTier(Math.abs(chosenEdge)) : 'NO_EDGE';
     let tierInt = confidenceTierInt(fusedTierStr);
 
+    // Graduated tier ceiling by minutes-to-close (replaces the old hard
+    // minMinutesToClose guard 2026-05-22). The ladder encodes empirical
+    // calibration realism: as T shrinks, the engine's prob estimate
+    // becomes less reliable relative to Kalshi's order-flow-aware price.
+    // Demotion routes through the same downgradeFusedTier helper the FRED
+    // path uses, so the per-row push picks up the new tier + confidence
+    // without extra wiring. The SPECULATIVE floor (default 2min) covers
+    // the literal TWAP averaging window where the probability math is
+    // genuinely undefined and gets tagged with quality_flag.
+    if (config.tierCeilingByMinutes != null) {
+      const ladder = config.tierCeilingByMinutes;
+      let ceiling = null;
+      if (ladder.SPECULATIVE != null && minutesToClose < ladder.SPECULATIVE) ceiling = 'NO_EDGE';
+      else if (ladder.MODERATE != null && minutesToClose < ladder.MODERATE) ceiling = 'SPECULATIVE';
+      else if (ladder.STRONG != null && minutesToClose < ladder.STRONG) ceiling = 'MODERATE';
+      if (ceiling != null) {
+        const TIER_ORDER = { NO_EDGE: 0, SPECULATIVE: 1, MODERATE: 2, STRONG: 3 };
+        const before = fusedTierStr;
+        if ((TIER_ORDER[fusedTierStr] ?? 0) > (TIER_ORDER[ceiling] ?? 0)) {
+          const notches = (TIER_ORDER[before] ?? 0) - (TIER_ORDER[ceiling] ?? 0);
+          fusedTierStr = ceiling;
+          tierInt = confidenceTierInt(fusedTierStr);
+          for (let i = 0; i < notches; i++) confidence = downgradeLegacyConfidence(confidence);
+          if (fusedTierStr === 'NO_EDGE') {
+            direction = 'PASS';
+            confidence = 'skip';
+            if (qualityFlag == null) qualityFlag = 'twap_settle_window';
+          }
+          const ceilingLabel = ceiling === 'NO_EDGE' ? 'PASS' : ceiling;
+          rationale = (rationale ?? '') + ` (tier capped at ${ceilingLabel} — ${minutesToClose.toFixed(1)}min to close)`;
+        }
+      }
+    }
+
     // FRED Phase 5 — demote tier/confidence one notch when realtime spot
     // diverges from FRED daily close beyond the threshold. SPECULATIVE
     // collapses to NO_EDGE (suppress) and direction reverts to PASS so the
@@ -859,6 +928,56 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       quote_age_seconds: quoteAgeSeconds,
       model_version: activeModelVersion,
     });
+  }
+
+  // ---- Event-level smile-vs-Kalshi sanity check (2026-05-22) ----
+  // If our prob curve across strikes doesn't even rank-correlate with
+  // Kalshi's, that's a fundamental model failure for this event — not a
+  // tradeable edge. Spearman is robust to scale/curvature differences;
+  // we only fail when the SHAPE disagrees. Threshold tuned conservatively
+  // so smile + Kalshi can disagree on levels (a real edge) without
+  // tripping the suppress.
+  let smileKalshiCorr = null;
+  if (config.smileKalshiCorrCheck === true) {
+    const usable = rows.filter(
+      (r) =>
+        r.options_prob != null &&
+        r.kalshi_yes != null &&
+        r.kalshi_yes > 0.05 &&
+        r.kalshi_yes < 0.95 &&
+        r.quality_flag == null,
+    );
+    if (usable.length >= 4) {
+      smileKalshiCorr = spearmanCorr(
+        usable.map((r) => r.options_prob),
+        usable.map((r) => r.kalshi_yes),
+      );
+      if (Number.isFinite(smileKalshiCorr) && smileKalshiCorr < 0.5) {
+        for (const r of rows) {
+          r.quality_flag = r.quality_flag ?? 'smile_kalshi_diverged';
+          r.direction = 'PASS';
+          r.confidence = 'skip';
+          r.fused_confidence = 'NO_EDGE';
+          r.rationale =
+            (r.rationale ?? '') +
+            ` (event-level: engine-prob vs Kalshi-prob Spearman ${smileKalshiCorr.toFixed(2)} — surface diverges, all signals suppressed)`;
+        }
+      } else if (Number.isFinite(smileKalshiCorr) && smileKalshiCorr < 0.7) {
+        for (const r of rows) {
+          if (r.fused_confidence === 'STRONG' || r.fused_confidence === 'MODERATE' || r.fused_confidence === 'SPECULATIVE') {
+            r.fused_confidence = downgradeFusedTier(r.fused_confidence);
+            r.confidence = downgradeLegacyConfidence(r.confidence);
+            if (r.fused_confidence === 'NO_EDGE') {
+              r.direction = 'PASS';
+              r.confidence = 'skip';
+            }
+            r.rationale =
+              (r.rationale ?? '') +
+              ` (event-level: engine-prob vs Kalshi-prob Spearman ${smileKalshiCorr.toFixed(2)} — surface partly diverged, tier demoted)`;
+          }
+        }
+      }
+    }
   }
 
   // ---- Snapshot guards (handoff: SILVER_EDGE_GUARDS_2026-05-15) ----
@@ -935,6 +1054,17 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       fredDivergenceBp,
       fredObservationDate,
       divergenceWarning,
+      smileKalshiCorr,
+      shortHorizon: shStats == null
+        ? { source: eventColdBuffer ? 'cold_buffer' : 'disabled', alpha: alphaShortHorizon }
+        : {
+            source: shStats.source,
+            sigma_annual: shStats.sigma_annual,
+            mu_annual: shStats.mu_annual,
+            nTicks: shStats.nTicks,
+            lookbackActualMin: shStats.lookbackActualMin,
+            alpha: alphaShortHorizon,
+          },
     },
     rows: filteredRows,
   };
@@ -947,6 +1077,7 @@ export const __test__ = {
   passesLiquidityGate,
   validateSnapshot,
   smileCoherenceCheck,
+  spearmanCorr,
   IV_HARD_CAP,
   MIN_STRIKES_PER_SNAPSHOT,
   // Test seam: lets unit tests force the first-snapshot flag.

@@ -11,13 +11,14 @@ import {
 } from '../src/engine/commodities.js';
 
 describe('COMMODITIES registry', () => {
-  it('has silver, gold, oil, bitcoin, copper', () => {
+  it('has silver, gold, oil, bitcoin, spx, copper', () => {
     expect(Object.keys(COMMODITIES).sort()).toEqual([
       'bitcoin',
       'copper',
       'gold',
       'oil',
       'silver',
+      'spx',
     ]);
   });
 
@@ -64,7 +65,18 @@ describe('COMMODITIES registry', () => {
 
   it('listAllCommodities returns every config', () => {
     const all = listAllCommodities();
-    expect(all).toHaveLength(5);
+    expect(all).toHaveLength(6);
+  });
+
+  it('V2 cutover: silver/gold/oil flipped ON, bitcoin EXPLICITLY OFF', () => {
+    // Phase A cutover 2026-05-21. physical-measure prob drives direction/
+    // confidence for the three commodities V2 has been validated against;
+    // bitcoin carve-out preserved because runtime behavior must be unchanged
+    // (KXBTCD is hourly so drift contribution is mathematically ≤0.15pp).
+    expect(COMMODITIES.silver.useV2Cutover).toBe(true);
+    expect(COMMODITIES.gold.useV2Cutover).toBe(true);
+    expect(COMMODITIES.oil.useV2Cutover).toBe(true);
+    expect(COMMODITIES.bitcoin.useV2Cutover).toBe(false);
   });
 
   it('bitcoin pauses snapshots off-hours because IBIT chain is OPRA-only', () => {

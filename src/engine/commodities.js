@@ -89,18 +89,21 @@ export const COMMODITIES = {
     underlyingEtf: 'USO',
     pythSymbol: 'WTI', // not used when useYahooSpot is true; kept for shape parity
     spotUnit: '$/bbl',
-    spotLabel: 'USO-synthetic (Databento USO × FRED DCOILWTICO daily anchor)',
+    spotLabel: 'Yahoo CL=F (contract-aware CLM26.NYM primary, CL=F continuous fallback)',
     enabled: true,
     // V2 cutover — see commodities.silver.useV2Cutover note.
     useV2Cutover: true,
-    // USO-synthetic primary path (Phase B of COMMODITY_EDGE_CUTOVER_PLAN_
-    // 2026-05-21). Derives WTI spot from the real-time USO mid the chain
-    // already carries × a daily wti/uso ratio anchored to FRED DCOILWTICO.
-    // Replaces Yahoo CL=F as the latency-sensitive anchor; Yahoo paths
-    // below stay wired as tertiary fallback (contract-aware first, then
-    // continuous CL=F) so any synthetic failure mode is covered without
-    // a deploy. See src/feeds/uso-synthetic.js.
-    useUsoSynthetic: true,
+    // USO-synthetic DISABLED 2026-05-22 (same day it shipped). Databento's
+    // parity-derived USO underlyingPrice has been reporting ~$142 (real
+    // USO ~$77) for days — this didn't matter while spot came from Yahoo
+    // CL=F because the bad number only affected IV-smile relative
+    // moneyness. Once the synthetic path treated that USO as truth and
+    // multiplied by wti_per_uso, every WTI snapshot ran ~15% high
+    // ($111.62 vs Kalshi-implied $98), producing fake +20-50pp BUY YES
+    // signals across all in-money strikes. Do NOT re-enable until
+    // deriveEtfSpotByParity in feeds/databento.js returns ~real USO.
+    // Tracking: handoffs/OIL_USO_SYNTHETIC_DISABLE_2026-05-22.md
+    useUsoSynthetic: false,
     useYahooSpot: true,
     bypassWriterTag: true,
     // Contract-aware spot (Part B of OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13).
@@ -170,6 +173,21 @@ export const COMMODITIES = {
     // pre-settlement action. Pairs with requiredOffHours:false on the
     // databento_ibit readiness gate.
     pauseSnapshotsOffHours: true,
+    // Settlement-window guard 2026-05-22. KXBTCD settles on a 60-second TWAP
+    // of CF Benchmarks BRTI over the minute leading up to the hour. Inside
+    // that window the point-in-time BS prob collapses to 0/1 (T → 0 with
+    // IV-implied std-dev of ~$5 on a $76k spot) while real BTC routinely
+    // moves $200-500 in 60s. Result observed today (handoff:
+    // BITCOIN_TWAP_GUARD_2026-05-22): 100% of actionable signals fired in
+    // the final 1.6 minutes, multiple in the final 60 seconds, with model
+    // probabilities of exactly 0.00 or 1.00 against strikes ±$100 of spot.
+    // Several "in the money" STRONG positions lost to last-minute moves
+    // that the TWAP absorbed. Force PASS/skip on any actionable row where
+    // hoursToClose < 5/60 (= 5 minutes). Implemented in commodity-base.js
+    // computeSnapshot. Other commodities leave this null (daily settles,
+    // not TWAP-windowed). Revisit when we replace point-in-time BS prob
+    // with realized-vol-aware TWAP model.
+    minMinutesToClose: 5,
     // Restrict snapshots to the 7 hourly settles per weekday (10 AM through
     // 4 PM ET) covered by a live IBIT options chain. KXBTCD event tickers
     // encode the ET wallclock hour as the trailing 2 digits (DST-safe by

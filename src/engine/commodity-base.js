@@ -599,6 +599,63 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     let confidence = 'skip';
     let rationale = null;
 
+    // TWAP settlement-window guard 2026-05-22. For commodities with a
+    // hourly/sub-hourly TWAP settle (bitcoin: CF Benchmarks BRTI 60s TWAP),
+    // the point-in-time BS prob collapses to 0/1 inside the final few minutes
+    // because T → 0 makes IV-implied std-dev meaningless ($5 on a $76k BTC
+    // when real BTC moves $200-500 in 60s). config.minMinutesToClose forces
+    // the row to PASS before any direction/confidence math runs, regardless
+    // of how big the apparent edge is. Null = no guard (silver/gold/oil
+    // daily settles don't need it). See handoffs/BITCOIN_TWAP_GUARD_2026-
+    // 05-22.md for the empirical pattern that motivated this.
+    const minutesToClose = (closeMs - now.getTime()) / 60000;
+    if (
+      config.minMinutesToClose != null &&
+      minutesToClose < config.minMinutesToClose
+    ) {
+      rationale = `TWAP settle window — ${minutesToClose.toFixed(1)}min to close < ${config.minMinutesToClose}min guard. ` +
+        `Point-in-time BS prob unreliable inside the settle averaging window; row suppressed.`;
+      rows.push({
+        snapshot_at: now.toISOString(),
+        commodity: config.commodity,
+        event_ticker: event.eventTicker,
+        event_close_at: new Date(closeMs).toISOString(),
+        strike: kSpot,
+        kalshi_yes: kalshiProb ?? 0,
+        kalshi_yes_bid: market.yesBid ?? null,
+        kalshi_yes_ask: market.yesAsk ?? null,
+        kalshi_volume_24h: Math.round(market.volume24h ?? 0),
+        kalshi_open_int: Math.round(market.openInterest ?? 0),
+        options_iv: iv ?? null,
+        options_prob: optProb ?? null,
+        edge_pp: edge ?? null,
+        fused_edge_pp: chosenEdge ?? null,
+        direction: 'PASS',
+        confidence: 'skip',
+        fused_confidence: 'NO_EDGE',
+        rationale,
+        quality_flag: 'twap_settle_window',
+        spot_price: spotPrice,
+        spot_source: spot.source,
+        underlying_etf: config.underlyingEtf,
+        underlying_price: etfPrice,
+        fred_divergence_bp: fredDivergenceBp,
+        divergence_warning: divergenceWarning,
+        prob_physical: probPhysical,
+        physical_edge_pp: physicalEdge,
+        mu_used: muUsed,
+        mu_source: muSource,
+        mu_confidence: muConfidence,
+        sigma_blend: sigmaBlendVal,
+        sigma_iv: sigmaIvVal,
+        sigma_rv20: sigmaRv20Val,
+        sigma_source: sigmaSource,
+        quote_age_seconds: quoteAgeSeconds,
+        model_version: activeModelVersion,
+      });
+      continue;
+    }
+
     if (chosenEdge == null) {
       // Edge is null for two distinct reasons; before today both collapsed
       // to "Missing IV" which masked the more common cause (no Kalshi bid

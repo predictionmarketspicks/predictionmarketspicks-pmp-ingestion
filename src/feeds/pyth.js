@@ -6,6 +6,17 @@
 // need sub-second spot.
 
 import { setFeedStatus, recordTick } from '../observability/health.js';
+import { recordTick as recordPriceTick } from '../engine/short-horizon-vol.js';
+
+// Pyth feed symbols → commodity tags consumed by the short-horizon vol
+// estimator. Only listed symbols here get fed into the tick buffer; others
+// pass through the price map without short-horizon stats.
+const SHORT_HORIZON_COMMODITY = {
+  'BTC/USD': 'bitcoin',
+  'XAG/USD': 'silver',
+  'XAU/USD': 'gold',
+  'SPY/USD': 'spx',
+};
 
 const HERMES_BASE = process.env.PYTH_HERMES_BASE || 'https://hermes.pyth.network';
 const POLL_INTERVAL_MS = 10_000;
@@ -86,6 +97,8 @@ async function pollOnce(symbol) {
     const px = await fetchOnce(symbol);
     priceMap.set(symbol, px);
     recordTick(key);
+    const commodity = SHORT_HORIZON_COMMODITY[symbol];
+    if (commodity) recordPriceTick(commodity, px.price, px.publishTimeMs);
     setFeedStatus(key, { connected: true, lastError: null });
   } catch (err) {
     setFeedStatus(key, {

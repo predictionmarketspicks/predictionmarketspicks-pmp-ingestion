@@ -89,18 +89,21 @@ export const COMMODITIES = {
     underlyingEtf: 'USO',
     pythSymbol: 'WTI', // not used when useYahooSpot is true; kept for shape parity
     spotUnit: '$/bbl',
-    spotLabel: 'USO-synthetic (Databento USO × FRED DCOILWTICO daily anchor)',
+    spotLabel: 'Yahoo CL=F (contract-aware CLM26.NYM primary, CL=F continuous fallback)',
     enabled: true,
     // V2 cutover — see commodities.silver.useV2Cutover note.
     useV2Cutover: true,
-    // USO-synthetic primary path (Phase B of COMMODITY_EDGE_CUTOVER_PLAN_
-    // 2026-05-21). Derives WTI spot from the real-time USO mid the chain
-    // already carries × a daily wti/uso ratio anchored to FRED DCOILWTICO.
-    // Replaces Yahoo CL=F as the latency-sensitive anchor; Yahoo paths
-    // below stay wired as tertiary fallback (contract-aware first, then
-    // continuous CL=F) so any synthetic failure mode is covered without
-    // a deploy. See src/feeds/uso-synthetic.js.
-    useUsoSynthetic: true,
+    // USO-synthetic DISABLED 2026-05-22 (same day it shipped). Databento's
+    // parity-derived USO underlyingPrice has been reporting ~$142 (real
+    // USO ~$77) for days — this didn't matter while spot came from Yahoo
+    // CL=F because the bad number only affected IV-smile relative
+    // moneyness. Once the synthetic path treated that USO as truth and
+    // multiplied by wti_per_uso, every WTI snapshot ran ~15% high
+    // ($111.62 vs Kalshi-implied $98), producing fake +20-50pp BUY YES
+    // signals across all in-money strikes. Do NOT re-enable until
+    // deriveEtfSpotByParity in feeds/databento.js returns ~real USO.
+    // Tracking: handoffs/OIL_USO_SYNTHETIC_DISABLE_2026-05-22.md
+    useUsoSynthetic: false,
     useYahooSpot: true,
     bypassWriterTag: true,
     // Contract-aware spot (Part B of OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13).
@@ -170,6 +173,40 @@ export const COMMODITIES = {
     // pre-settlement action. Pairs with requiredOffHours:false on the
     // databento_ibit readiness gate.
     pauseSnapshotsOffHours: true,
+    // TWAP-aware probability model + Pyth-tick-grounded σ/μ (final form,
+    // 2026-05-22). Two compounding fixes layered on top of standard BS:
+    //
+    //   1. Settlement is an average, not a point. probAboveTwap integrates
+    //      the geometric-average variance σ²(T - 2τ/3) and drift period
+    //      (T - τ/2). Tiny correction at τ << T but non-zero, and the
+    //      math collapses gracefully near the averaging window instead of
+    //      blowing up.
+    //   2. σ and μ come from a 15-min Pyth tick buffer
+    //      (src/engine/short-horizon-vol.js) — not from the IBIT IV smile
+    //      (calibrated to weekly+ expiries; under-represents BTC's sub-hour
+    //      realized vol by 2-3×) and not from the 60-day annualized drift
+    //      (too slow to see intra-hour momentum). When the buffer is cold
+    //      (first ~5 min after a Fly redeploy), the engine falls back to
+    //      σ × shortHorizonVolScale and tags rows quality_flag='cold_buffer'.
+    twapWindowSeconds: 60,
+    useShortHorizonRv: true,
+    shortHorizonLookbackMin: 15,
+    shortHorizonVolScale: 3.5,        // cold-buffer fallback only
+    shortHorizonVolCapHours: 1,
+    // Graduated tier ceiling by minutes-to-close. Encodes calibration
+    // realism: even with a better σ + μ, the engine's binary prob is less
+    // reliable than Kalshi's order-flow-aware price as T shrinks. STRONG
+    // requires ≥30min, MODERATE requires ≥10min, SPECULATIVE requires
+    // ≥2min. Inside the 2-min averaging window, every row goes PASS with
+    // quality_flag='twap_settle_window'. Replaces the old hard
+    // minMinutesToClose guard.
+    tierCeilingByMinutes: { STRONG: 30, MODERATE: 10, SPECULATIVE: 2 },
+    // Event-level Spearman correlation between engine prob and Kalshi
+    // prob across strikes. corr < 0.5 suppresses every row in the event;
+    // 0.5 ≤ corr < 0.7 demotes each tier one notch. Catches "the engine's
+    // surface doesn't even look like the market's" — fundamental model
+    // failure for the event, not a tradeable edge.
+    smileKalshiCorrCheck: true,
     // Restrict snapshots to the 7 hourly settles per weekday (10 AM through
     // 4 PM ET) covered by a live IBIT options chain. KXBTCD event tickers
     // encode the ET wallclock hour as the trailing 2 digits (DST-safe by

@@ -220,3 +220,60 @@ export function impliedVol(marketPrice, S, K, T, r, q, type, { lo = 1e-4, hi = 5
 export function yearFraction(nowEpochS, expiryEpochS) {
   return Math.max(0, (expiryEpochS - nowEpochS) / (365 * 24 * 3600));
 }
+
+// ---------- TWAP-aware probability (KXBTCD + future TWAP-settled markets) ----------
+//
+// Two distinct effects that point-in-time BS gets wrong on sub-hour TWAP-
+// settled markets:
+//
+//   1. **Settlement is an average, not a point.** KXBTCD settles on a
+//      60-second TWAP of CF Benchmarks BRTI over the minute leading up to
+//      the hour. For geometric Brownian motion the log of the geometric
+//      average over [T-τ, T] is Normal with mean Y_0 + (μ-σ²/2)(T-τ/2) and
+//      variance σ²(T - 2τ/3). Outside the window (T ≫ τ) this is a tiny
+//      correction; inside the window it changes the answer materially.
+//      Closed-form derivation in the rationale block above.
+//
+//   2. **The smile IV understates realized vol at sub-hour scales.** OPRA
+//      smiles are calibrated to weekly+ expiries. BTC's empirical 5-minute
+//      realized vol is 2-3× the IV-implied σ — observed live 2026-05-22
+//      when the engine's smile-σ at T=7min implied $138 (1-sigma) while
+//      BTC was actually traversing $300-800 in that window. The short-
+//      horizon multiplier linearly inflates σ from 1× at T = capHours down
+//      to `scale` × at T → 0. Empirical fit on BTC suggests scale ≈ 3.0–3.5.
+//
+// Caller passes physical drift μ (caller decides risk-neutral vs physical).
+// Tau in seconds; rest in year-fraction units.
+export function probAboveTwap(S, K, T, mu, sigma, twapWindowSec, shortHorizonScale = 1, capHours = 1) {
+  if (T <= 0) return S > K ? 1 : 0;
+  const tauYr = (twapWindowSec ?? 0) / (365 * 24 * 3600);
+  // Effective drift period — the average is over [T-τ, T], so the mean is
+  // accumulated to T - τ/2 (midpoint of the averaging window).
+  const driftT = Math.max(T - tauYr / 2, 0);
+  // Effective variance of ln(geometric-average) over the window:
+  //   Var = σ² × (T - 2τ/3) for T ≥ τ.
+  // For T < τ (already inside the window) only the remaining T/3 of variance
+  // is contributed by future ticks — clamp conservatively.
+  const varT = Math.max(T - (2 / 3) * tauYr, T / 3);
+  const sigmaEff = effectiveVolShortHorizon(T, sigma, shortHorizonScale, capHours);
+  if (sigmaEff <= 0) {
+    const fwd = S * Math.exp(mu * driftT);
+    return fwd > K ? 1 : 0;
+  }
+  const volT = sigmaEff * Math.sqrt(varT);
+  const d2 = (Math.log(S / K) + (mu - 0.5 * sigmaEff * sigmaEff) * driftT) / volT;
+  return normCdf(d2);
+}
+
+// Short-horizon vol inflation. Returns sigma unchanged at T ≥ capHours;
+// scales linearly up to `scale × sigma` as T → 0. Used by probAboveTwap to
+// repair the IV→realized-vol gap that BS inherits when smiles calibrated to
+// weekly expiries are evaluated at minute-scale T.
+export function effectiveVolShortHorizon(T, sigma, scale = 1, capHours = 1) {
+  if (!Number.isFinite(scale) || scale <= 1 || T <= 0 || sigma <= 0) return sigma;
+  const Thours = T * 365 * 24;
+  if (Thours >= capHours) return sigma;
+  const frac = Thours / capHours;
+  const boost = scale - (scale - 1) * frac;
+  return sigma * boost;
+}

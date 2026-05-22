@@ -44,6 +44,12 @@ export const COMMODITIES = {
     spotUnit: '$/oz',
     spotLabel: 'Pyth XAG/USD',
     enabled: true,
+    // V2 cutover (2026-05-21): physical-measure prob drives direction/
+    // confidence/tier/routing. drift.js + vol.js outputs feed
+    // probAboveStrikePhysical; if either fails this tick the row falls back
+    // to the V1 risk-neutral edge silently. See commodity-base.js v2Eligible
+    // gate.
+    useV2Cutover: true,
     // FRED skip: no clean daily silver spot equivalent on FRED (LBMA silver
     // is monthly only). Revisit if a daily series surfaces. See handoffs/
     // BATCH_FRED_P5_AND_TRACKER_P2_2026-05-10.md.
@@ -66,6 +72,8 @@ export const COMMODITIES = {
     spotUnit: '$/oz',
     spotLabel: 'Pyth XAU/USD',
     enabled: true,
+    // V2 cutover — see commodities.silver.useV2Cutover note.
+    useV2Cutover: true,
     // FRED Phase 5: London Bullion Market PM fix, daily.
     fredSeriesId: 'GOLDPMGBD228NLBM',
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
@@ -83,6 +91,8 @@ export const COMMODITIES = {
     spotUnit: '$/bbl',
     spotLabel: 'Yahoo CL=F / CLM26.NYM (contract-aware)',
     enabled: true,
+    // V2 cutover — see commodities.silver.useV2Cutover note.
+    useV2Cutover: true,
     useYahooSpot: true,
     bypassWriterTag: true,
     // Contract-aware spot (Part B of OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13).
@@ -131,6 +141,14 @@ export const COMMODITIES = {
     spotUnit: '$/BTC',
     spotLabel: 'Pyth BTC/USD',
     enabled: true,
+    // V2 cutover EXPLICITLY OFF for bitcoin. KXBTCD events are hourly, so
+    // T is ~tiny — drift contribution mathematically caps at ≤0.15pp,
+    // invisible vs the 7pp MODERATE threshold. Math says V2 is a no-op
+    // here; operational risk-aversion says keep BTC untouched until
+    // silver/gold/oil prove V2 is correct in production. drift/vol
+    // estimators still run (cost ~5ms) and write to the parallel V2
+    // columns for free backtest data, but direction/confidence stay V1.
+    useV2Cutover: false,
     // FRED skip: no daily BTC spot series on FRED; CF Benchmarks BRTI
     // (Kalshi's settlement source) isn't on FRED either. The Massive-style
     // cross-check that protects oil from a frozen CL=F print doesn't apply

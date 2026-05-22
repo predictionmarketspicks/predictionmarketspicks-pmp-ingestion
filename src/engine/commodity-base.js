@@ -532,6 +532,19 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     let physicalEdge = null;
     if (probPhysical != null && kalshiProb != null && kalshiProb > 0) physicalEdge = probPhysical - kalshiProb;
 
+    // V2 cutover (2026-05-21). When config.useV2Cutover === true (silver/
+    // gold/oil), the physical-measure edge drives direction/confidence/tier/
+    // routing. Bitcoin (and any commodity without the flag) keeps V1
+    // risk-neutral by construction — its runtime code path is byte-for-byte
+    // unchanged. Graceful per-snapshot fallback: if drift estimator or
+    // probAboveStrikePhysical returned null this tick, we silently revert
+    // to V1 for that row. Always keep edge_pp column = V1 for backtest A/B.
+    const v2Eligible = config.useV2Cutover === true;
+    const v2Available = v2Eligible && physicalEdge != null && probPhysical != null;
+    const chosenEdge = v2Available ? physicalEdge : edge;
+    const chosenProb = v2Available ? probPhysical : optProb;
+    const activeModelVersion = v2Available ? 'v2_physical' : 'v1_riskneutral';
+
     // Quote age — Kalshi WS frames carry a `ts` (ms epoch) on the merged
     // market object via mergeLiveQuote / kalshi.js applyTickerMsg. Falls
     // back to null when only the REST seed is present (no live frame yet).
@@ -543,31 +556,31 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     let confidence = 'skip';
     let rationale = null;
 
-    if (edge == null) {
+    if (chosenEdge == null) {
       // Edge is null for two distinct reasons; before today both collapsed
       // to "Missing IV" which masked the more common cause (no Kalshi bid
       // on a thin strike). kalshiYesImpliedProb now returns null when
       // there is neither a two-sided book nor a recent in-band last print.
-      if (optProb == null) {
+      if (chosenProb == null) {
         rationale = `Missing IV (could not interpolate from ${config.underlyingEtf} chain)`;
       } else if (kalshiProb == null) {
         rationale = 'No Kalshi quote (no live book + insufficient recent volume)';
       } else {
         rationale = 'No Kalshi quote (zero bid, no recent print)';
       }
-    } else if (Math.abs(edge) < MIN_EDGE_PP) {
+    } else if (Math.abs(chosenEdge) < MIN_EDGE_PP) {
       confidence = 'low';
-      rationale = `Edge ${(edge * 100).toFixed(1)}pp below ${(MIN_EDGE_PP * 100).toFixed(0)}pp threshold`;
+      rationale = `Edge ${(chosenEdge * 100).toFixed(1)}pp below ${(MIN_EDGE_PP * 100).toFixed(0)}pp threshold`;
     } else if (kalshiView === 'no_market') {
       rationale = 'No Kalshi market depth — cannot execute';
     } else {
-      const dirYes = edge > 0;
+      const dirYes = chosenEdge > 0;
       direction = dirYes ? 'BUY YES' : 'BUY NO';
-      const optPct = (optProb * 100).toFixed(0);
+      const modelPct = (chosenProb * 100).toFixed(0);
       const kpPct = (kalshiProb * 100).toFixed(0);
-      const edgePct = Math.abs(edge * 100).toFixed(1);
-      rationale = `Options imply ${optPct}% chance ${config.commodity} above $${kSpot.toFixed(2)}, market prices it at ${kpPct}%. ${dirYes ? 'YES' : 'NO'} is underpriced by ${edgePct}pp.`;
-      const mag = Math.abs(edge);
+      const edgePct = Math.abs(chosenEdge * 100).toFixed(1);
+      rationale = `Model implies ${modelPct}% chance ${config.commodity} above $${kSpot.toFixed(2)}, market prices it at ${kpPct}%. ${dirYes ? 'YES' : 'NO'} is underpriced by ${edgePct}pp.`;
+      const mag = Math.abs(chosenEdge);
       if (mag >= 0.15 && (kalshiView === 'live' || kalshiView === 'tight_book')) confidence = 'high';
       else if (
         mag >= 0.1 &&
@@ -612,17 +625,17 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       // public surface (site reader filters quality_flag IS NULL).
       if (
         kalshiView === 'stale_print' &&
-        optProb != null &&
+        chosenProb != null &&
         kalshiProb != null &&
-        Math.abs(optProb - kalshiProb) > STALE_PRINT_DIVERGENCE_CEILING
+        Math.abs(chosenProb - kalshiProb) > STALE_PRINT_DIVERGENCE_CEILING
       ) {
         qualityFlag = 'kalshi_stale_divergence';
         direction = 'PASS';
         confidence = 'skip';
         rationale =
           `kalshi: stale print ${(kalshiProb * 100).toFixed(0)}c diverges ` +
-          `${(Math.abs(optProb - kalshiProb) * 100).toFixed(1)}pp from live ` +
-          `options ${(optProb * 100).toFixed(0)}% — likely stale lastPrice from prior spot regime`;
+          `${(Math.abs(chosenProb - kalshiProb) * 100).toFixed(1)}pp from live ` +
+          `model ${(chosenProb * 100).toFixed(0)}% — likely stale lastPrice from prior spot regime`;
       }
 
       // Edit E — Thin-book large-edge ceiling. passesLiquidityGate.ok=false
@@ -636,19 +649,19 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       if (
         qualityFlag == null &&
         !gate.ok &&
-        edge != null &&
-        Math.abs(edge) > THIN_BOOK_EDGE_CEILING
+        chosenEdge != null &&
+        Math.abs(chosenEdge) > THIN_BOOK_EDGE_CEILING
       ) {
         qualityFlag = 'kalshi_thin_book_large_edge';
         direction = 'PASS';
         confidence = 'skip';
         rationale =
-          `kalshi: ${gate.reason} + |edge|=${(Math.abs(edge) * 100).toFixed(1)}pp ` +
-          `— thin-book mid likely stale relative to live options-implied prob`;
+          `kalshi: ${gate.reason} + |edge|=${(Math.abs(chosenEdge) * 100).toFixed(1)}pp ` +
+          `— thin-book mid likely stale relative to live model prob`;
       }
     }
 
-    let fusedTierStr = edge != null ? fusedTier(Math.abs(edge)) : 'NO_EDGE';
+    let fusedTierStr = chosenEdge != null ? fusedTier(Math.abs(chosenEdge)) : 'NO_EDGE';
     let tierInt = confidenceTierInt(fusedTierStr);
 
     // FRED Phase 5 — demote tier/confidence one notch when realtime spot
@@ -681,8 +694,8 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       kalshi_open_int: Math.round(market.openInterest ?? 0),
       options_iv: iv ?? null,
       options_prob: optProb ?? null,
-      edge_pp: edge ?? null,
-      fused_edge_pp: edge ?? null,
+      edge_pp: edge ?? null,                  // V1 frozen for backtest A/B
+      fused_edge_pp: chosenEdge ?? null,       // V2 active when useV2Cutover=true; drives Discord routing + fusedTier
       direction,
       confidence,
       fused_confidence: fusedTierStr,
@@ -708,7 +721,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       sigma_rv20: sigmaRv20Val,
       sigma_source: sigmaSource,
       quote_age_seconds: quoteAgeSeconds,
-      model_version: 'v1_riskneutral',
+      model_version: activeModelVersion,
     });
   }
 
@@ -741,10 +754,13 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   recordGuardOk(config.commodity).catch(() => {});
 
   const filteredRows = ivCapped;
-  const actionable = filteredRows.filter((r) => r.edge_pp != null && (r.direction === 'BUY YES' || r.direction === 'BUY NO'));
+  // V2 cutover: meta.topEdge reads from fused_edge_pp (= V2 when useV2Cutover
+  // is on, = V1 when off or when V2 fell back). Discord routing keys off
+  // meta.topTier, which in turn keys off this; we want the active edge.
+  const actionable = filteredRows.filter((r) => r.fused_edge_pp != null && (r.direction === 'BUY YES' || r.direction === 'BUY NO'));
   let topEdge = null;
   if (actionable.length > 0) {
-    topEdge = actionable.reduce((best, cur) => (Math.abs(cur.edge_pp) > Math.abs(best.edge_pp) ? cur : best));
+    topEdge = actionable.reduce((best, cur) => (Math.abs(cur.fused_edge_pp) > Math.abs(best.fused_edge_pp) ? cur : best));
   }
 
   // Dealer gamma — uses the same ETF chain + spot + T already in scope. UNIQUE
@@ -761,7 +777,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   // FRED divergence demotes meta.topTier the same way per-row tiers were
   // demoted, so Discord routing + downstream consumers see the suppressed
   // confidence rather than the raw edge_pp tier.
-  const rawTopTier = topEdge ? fusedTier(Math.abs(topEdge.edge_pp)) : 'NO_EDGE';
+  const rawTopTier = topEdge ? fusedTier(Math.abs(topEdge.fused_edge_pp)) : 'NO_EDGE';
   const finalTopTier = divergenceWarning ? downgradeFusedTier(rawTopTier) : rawTopTier;
 
   return {

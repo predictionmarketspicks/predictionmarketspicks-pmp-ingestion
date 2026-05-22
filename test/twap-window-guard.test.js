@@ -1,73 +1,174 @@
-// Bitcoin TWAP settlement-window guard + oil USO-synthetic rollback locks.
-// Anchors the 2026-05-22 fix (handoff: COMMODITY_EDGE_OIL_BITCOIN_FIX_2026-05-22.md).
+// TWAP-aware probability model + final-window backstop locks.
+// Anchors the 2026-05-22 bitcoin model rewrite + the oil USO-synthetic
+// rollback (handoff: COMMODITY_EDGE_OIL_BITCOIN_FIX_2026-05-22.md).
 //
-// Two pieces of config are load-bearing:
-//   1. commodities.bitcoin.minMinutesToClose === 15 — drives the
-//      twap_settle_window guard in commodity-base.js computeSnapshot.
-//      Started at 5min, widened to 15min same session after a live
-//      t-7.4min KXBTCD-26MAY2216 reading where the engine wanted to fade
-//      an uptrend with BUY NO STRONG -92pp at $75,900 (Kalshi correctly
-//      pricing YES at 94c). Sub-hour BS prob can't represent BTC's real
-//      realized vol — this is a band-aid until a TWAP-aware probability
-//      model lands.
-//   2. commodities.oil.useUsoSynthetic === false — rolls back the
-//      synthetic spot path that shipped earlier the same day.
-//      Databento's parity-derived USO underlyingPrice has been ~$142
-//      vs real ~$77 for days; the new path treated that as truth and
-//      produced WTI spot of ~$111.62 vs Kalshi-implied $98.
+// Three things load-bearing here:
 //
-// Full computeSnapshot integration tests for the guard are deferred —
-// they need heavy mocking of chain/event/spot. Config-level tests lock
-// in the patch and prevent silent re-enablement.
+//   1. Bitcoin uses TWAP-aware prob (config.twapWindowSeconds=60,
+//      shortHorizonVolScale=3.5) — see probAboveTwap in options.js.
+//      The point-in-time BS prob the engine used before collapsed to
+//      0/1 inside the final ~10min before KXBTCD settle; the TWAP model
+//      keeps σ honest at sub-hour scales.
+//
+//   2. minMinutesToClose=2 as the final-window backstop. With the model
+//      fix the guard's job shrinks from "absorb every short-T failure"
+//      (the 15-min band-aid) to "skip the literal TWAP averaging window
+//      where past + future contributions to the average mix".
+//
+//   3. oil.useUsoSynthetic === false — rollback of the morning's USO-
+//      synthetic spot path that read Databento's wrong-by-1.8× USO
+//      number as truth and produced fake +20-50pp BUY YES signals.
 
 import { describe, it, expect } from 'vitest';
 import { COMMODITIES } from '../src/engine/commodities.js';
+import { probAboveTwap, probAboveStrike, effectiveVolShortHorizon } from '../src/engine/options.js';
 
-describe('Bitcoin TWAP settlement-window guard config', () => {
-  it('bitcoin.minMinutesToClose === 15', () => {
-    // Widened from 5 → 15 same session after a live t-7.4min signal that
-    // the 5-min guard would have let through. The proper fix is a TWAP-
-    // aware probability model (simulate the avg-outcome distribution, not
-    // the point-in-time outcome); this guard is the conservative band-aid.
-    expect(COMMODITIES.bitcoin.minMinutesToClose).toBe(15);
+const HOUR_YR = 1 / (365 * 24);
+const MIN_YR = 1 / (365 * 24 * 60);
+
+describe('Bitcoin TWAP-aware prob + backstop config', () => {
+  it('bitcoin.twapWindowSeconds === 60 (KXBTCD settles on 60s TWAP)', () => {
+    expect(COMMODITIES.bitcoin.twapWindowSeconds).toBe(60);
   });
 
-  it('silver / gold / oil / spx / copper leave minMinutesToClose unset', () => {
-    // Daily-settle commodities — point-in-time prob is valid all the way
-    // to close because there's no TWAP averaging window absorbing moves.
+  it('bitcoin.shortHorizonVolScale === 3.5 (empirical BTC sub-hour IV→RV gap)', () => {
+    expect(COMMODITIES.bitcoin.shortHorizonVolScale).toBe(3.5);
+  });
+
+  it('bitcoin.minMinutesToClose === 2 (final TWAP averaging window only)', () => {
+    expect(COMMODITIES.bitcoin.minMinutesToClose).toBe(2);
+  });
+
+  it('silver / gold / oil / spx / copper opt out of TWAP path (daily settles)', () => {
+    expect(COMMODITIES.silver.twapWindowSeconds ?? null).toBe(null);
+    expect(COMMODITIES.gold.twapWindowSeconds ?? null).toBe(null);
+    expect(COMMODITIES.oil.twapWindowSeconds ?? null).toBe(null);
+    expect(COMMODITIES.spx.twapWindowSeconds ?? null).toBe(null);
+    expect(COMMODITIES.copper.twapWindowSeconds ?? null).toBe(null);
     expect(COMMODITIES.silver.minMinutesToClose ?? null).toBe(null);
     expect(COMMODITIES.gold.minMinutesToClose ?? null).toBe(null);
     expect(COMMODITIES.oil.minMinutesToClose ?? null).toBe(null);
-    expect(COMMODITIES.spx.minMinutesToClose ?? null).toBe(null);
-    expect(COMMODITIES.copper.minMinutesToClose ?? null).toBe(null);
   });
 });
 
 describe('Oil USO-synthetic rollback config', () => {
   it('oil.useUsoSynthetic === false', () => {
-    // Re-enabling requires fixing deriveEtfSpotByParity in feeds/databento.js
-    // first (currently returns ~$142 USO vs real ~$77). Do not flip back
-    // without verifying the underlying USO number matches reality.
     expect(COMMODITIES.oil.useUsoSynthetic).toBe(false);
   });
 
-  it('oil.useYahooSpot === true (fallback ladder remains active)', () => {
-    // With useUsoSynthetic off, the engine drops through to the Yahoo
-    // path — contract-aware CLM26.NYM primary, CL=F continuous fallback.
+  it('oil.useYahooSpot === true (fallback ladder active)', () => {
     expect(COMMODITIES.oil.useYahooSpot).toBe(true);
   });
 
-  it('oil.spotLabel reflects the active Yahoo path, not the disabled synthetic', () => {
+  it('oil.spotLabel reflects the active Yahoo path', () => {
     expect(COMMODITIES.oil.spotLabel).toMatch(/yahoo/i);
     expect(COMMODITIES.oil.spotLabel).not.toMatch(/uso-synthetic/i);
   });
 });
 
+describe('effectiveVolShortHorizon — short-horizon vol inflation', () => {
+  it('returns sigma unchanged when scale <= 1', () => {
+    expect(effectiveVolShortHorizon(MIN_YR, 0.5, 1, 1)).toBe(0.5);
+    expect(effectiveVolShortHorizon(MIN_YR, 0.5, 0.8, 1)).toBe(0.5);
+  });
+
+  it('full scale at T = 0+', () => {
+    const T = 1e-9;
+    const out = effectiveVolShortHorizon(T, 0.5, 3.5, 1);
+    expect(out).toBeCloseTo(0.5 * 3.5, 3);
+  });
+
+  it('linear decay — at T = capHours / 2 the boost is midway', () => {
+    const T = 0.5 * HOUR_YR;
+    const out = effectiveVolShortHorizon(T, 0.5, 3.5, 1);
+    const expectedBoost = 3.5 - (3.5 - 1) * 0.5;
+    expect(out).toBeCloseTo(0.5 * expectedBoost, 6);
+  });
+
+  it('returns sigma unchanged at T >= capHours', () => {
+    expect(effectiveVolShortHorizon(HOUR_YR, 0.5, 3.5, 1)).toBe(0.5);
+    expect(effectiveVolShortHorizon(2 * HOUR_YR, 0.5, 3.5, 1)).toBe(0.5);
+  });
+});
+
+describe('probAboveTwap — replicates live KXBTCD pathology', () => {
+  // Pulled from the 2026-05-22 live diagnostic:
+  //   t-7.4min, BTC spot $75,695, IV ~0.5 (50% annual from smile)
+  //   $75,900 strike — Kalshi YES at 0.94. Engine (pre-fix) at 0.01.
+  const S = 75_695;
+  const T = 7.4 * MIN_YR;
+  const sigma = 0.5;
+  const mu = 0;
+  const TAU_S = 60;
+
+  it('without short-horizon boost the prob is the BS pathology — near 0', () => {
+    // probAboveTwap with scale=1 ≈ probAboveStrike (TWAP variance correction
+    // for τ << T is sub-percent). Both should produce the 0.01 pathology.
+    const K = 75_900;
+    const probTwap = probAboveTwap(S, K, T, mu, sigma, TAU_S, 1, 1);
+    const probBs = probAboveStrike(S, K, T, 0, 0, sigma);
+    expect(probTwap).toBeLessThan(0.10);
+    expect(probBs).toBeLessThan(0.10);
+    expect(Math.abs(probTwap - probBs)).toBeLessThan(0.01);
+  });
+
+  it('with shortHorizonScale=3.5 the prob lifts to a defensible mid range', () => {
+    // The model fix: inflated σ moves the $75,900 strike from <1% to >25%.
+    // Still a strong disagreement with Kalshi (0.94) but no longer the 0/1
+    // collapse that was driving fake BUY NO STRONG -92pp signals.
+    const K = 75_900;
+    const prob = probAboveTwap(S, K, T, mu, sigma, TAU_S, 3.5, 1);
+    expect(prob).toBeGreaterThan(0.25);
+    expect(prob).toBeLessThan(0.50);
+  });
+
+  it('prob is monotone decreasing in strike at fixed S, T, sigma', () => {
+    const strikes = [75_500, 75_700, 75_900, 76_100, 76_400];
+    const probs = strikes.map((K) => probAboveTwap(S, K, T, mu, sigma, TAU_S, 3.5, 1));
+    for (let i = 1; i < probs.length; i++) {
+      expect(probs[i]).toBeLessThan(probs[i - 1]);
+    }
+  });
+
+  it('prob does NOT collapse to {0, 1} for nearby strikes at short T', () => {
+    // The pre-fix pathology: at T = 7.4min, every strike >$200 from spot
+    // returned exactly 0 or 1. With the TWAP-aware model + σ inflation,
+    // nearby strikes carry meaningful probability mass.
+    const strikes = [75_900, 76_100, 76_300];
+    for (const K of strikes) {
+      const prob = probAboveTwap(S, K, T, mu, sigma, TAU_S, 3.5, 1);
+      expect(prob).toBeGreaterThan(0.01);
+      expect(prob).toBeLessThan(0.99);
+    }
+  });
+
+  it('prob converges to standard BS at T >= 1 hour (no short-horizon boost)', () => {
+    // shortHorizonVolCapHours=1: at T=1hr or longer, σ_eff = σ and the TWAP
+    // correction (τ=60s vs T=3600s) is sub-percent. probAboveTwap should
+    // approximately match probAboveStrike.
+    const K = 76_500;
+    const T1hr = 1 * HOUR_YR;
+    const probTwap = probAboveTwap(S, K, T1hr, mu, sigma, TAU_S, 3.5, 1);
+    const probBs = probAboveStrike(S, K, T1hr, 0, 0, sigma);
+    expect(Math.abs(probTwap - probBs)).toBeLessThan(0.01);
+  });
+
+  it('T <= 0 returns indicator (S > K)', () => {
+    expect(probAboveTwap(100, 99, 0, 0, 0.5, 60, 3.5, 1)).toBe(1);
+    expect(probAboveTwap(100, 101, 0, 0, 0.5, 60, 3.5, 1)).toBe(0);
+    expect(probAboveTwap(100, 99, -0.01, 0, 0.5, 60, 3.5, 1)).toBe(1);
+  });
+
+  it('zero sigma collapses to deterministic forward', () => {
+    const out = probAboveTwap(100, 110, 0.01, 0, 0, 60, 3.5, 1);
+    expect(out).toBe(0);
+    const out2 = probAboveTwap(110, 100, 0.01, 0, 0, 60, 3.5, 1);
+    expect(out2).toBe(1);
+  });
+});
+
 describe('Guard block presence in commodity-base.js (smoke)', () => {
-  // Cheap source-level guard: re-introducing the bug by removing the
-  // minMinutesToClose branch would silently re-enable late-window
-  // signals. This test fails loud if the literal guard is gone.
-  it('commodity-base.js still references config.minMinutesToClose', async () => {
+  it('commodity-base.js still references config.minMinutesToClose + twapWindowSeconds', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const url = await import('node:url');
@@ -78,5 +179,7 @@ describe('Guard block presence in commodity-base.js (smoke)', () => {
     );
     expect(src).toMatch(/config\.minMinutesToClose/);
     expect(src).toMatch(/twap_settle_window/);
+    expect(src).toMatch(/config\.twapWindowSeconds/);
+    expect(src).toMatch(/probAboveTwap/);
   });
 });

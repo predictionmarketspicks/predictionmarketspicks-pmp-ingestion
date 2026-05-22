@@ -173,30 +173,29 @@ export const COMMODITIES = {
     // pre-settlement action. Pairs with requiredOffHours:false on the
     // databento_ibit readiness gate.
     pauseSnapshotsOffHours: true,
-    // Settlement-window guard 2026-05-22 (widened from 5 → 15 min same
-    // session). KXBTCD settles on a 60-second TWAP of CF Benchmarks BRTI
-    // over the minute leading up to the hour. The deeper problem: BS prob
-    // at sub-hour T cannot represent BTC's empirical realized vol. IV-
-    // implied 1-sigma at T=7min ≈ $142 on a $76k spot, but BTC routinely
-    // moves $300-800 inside 7 minutes when trending. Inside that window
-    // the model collapses to 0.00/1.00 for any strike >$200 from spot
-    // while Kalshi (humans + market makers reading order flow + trend) is
-    // pricing the same strike at 90c+. Engine confidently flags BUY NO
-    // against the trend; positions lose.
+    // TWAP-aware probability model (shipped same session as the guard, 2026-
+    // 05-22). Replaces point-in-time BS prob for KXBTCD with probAboveTwap
+    // — see the rationale block on probAboveTwap in options.js. Two fixes:
     //
-    // Today observed live at t-7.4min on KXBTCD-26MAY2216 (BTC rising):
-    //   $75,900 strike — Kalshi YES 0.94, model 0.01, engine "BUY NO STRONG -92pp"
-    //   $76,100 strike — Kalshi YES 0.67, model 0.00, engine "BUY NO STRONG -66pp"
-    //   spot $75,695 and rising. Engine wanted to fade the entire uptrend.
-    //
-    // 15 min covers the empirically observed bad-signal window (all
-    // actionable bitcoin signals today fired in the last 1.6min, plus this
-    // 7.4min sighting). KXBTCD is hourly so this kills the last 25% of
-    // each event — acceptable given >99% of signals in that window have
-    // been false positives. Revisit when we replace BS prob with a
-    // realized-vol-aware TWAP model that respects the 60s settle
-    // averaging window AND short-horizon trend.
-    minMinutesToClose: 15,
+    //   1. Settlement is an average, not a point. KXBTCD settles on a 60-
+    //      second TWAP of CF Benchmarks BRTI. The geometric-average variance
+    //      σ²(T - 2τ/3) collapses gracefully near the window instead of
+    //      σ²T → 0 producing the 0/1 prob artifact.
+    //   2. Smile σ underestimates BTC realized vol at sub-hour scales by
+    //      ~2-3×. shortHorizonVolScale linearly inflates σ from 1× at
+    //      T = shortHorizonVolCapHours down to 3.5× at T → 0. Empirical
+    //      fit on the 2026-05-22 t-7.4min observation: with scale=3.5 the
+    //      engine's $75,900-strike prob moves from 0.01 (the bad number
+    //      that mid-trend produced "BUY NO STRONG -92pp") to ~0.33, which
+    //      vs Kalshi 0.94 is still a -61pp edge but a defensible one.
+    twapWindowSeconds: 60,
+    shortHorizonVolScale: 3.5,
+    shortHorizonVolCapHours: 1,
+    // Final-window backstop kept at 2 min — covers the literal TWAP
+    // averaging window (60s) with a 60s buffer for clock skew + tick
+    // staleness. The model fix above lets us drop from the 15-min
+    // conservative band-aid the earlier patch needed.
+    minMinutesToClose: 2,
     // Restrict snapshots to the 7 hourly settles per weekday (10 AM through
     // 4 PM ET) covered by a live IBIT options chain. KXBTCD event tickers
     // encode the ET wallclock hour as the trailing 2 digits (DST-safe by

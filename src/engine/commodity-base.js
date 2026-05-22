@@ -15,7 +15,7 @@
 // reusing Massive's server-side IV/Greeks (the Python path back-solves IV from
 // Yahoo, which has known quantization issues; the engine doesn't).
 
-import { probAboveStrike, probAboveStrikePhysical, yearFraction } from './options.js';
+import { probAboveStrike, probAboveStrikePhysical, probAboveTwap, yearFraction } from './options.js';
 import { computeDealerGamma } from './gamma.js';
 import { estimateDrift } from './drift.js';
 import { warmVolCache, estimateVol } from './vol.js';
@@ -548,7 +548,6 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       // 0.013 explicitly in commodities.js because SPY's ~1.3% dividend yield
       // materially shifts the risk-neutral drift for sub-hour expiries.
       const q = config.dividendYield ?? DIVIDEND_YIELD;
-      optProb = probAboveStrike(spotPrice, kSpot, T, RISK_FREE_RATE, q, iv);
       volEst = estimateVol(iv, config.commodity);
       const sigmaForPhysical = volEst?.sigma_blend ?? iv;
       sigmaBlendVal = volEst?.sigma_blend ?? null;
@@ -556,7 +555,44 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       sigmaRv20Val = volEst?.sigma_rv20 ?? null;
       sigmaSource = volEst?.source ?? 'iv_only';
       const muForPhysical = muUsed != null ? muUsed : (RISK_FREE_RATE - q);
-      probPhysical = probAboveStrikePhysical(spotPrice, kSpot, T, muForPhysical, sigmaForPhysical);
+      // TWAP-aware probability for sub-hour TWAP-settled markets (KXBTCD: 60s
+      // TWAP of BRTI). When config.twapWindowSeconds is set the engine uses
+      // probAboveTwap, which (a) integrates the geometric-average variance
+      // σ²(T - 2τ/3) instead of σ²T and (b) inflates σ on a short-horizon
+      // linear ramp via config.shortHorizonVolScale to repair the IV→
+      // realized-vol gap that BS inherits at minute-scale T. See the long
+      // rationale block on probAboveTwap in options.js. Both v1 (risk-
+      // neutral) and v2 (physical) paths use the same TWAP function — only
+      // the drift differs. Commodities without the config flag (silver/
+      // gold/oil/spx/copper — daily settles, no TWAP averaging) continue
+      // through the standard probAboveStrike + probAboveStrikePhysical path.
+      if (config.twapWindowSeconds != null) {
+        const scale = config.shortHorizonVolScale ?? 1;
+        const capHours = config.shortHorizonVolCapHours ?? 1;
+        optProb = probAboveTwap(
+          spotPrice,
+          kSpot,
+          T,
+          RISK_FREE_RATE - q,
+          iv,
+          config.twapWindowSeconds,
+          scale,
+          capHours,
+        );
+        probPhysical = probAboveTwap(
+          spotPrice,
+          kSpot,
+          T,
+          muForPhysical,
+          sigmaForPhysical,
+          config.twapWindowSeconds,
+          scale,
+          capHours,
+        );
+      } else {
+        optProb = probAboveStrike(spotPrice, kSpot, T, RISK_FREE_RATE, q, iv);
+        probPhysical = probAboveStrikePhysical(spotPrice, kSpot, T, muForPhysical, sigmaForPhysical);
+      }
     }
 
     const kalshiProb = kalshiYesImpliedProb(market);

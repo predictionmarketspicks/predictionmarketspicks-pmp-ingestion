@@ -46,6 +46,18 @@ export const KALSHI_SERIES = [
   // Sports — DK comparison only
   { series: 'KXNBAGAME', category: 'Sports' },
 
+  // NFL futures — added 2026-05-22 for /sports rebuild.
+  // Consumer: components/sports/NflFuturesMovers.tsx (Super Bowl + MVP).
+  // Other tickers feed Live-on-Kalshi-Sports MoverBox.
+  // Source: handoffs/SPORTS_PAGE_REBUILD_2026-05-22.md.
+  // KXSB substitutes for handoff's KXNFLSUPER (not a real Kalshi ticker).
+  { series: 'KXSB',          category: 'Sports' },
+  { series: 'KXNFLMVP',      category: 'Sports' },
+  { series: 'KXNFLAFCCHAMP', category: 'Sports' },
+  { series: 'KXNFLNFCCHAMP', category: 'Sports' },
+  { series: 'KXNFLPLAYOFF',  category: 'Sports' },
+  { series: 'KXNFLWINS',     category: 'Sports' },
+
   // Politics (4) — KXNEWOUTBREAK added per macro-movers.ts (Hantavirus momentum play, sunset 2026-06-15)
   // KXPRESPERSON added 2026-05-15 — candidate-level 2028 Pres feeds pair-discover
   // (the title 'Who will win the next presidential election?' is generic across all

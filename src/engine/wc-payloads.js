@@ -47,22 +47,25 @@ const state = {
 // ── world-cup-2026 ──────────────────────────────────────────────────────
 
 // Display precedence for the champion-row payload only — Kalshi if it has
-// any volume, else Polymarket if any volume, else DraftKings if present.
-// More permissive than the mispricing engine's selectDisplayPlatform()
-// because pre-tournament champion outright Kalshi books may have low
-// volume but still represent the market.
+// any volume, else Polymarket if any volume. DraftKings is intentionally NOT
+// a source here: it's sportsbook data (off-brand for a prediction-markets
+// widget per CLAUDE.md) and its implied outright probabilities were dominating
+// the probability sort, surfacing non-contenders (e.g. Scotland at ~50%) above
+// real Kalshi favourites. Callers pre-filter `rows` to Kalshi/Polymarket only,
+// so any DraftKings row never reaches this function — kept defensive anyway.
+// More permissive than the mispricing engine's selectDisplayPlatform() because
+// pre-tournament champion outright Kalshi books may have low volume but still
+// represent the market.
 function pickChampionRow(rows) {
   if (!rows || rows.length === 0) return null;
   const k = rows.find((r) => r.platform === 'kalshi');
   if (k && Number(k.volume_24h ?? 0) > 0) return k;
   const p = rows.find((r) => r.platform === 'polymarket');
   if (p && Number(p.volume_24h ?? 0) > 0) return p;
-  const d = rows.find((r) => r.platform === 'draftkings');
-  if (d) return d;
   // No platform has volume — fall back to whichever Kalshi/Poly row exists
   // so the team still appears (probability > 0). Keeps pre-tournament
   // skeleton data on screen until volume arrives.
-  return k || p || d || rows[0];
+  return k || p || null;
 }
 
 function teamSlugFromEntity(entityId) {
@@ -100,7 +103,13 @@ export function buildWorldCup2026Envelope({ simRows, marketRows }) {
     const team = lookupTeamBySlug(slug);
     const displayName = team?.name || slug;
 
-    const platformRows = championMarketByTeam.get(slug) || [];
+    // Kalshi-first, Polymarket fallback. DraftKings sportsbook outrights are
+    // dropped before they reach the display payload or the _raw array — they
+    // are off-brand for a prediction-markets widget and their probabilities
+    // were polluting the champion leaderboard (see pickChampionRow note).
+    const platformRows = (championMarketByTeam.get(slug) || []).filter(
+      (r) => r.platform === 'kalshi' || r.platform === 'polymarket',
+    );
     const pick = pickChampionRow(platformRows);
 
     let probability;

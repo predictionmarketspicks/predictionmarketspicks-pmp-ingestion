@@ -31,13 +31,15 @@ describe('pickChampionRow', () => {
     expect(pickChampionRow(rows).platform).toBe('polymarket');
   });
 
-  it('falls through to DraftKings when Kalshi + Poly empty', () => {
+  it('ignores DraftKings and keeps the Kalshi skeleton row when Kalshi + Poly have no volume', () => {
     const rows = [
       { platform: 'kalshi', volume_24h: 0 },
       { platform: 'polymarket', volume_24h: 0 },
       { platform: 'draftkings' },
     ];
-    expect(pickChampionRow(rows).platform).toBe('draftkings');
+    // DraftKings outrights were dropped from the WC writer (2026-05-28); the
+    // zero-volume Kalshi skeleton row wins so the team still shows pre-volume.
+    expect(pickChampionRow(rows).platform).toBe('kalshi');
   });
 
   it('returns the lone platform row even with zero volume', () => {

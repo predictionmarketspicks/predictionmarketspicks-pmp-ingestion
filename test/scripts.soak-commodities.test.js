@@ -5,7 +5,7 @@
 // future "just nudge the number" change can't silently restore the cry-wolf.
 
 import { describe, it, expect } from 'vitest';
-import { evaluateSmile, minSmileRatio } from '../scripts/soak-commodities.js';
+import { evaluateSmile, minSmileRatio, classifyFlagCounts } from '../scripts/soak-commodities.js';
 
 describe('evaluateSmile', () => {
   it('skips when fewer than 3 strikes have usable IV', () => {
@@ -94,5 +94,47 @@ describe('minSmileRatio', () => {
 
   it('returns the default for unknown commodities (defensive)', () => {
     expect(minSmileRatio('platinum')).toBeGreaterThan(0);
+  });
+});
+
+describe('classifyFlagCounts', () => {
+  it('ignores cold_buffer at any volume', () => {
+    expect(classifyFlagCounts({ cold_buffer: 9999 })).toEqual([]);
+  });
+
+  it('ignores twap_settle_window at any volume (bitcoin hourly settles produce 500+ rows/day)', () => {
+    expect(classifyFlagCounts({ twap_settle_window: 1500 })).toEqual([]);
+  });
+
+  it('passes mixed expected flags', () => {
+    expect(classifyFlagCounts({ cold_buffer: 30, twap_settle_window: 800 })).toEqual([]);
+  });
+
+  it('fails kalshi_no_book above ceiling 50', () => {
+    const v = classifyFlagCounts({ kalshi_no_book: 51 });
+    expect(v).toHaveLength(1);
+    expect(v[0]).toMatchObject({ flag: 'kalshi_no_book', count: 51, ceiling: 50 });
+  });
+
+  it('passes kalshi_no_book at exactly 50 (ceiling is inclusive of equal counts)', () => {
+    expect(classifyFlagCounts({ kalshi_no_book: 50 })).toEqual([]);
+  });
+
+  it('fails smile_kalshi_diverged at low volume (ceiling 10)', () => {
+    expect(classifyFlagCounts({ smile_kalshi_diverged: 11 })).toHaveLength(1);
+  });
+
+  it('fails unknown flags on first sighting (defensive — forces engine devs to update soak)', () => {
+    expect(classifyFlagCounts({ some_new_flag: 1 })).toHaveLength(1);
+  });
+
+  it('reports all violations in one pass', () => {
+    const v = classifyFlagCounts({
+      cold_buffer: 100,                        // ignored
+      twap_settle_window: 800,                 // ignored
+      kalshi_no_book: 200,                     // FAIL
+      smile_kalshi_diverged: 11,               // FAIL
+    });
+    expect(v.map((x) => x.flag).sort()).toEqual(['kalshi_no_book', 'smile_kalshi_diverged']);
   });
 });

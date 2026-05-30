@@ -15,7 +15,10 @@
 //      old absolute floor of 0.05 stddev caught 88–97% of healthy snapshots
 //      as false positives because low-vol commodities have naturally tight
 //      smiles. See memory: project_commodity_soak_threshold.md.
-//   5. No NON-NULL quality_flag values landed today.
+//   5. No problematic quality_flag values above their daily ceiling. Expected
+//      audit tags (cold_buffer, twap_settle_window) are ignored at any volume;
+//      kalshi_* / smile_kalshi_diverged fail only past per-flag ceilings, and
+//      any unknown flag fails on first sighting. See classifyFlagCounts.
 //
 // Exit code: 0 if all commodities pass, 1 if any fail. Posts a #bot-logs
 // summary either way (DISCORD_BOT_TOKEN must be set).
@@ -40,6 +43,25 @@ const MIN_SNAPSHOTS_PER_DAY = 4;
 const MIN_SMILE_RATIO_DEFAULT = 0.005;
 const MIN_SMILE_RATIO_OVERRIDES = {};
 const BOT_LOGS_CHANNEL_ID = '1487857846111567952';
+
+// quality_flag classification. EXPECTED_FLAGS fire under normal operation by
+// design — cold_buffer after Fly redeploys, twap_settle_window in the last 15
+// min before bitcoin's hourly settles. Site readers + Discord routing filter
+// `quality_flag IS NULL` so these never reach a public surface. Soak ignores
+// them.
+//
+// UNEXPECTED_FLAG_CEILINGS sets per-flag daily ceilings for the genuinely
+// problematic flags. Small daily counts (transient hiccups) are fine; anything
+// sustained means kalshi or the chain is broken — those should fail soak.
+// Anything not in either set falls through to ceiling=0 (any sighting fails);
+// new flag names added to the engine should be added here explicitly.
+const EXPECTED_FLAGS = new Set(['cold_buffer', 'twap_settle_window']);
+const UNEXPECTED_FLAG_CEILINGS = {
+  kalshi_no_book:              50,
+  kalshi_stale_divergence:     25,
+  kalshi_thin_book_large_edge: 25,
+  smile_kalshi_diverged:       10,
+};
 
 export function minSmileRatio(commodity) {
   return MIN_SMILE_RATIO_OVERRIDES[commodity] ?? MIN_SMILE_RATIO_DEFAULT;
@@ -73,6 +95,23 @@ export function evaluateSmile(ivs, { minRatio = MIN_SMILE_RATIO_DEFAULT } = {}) 
     stddev,
     ratio,
   };
+}
+
+// Pure-function quality_flag classifier — exported for testability, mirroring
+// evaluateSmile. Takes a {flag: count} map and returns the list of violations
+// (flags whose count exceeds their ceiling). EXPECTED_FLAGS are ignored at any
+// volume; unknown flags default to ceiling 0 (any sighting is a violation).
+export function classifyFlagCounts(flagCounts, {
+  expected = EXPECTED_FLAGS,
+  ceilings = UNEXPECTED_FLAG_CEILINGS,
+} = {}) {
+  const violations = [];
+  for (const [flag, count] of Object.entries(flagCounts || {})) {
+    if (expected.has(flag)) continue;
+    const ceiling = ceilings[flag] ?? 0;
+    if (count > ceiling) violations.push({ flag, count, ceiling });
+  }
+  return violations;
 }
 
 function sb() {
@@ -130,14 +169,26 @@ async function checkCommodity(client, commodity, snapshotDate) {
     failures.push(`first_snapshot_used_prev_close_bridge at ${firstSnapAt}`);
   }
 
-  const { count: flaggedCount, error: flagErr } = await client
+  // Criterion #5: per-flag classification (replaces the blanket
+  // flaggedCount > 0 check). EXPECTED_FLAGS are by-design audit tags; only
+  // genuinely problematic flags above their daily ceiling fail soak.
+  const { data: flagRows, error: flagErr } = await client
     .from('commodity_edge_signals')
-    .select('*', { count: 'exact', head: true })
+    .select('quality_flag')
     .eq('commodity', commodity)
     .eq('snapshot_date', snapshotDate)
     .not('quality_flag', 'is', null);
-  if (flagErr) failures.push(`flag_query: ${flagErr.message}`);
-  else if ((flaggedCount || 0) > 0) failures.push(`quality_flagged_rows=${flaggedCount}`);
+  if (flagErr) {
+    failures.push(`flag_query: ${flagErr.message}`);
+  } else {
+    const flagCounts = {};
+    for (const r of flagRows || []) {
+      flagCounts[r.quality_flag] = (flagCounts[r.quality_flag] || 0) + 1;
+    }
+    for (const v of classifyFlagCounts(flagCounts)) {
+      failures.push(`${v.flag}=${v.count} > ${v.ceiling}`);
+    }
+  }
 
   if (distinct && distinct.length > 0) {
     const latestSnapAt = [...seenSnaps].sort().pop();

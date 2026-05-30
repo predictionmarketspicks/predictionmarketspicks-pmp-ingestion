@@ -4,11 +4,11 @@
 // What it does:
 //   1. Loads market_pairs rows we've already seen (active OR llm_proposed) and
 //      builds a "seen" set keyed by anchor_id|mirror_id.
-//   2. Pulls Kalshi political/economic/fed candidates via the existing
-//      feeds/movers.js watchlist (filtered to those three categories — Sports
-//      KXNBAGAME, Crypto, Weather, Entertainment intentionally excluded).
+//   2. Pulls Kalshi candidates via the existing feeds/movers.js watchlist,
+//      filtered to the categories in KALSHI_CATEGORY_MAP (Politics, Economics,
+//      Crypto, Entertainment — Sports KXNBAGAME and Weather stay excluded).
 //   3. Pulls Polymarket markets via feeds/polymarket-gamma.js fetchTopMarkets,
-//      then narrows to allowlist tags that overlap our three categories.
+//      then narrows to the allowlist tags those categories bridge to.
 //   4. For each Kalshi market, scores the top-3 Polymarket candidates with the
 //      shared matchTitles tokenizer (engine/lib/match.js). Score floor 0.25.
 //   5. Skips anything already in the seen set, then chunks the survivors and
@@ -21,10 +21,10 @@
 // inside a fast-path setTimeout, and `lastRunAt` short-circuits anything that
 // fires sooner than MIN_INTERVAL_MS.
 //
-// Cost: capped via the cost ceiling in llm-pair-confirm. With ~150 Kalshi
-// candidates × top-3 Poly each, after seen-dedup and the 0.25 score floor we
-// typically send 30–80 pairs to the LLM. At Haiku rates that's well under
-// $0.50/run.
+// Cost: capped via the cost ceiling in llm-pair-confirm ($1.00/run) and the
+// MAX_LLM_CONFIRMATIONS_PER_RUN slice (150). Broad candidates are interleaved
+// round-robin by category before the slice so crypto volume can't starve the
+// political/economic pairs. At Haiku rates 150 confirms stays well under $1.00.
 
 import { fetchKalshiCandidates, kalshiGet } from '../feeds/movers.js';
 import { fetchTopMarkets } from '../feeds/polymarket-gamma.js';
@@ -40,8 +40,9 @@ const GAMMA_API_BASE = process.env.POLYMARKET_GAMMA_BASE || 'https://gamma-api.p
 const MIN_INTERVAL_MS = Number(process.env.PAIR_DISCOVER_INTERVAL_MS || 24 * 60 * 60 * 1000);
 
 // Hard cap on how many candidates we will LLM-confirm in a single run. Keeps
-// cost predictable even if the Kalshi/Poly feeds spike. handoff §4c says 50.
-const MAX_LLM_CONFIRMATIONS_PER_RUN = Number(process.env.PAIR_DISCOVER_MAX_LLM || 50);
+// cost predictable even if the Kalshi/Poly feeds spike. Raised 50→150 (2026-05-30)
+// when Crypto + Entertainment were added to the sweep. Env var overrides the default.
+const MAX_LLM_CONFIRMATIONS_PER_RUN = Number(process.env.PAIR_DISCOVER_MAX_LLM || 150);
 
 // Minimum tokenizer score for a Kalshi×Poly pair to be worth confirming.
 // 0.25 = ~3-token overlap on a 12-token title — keeps obvious noise out
@@ -91,8 +92,22 @@ const PERSON_PLACEHOLDER_RE = /^Person [A-Z]{1,3}$/i;
 const KALSHI_CATEGORY_MAP = {
   Politics: 'political',
   Economics: 'economic',
+  Crypto: 'crypto',
+  Entertainment: 'culture',
 };
-const POLY_TAG_BRIDGE = ['politics', 'us-election-2028', 'economy', 'fed-rate'];
+// Which Poly category tags a given Kalshi category may pair with. Drives the
+// cross-platform screen in buildCandidates so we never pair a Kalshi Politics
+// market against a Poly crypto market, etc. Broadened 2026-05-30 to add
+// Crypto (KXBTC*/KXETH ↔ Poly crypto) and Entertainment (KXSURVIVOR ↔ Poly culture).
+const KALSHI_TO_POLY_TAGS = {
+  Politics: ['politics', 'us-election-2028'],
+  Economics: ['economy', 'fed-rate'],
+  Crypto: ['crypto'],
+  Entertainment: ['culture'],
+};
+// Poly categories worth keeping from the broad top-200 fetch — the union of the
+// allowed-tag lists above.
+const POLY_TAG_BRIDGE = ['politics', 'us-election-2028', 'economy', 'fed-rate', 'crypto', 'culture'];
 
 registerFeed('pair_discover_engine');
 
@@ -164,12 +179,10 @@ function buildCandidates(kalshiSide, polySide, seen) {
   for (const k of kalshiSide) {
     const scored = [];
     for (const p of polySide) {
-      // Cross-platform category screen: only pair Kalshi Politics rows with
-      // Poly politics tags, Kalshi Economics with Poly economy/fed-rate.
-      const polyTagOk =
-        (k.category === 'Politics' && (p.category === 'politics' || p.category === 'us-election-2028')) ||
-        (k.category === 'Economics' && (p.category === 'economy' || p.category === 'fed-rate'));
-      if (!polyTagOk) continue;
+      // Cross-platform category screen: a Kalshi category may only pair with its
+      // allowed Poly tags (see KALSHI_TO_POLY_TAGS).
+      const allowedPolyTags = KALSHI_TO_POLY_TAGS[k.category] || [];
+      if (!allowedPolyTags.includes(p.category)) continue;
       const score = matchTitles(k.title, p.question || '');
       if (score < MATCH_SCORE_FLOOR) continue;
       scored.push({ score, k, p });
@@ -187,6 +200,31 @@ function buildCandidates(kalshiSide, polySide, seen) {
     }
   }
   return candidates;
+}
+
+// Interleave broad candidates round-robin by Kalshi category, each group in
+// score order. A high-volume category (crypto) produces many title-token matches;
+// without this, score-sort-then-slice would let crypto eat the whole cap and
+// starve political/economic. Round-robin guarantees every category gets a fair
+// share of the LLM-confirm budget. (Round-robin-backfill lesson.)
+function interleaveByCategory(candidates) {
+  const groups = new Map();
+  for (const c of candidates) {
+    const cat = c.kalshi.category || 'other';
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat).push(c);
+  }
+  for (const g of groups.values()) g.sort((a, b) => b.score - a.score);
+  const out = [];
+  let added = true;
+  while (added) {
+    added = false;
+    for (const g of groups.values()) {
+      const next = g.shift();
+      if (next) { out.push(next); added = true; }
+    }
+  }
+  return out;
 }
 
 function buildPairRow({ candidate, verdict }) {
@@ -417,8 +455,11 @@ export async function runPairDiscoverOnce({ force = false } = {}) {
     const broadCandidates = buildCandidates(kalshiSide, polySide, seen);
     state.seenSkipped += Math.max(0, (kalshiSide.length * POLY_PER_KALSHI) - broadCandidates.length);
 
-    // Event-id first (score=1.0), then broad. Sort tie-broken by score desc.
-    const allCandidates = [...eventCandidates, ...broadCandidates];
+    // Event-id candidates (score=1.0, e.g. KXPRESPERSON) always lead and are never
+    // starved by the cap. Broad candidates are interleaved round-robin by Kalshi
+    // category so a high-volume category (crypto) can't crowd political/economic
+    // out of the cap.
+    const allCandidates = [...eventCandidates, ...interleaveByCategory(broadCandidates)];
     if (allCandidates.length === 0) {
       console.log('[pair-discover] no new candidates after event-id + broad sweep + dedup');
       recordTick('pair_discover_engine');
@@ -433,9 +474,8 @@ export async function runPairDiscoverOnce({ force = false } = {}) {
       };
     }
 
-    // Sort by score desc, keep top N — the most-likely matches go first so
-    // the cost ceiling abort still lands the best candidates if we trip it.
-    allCandidates.sort((a, b) => b.score - a.score);
+    // Keep top N. Order is already event-first then category-interleaved, so the
+    // cost-ceiling abort still lands the highest-value candidates if it trips.
     const capped = allCandidates.slice(0, MAX_LLM_CONFIRMATIONS_PER_RUN);
     console.log(
       `[pair-discover] scored ${allCandidates.length} candidates (event=${eventCandidates.length} + broad=${broadCandidates.length}) → sending ${capped.length} to LLM`,
@@ -447,7 +487,7 @@ export async function runPairDiscoverOnce({ force = false } = {}) {
       chunkSize: 10,
       sonnetBandLow: 0.6,
       sonnetBandHigh: 0.85,
-      costCeilingUsd: Number(process.env.PAIR_DISCOVER_COST_CEILING_USD || 0.5),
+      costCeilingUsd: Number(process.env.PAIR_DISCOVER_COST_CEILING_USD || 1.0),
     });
     state.lastCostUsd = result.costUsd;
     state.lastVerdictBreakdown = result.model_breakdown;

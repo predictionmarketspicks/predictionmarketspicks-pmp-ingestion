@@ -1,51 +1,62 @@
 """
 WC 2026 team registry. Single source of truth for:
-  - strength ratings (Off/Def Elo-tier, Apr 2026 v2 calibration)
+  - strength ratings (Off/Def, v4 market-anchored calibration, May 2026)
   - groups
   - host status
   - display name → DB slug
   - display name → FIFA tri-code (used in match entity_ids)
 
-Ratings + groups ported verbatim from /Users/benny/projects/predictionmarketspicks/
-wc2026_sim_v2.py — the script that produced v2_april_2026_seed.
+Groups/slugs/tri-codes are unchanged from the original wc2026_sim_v2.py registry.
+
+Ratings are v4 MARKET-ANCHORED (sim_run_id prefix v4_, replaces v2_april_2026_seed):
+each team's overall strength was calibrated so the deterministic sim (10000 iters,
+seed=42) reproduces a champion distribution that is a 50/50 blend of the original
+Elo model and the de-vigged DraftKings outright market (operator snapshot
+2026-05-31; cross-checked vs de-vigged Kalshi KXWORLDCUP). The blend is the target;
+calibrate_ratings.py solved for the ratings that produce it (fixed point on overall
+strength, preserving each team's Off−Def differential). Market snapshot + weight
+live in market_anchor.py (W_MARKET = 0.50). The seed values are the validation
+source of truth in validation.py SPOT_CHECKS. To re-anchor: refresh the board in
+market_anchor.py, re-run `python -m wc.calibrate_ratings`, paste the new TEAMS +
+SPOT_CHECKS, bump the sim_run_id prefix.
 """
 
-# ── Team strength ratings ─────────────────────────────────────────────────────
-# O/D scale: 1500 = average. Calibrated so elite vs minnow ~85-92%, peers ~40-30-30.
-# Source: aggregate of FIFA, eloratings.net, SPI tiers as of April 2026.
+# ── Team strength ratings (v4 market-anchored) ───────────────────────────────
+# O/D scale: 1500 = average. Off−Def differential preserved from the v2 Elo tiers;
+# overall strength shifted toward the 50/50 model-market champion blend.
 TEAMS = {
     # Elite contenders
-    "Spain":        (1920, 1880),
-    "France":       (1905, 1860),
-    "England":      (1890, 1850),
-    "Brazil":       (1880, 1830),
-    "Argentina":    (1875, 1840),
-    "Germany":      (1850, 1810),
-    "Portugal":     (1830, 1800),
-    "Netherlands":  (1820, 1795),
+    "Spain":        (1902, 1862),
+    "France":       (1894, 1849),
+    "England":      (1878, 1838),
+    "Brazil":       (1869, 1819),
+    "Argentina":    (1857, 1822),
+    "Germany":      (1837, 1797),
+    "Portugal":     (1834, 1804),
+    "Netherlands":  (1813, 1788),
     # Strong
-    "Belgium":      (1790, 1760),
-    "Croatia":      (1760, 1770),
-    "Colombia":     (1760, 1740),
-    "Uruguay":      (1770, 1735),
-    "Morocco":      (1740, 1790),
-    "Switzerland":  (1720, 1760),
-    "Japan":        (1730, 1720),
-    "Senegal":      (1725, 1710),
-    "Mexico":       (1710, 1700),
-    "United States":(1700, 1695),
-    "Ecuador":      (1680, 1730),
-    "Cote d'Ivoire":(1690, 1700),
+    "Belgium":      (1780, 1750),
+    "Croatia":      (1738, 1748),
+    "Colombia":     (1763, 1743),
+    "Uruguay":      (1764, 1729),
+    "Morocco":      (1728, 1778),
+    "Switzerland":  (1715, 1755),
+    "Japan":        (1740, 1730),
+    "Senegal":      (1730, 1715),
+    "Mexico":       (1715, 1705),
+    "United States":(1724, 1719),
+    "Ecuador":      (1686, 1736),
+    "Cote d'Ivoire":(1685, 1695),
     # Solid / mid
-    "Iran":         (1660, 1700),
+    "Iran":         (1646, 1686),
     "Egypt":        (1650, 1685),
     "Korea Republic":(1660, 1660),
     "Australia":    (1650, 1680),
     "Canada":       (1655, 1650),
-    "Türkiye":      (1665, 1650),
-    "Norway":       (1680, 1640),
-    "Sweden":       (1650, 1660),
-    "Austria":      (1660, 1665),
+    "Türkiye":      (1709, 1694),
+    "Norway":       (1760, 1720),
+    "Sweden":       (1699, 1709),
+    "Austria":      (1684, 1689),
     "Tunisia":      (1620, 1680),
     "Algeria":      (1640, 1660),
     # Lower-mid

@@ -1,11 +1,12 @@
 """
-Sim-output validation against v2_april_2026_seed.
+Sim-output validation against the v4 market-anchored seed (see teams.py header).
 
 What we validate:
   - Team progression (champion + reach_*) reproduces the seed within ±0.5pp,
     because the algorithm is deterministic with seed=42 (we replicated the
     original wc2026_sim_v2.py operator-precedence quirk on purpose; see
-    simulator.py for the load-bearing comment).
+    simulator.py for the load-bearing comment). The v4 seed swapped the team
+    ratings (market-anchored) but NOT the algorithm, so determinism is intact.
   - Champion% across all 48 teams sums to 100.0 ± 0.5.
   - Match-level (match_winner_*, match_o25, match_btts) — sanity only:
     H+D+A sums to 100 ± 1 per match; all values in (0, 100).
@@ -21,19 +22,21 @@ Failure modes:
 """
 from typing import Dict, List
 
-# Spot-check teams + tolerance window per the spec sign-off:
-#   Spain   17.8-19.4
-#   France  14.2-16.2
-#   England 11.8-13.8
-# We use ±0.5pp around the canonical seed values, which is well inside the spec
-# bands but tight enough to catch any algorithmic drift.
+# Spot-check teams + tolerance window — v4 MARKET-ANCHORED seed (May 2026).
+# expected = the actual champion% the baked teams.py ratings produce at the
+# production config (10000 iters, seed=42), which is a 50/50 blend of the Elo
+# model and the de-vigged DraftKings outright market (see teams.py header +
+# market_anchor.py). Because the run is deterministic, the nightly sim reproduces
+# these exactly; ±0.5pp catches any algorithmic drift. spec_band = expected ±1.0,
+# the acceptable market-anchored range. To re-anchor, regenerate via
+# `python -m wc.calibrate_ratings` and paste its printed SPOT_CHECKS block.
 SPOT_CHECKS = {
-    "team:spain":     {"kind": "champion", "expected": 18.6, "tol": 0.5, "spec_band": (17.8, 19.4)},
-    "team:france":    {"kind": "champion", "expected": 15.2, "tol": 0.5, "spec_band": (14.2, 16.2)},
-    "team:england":   {"kind": "champion", "expected": 12.8, "tol": 0.5, "spec_band": (11.8, 13.8)},
-    "team:brazil":    {"kind": "champion", "expected": 11.0, "tol": 0.5, "spec_band": (10.0, 12.0)},
-    "team:argentina": {"kind": "champion", "expected": 10.2, "tol": 0.5, "spec_band": (9.2, 11.2)},
-    "team:germany":   {"kind": "champion", "expected": 7.4,  "tol": 0.5, "spec_band": (6.4, 8.4)},
+    "team:spain":     {"kind": "champion", "expected": 16.7, "tol": 0.5, "spec_band": (15.7, 17.7)},
+    "team:france":    {"kind": "champion", "expected": 14.6, "tol": 0.5, "spec_band": (13.6, 15.6)},
+    "team:england":   {"kind": "champion", "expected": 12.7, "tol": 0.5, "spec_band": (11.7, 13.7)},
+    "team:brazil":    {"kind": "champion", "expected": 9.6,  "tol": 0.5, "spec_band": (8.6, 10.6)},
+    "team:argentina": {"kind": "champion", "expected": 9.7,  "tol": 0.5, "spec_band": (8.7, 10.7)},
+    "team:germany":   {"kind": "champion", "expected": 6.4,  "tol": 0.5, "spec_band": (5.4, 7.4)},
 }
 
 CHAMPION_SUM_TOLERANCE = 0.5  # sum of all 48 champion% should be 100 ± this

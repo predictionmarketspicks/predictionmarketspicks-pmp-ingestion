@@ -120,13 +120,14 @@ def build_match_rows(sim_run_id: str, ran_at_iso: str, backdrop) -> List[dict]:
     return rows
 
 
-def build_player_rows(sim_run_id: str, ran_at_iso: str) -> List[dict]:
-    """25 Golden Boot rows. exp_g_total left null for v3 — full MC scorer model is a follow-up."""
-    rows = project_all_players()
+def build_player_rows(sim_run_id: str, ran_at_iso: str, stages) -> List[dict]:
+    """25 Golden Boot rows. exp_g_total + metadata.golden_boot_pct now come from the
+    tournament-long scorer MC, reusing the champion sim's `stages` realizations."""
+    rows = project_all_players(stages)
     for r in rows:
         r["sim_run_id"] = sim_run_id
         r["sim_ran_at"] = ran_at_iso
-        r["metadata"] = {}
+        r.setdefault("metadata", {})  # project_all_players already sets golden_boot_pct
     return rows
 
 
@@ -167,7 +168,7 @@ def main() -> int:
     # 3. Build rows
     team_rows = build_team_rows(sim_run_id, agg, ran_at_iso, backdrop)
     match_rows = build_match_rows(sim_run_id, ran_at_iso, backdrop)
-    player_rows = build_player_rows(sim_run_id, ran_at_iso)
+    player_rows = build_player_rows(sim_run_id, ran_at_iso, stages)
     print(f"[wc-sim] built {len(team_rows)} team rows, {len(match_rows)} match rows, "
           f"{len(player_rows)} player rows")
 

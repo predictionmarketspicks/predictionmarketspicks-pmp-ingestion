@@ -20,6 +20,7 @@ from typing import Dict, List, Tuple
 
 from .teams import TEAMS, GROUPS, NAME_TO_SLUG, NAME_TO_TRI, HOST_SET
 from .simulator import expected_goals
+from .venues import match_env
 
 # Score grid cap. Goals 0..SCORE_GRID-1 per team. 15x15 captures >99.999% of mass
 # for our LAM_CAP=5; smaller grids leak ~5% on Brazil-Haiti / Spain-Cape Verde
@@ -63,16 +64,23 @@ def match_probs(
     host_a: bool = False,
     host_b: bool = False,
     rho: float = DC_RHO,
+    home_mult: float = 1.0,
+    away_mult: float = 1.0,
 ) -> Dict[str, float]:
     """Analytical Poisson + Dixon-Coles over an SxS score grid.
 
     Returns percentages (0-100, rounded to 1 decimal — matching seed format).
     Pass rho=0.0 for the legacy independent-Poisson result.
+
+    home_mult / away_mult are per-match environmental λ multipliers (altitude +
+    heat) from venues.match_env; default 1.0 (no adjustment). Applied after
+    expected_goals so the base rating model is untouched. See venues.py for the
+    containment rationale (analytical path only; champion seed unaffected).
     """
     oa, da = TEAMS[team_a]
     ob, db = TEAMS[team_b]
-    la = expected_goals(oa, db, host_a)
-    lb = expected_goals(ob, da, host_b)
+    la = expected_goals(oa, db, host_a) * home_mult
+    lb = expected_goals(ob, da, host_b) * away_mult
 
     # Build the DC-corrected joint grid, then renormalize (τ distorts total mass).
     cells: List[Tuple[int, int, float]] = []
@@ -139,14 +147,19 @@ def all_group_matches() -> List[dict]:
     out = []
     for letter, teams in GROUPS.items():
         for md, home, away in _matchday_pairs(teams):
+            home_slug = NAME_TO_SLUG[home]
+            away_slug = NAME_TO_SLUG[away]
             entity_id = (
                 f"match:{letter}-MD{md}-"
                 f"{NAME_TO_TRI[home]}-{NAME_TO_TRI[away]}"
             )
+            env = match_env(letter, home_slug, away_slug)
             probs = match_probs(
                 home, away,
                 host_a=(home in HOST_SET),
                 host_b=(away in HOST_SET),
+                home_mult=env["home_mult"],
+                away_mult=env["away_mult"],
             )
             out.append({
                 "entity_id": entity_id,
@@ -154,8 +167,10 @@ def all_group_matches() -> List[dict]:
                 "matchday": md,
                 "home_name": home,
                 "away_name": away,
-                "home_slug": NAME_TO_SLUG[home],
-                "away_slug": NAME_TO_SLUG[away],
+                "home_slug": home_slug,
+                "away_slug": away_slug,
+                "venue": env["venue"],
+                "env_notes": env["notes"],
                 "probs": probs,
             })
     assert len(out) == 72, f"expected 72 group matches, got {len(out)}"

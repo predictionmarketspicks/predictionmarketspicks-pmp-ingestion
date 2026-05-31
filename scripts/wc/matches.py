@@ -26,36 +26,77 @@ from .simulator import expected_goals
 # tail and break H+D+A=100 sanity.
 SCORE_GRID = 15
 
+# Dixon-Coles (1997) low-score correlation correction. The independent-Poisson
+# grid over-weights the (0,0)/(1,1) decisive-vs-draw cells; DC redistributes mass
+# toward draws and compresses heavy-favorite win% by ~1-3pp in mismatches — the
+# exact bias the analytical model needs. v3 applies it ONLY to this analytical
+# match path (simulator.py's Monte Carlo progression loop is untouched, so the
+# champion% seed + its validation bands are unaffected).
+#
+# ρ = −0.18 is the long-run international-football prior (WC2018 ~−0.15,
+# WC2022 ~−0.22) per .claude/skills/wc-2026-edge/reference/poisson-dixon-coles.md.
+# Sign verified empirically: with this τ + ρ<0 the favorite win% drops and draw
+# rises (matches the skill's Spain–Cape Verde worked example). See tools/dc_check.
+DC_RHO = -0.18
+
 
 def _pmf(k: int, lam: float) -> float:
     return math.exp(-lam) * (lam ** k) / math.factorial(k)
 
 
-def match_probs(team_a: str, team_b: str, host_a: bool = False, host_b: bool = False) -> Dict[str, float]:
-    """Analytical Poisson over an SxS score grid.
+def _dc_tau(ga: int, gb: int, la: float, lb: float, rho: float) -> float:
+    """Dixon-Coles τ adjustment for the four low-score cells; 1.0 elsewhere."""
+    if ga == 0 and gb == 0:
+        return 1.0 - la * lb * rho
+    if ga == 0 and gb == 1:
+        return 1.0 + la * rho
+    if ga == 1 and gb == 0:
+        return 1.0 + lb * rho
+    if ga == 1 and gb == 1:
+        return 1.0 - rho
+    return 1.0
+
+
+def match_probs(
+    team_a: str,
+    team_b: str,
+    host_a: bool = False,
+    host_b: bool = False,
+    rho: float = DC_RHO,
+) -> Dict[str, float]:
+    """Analytical Poisson + Dixon-Coles over an SxS score grid.
 
     Returns percentages (0-100, rounded to 1 decimal — matching seed format).
+    Pass rho=0.0 for the legacy independent-Poisson result.
     """
     oa, da = TEAMS[team_a]
     ob, db = TEAMS[team_b]
     la = expected_goals(oa, db, host_a)
     lb = expected_goals(ob, da, host_b)
 
-    home_w = draw = away_w = 0.0
-    over25 = btts = 0.0
+    # Build the DC-corrected joint grid, then renormalize (τ distorts total mass).
+    cells: List[Tuple[int, int, float]] = []
+    total = 0.0
     for ga in range(SCORE_GRID):
         for gb in range(SCORE_GRID):
-            p = _pmf(ga, la) * _pmf(gb, lb)
-            if ga > gb:
-                home_w += p
-            elif gb > ga:
-                away_w += p
-            else:
-                draw += p
-            if (ga + gb) >= 3:
-                over25 += p
-            if ga > 0 and gb > 0:
-                btts += p
+            p = _pmf(ga, la) * _pmf(gb, lb) * _dc_tau(ga, gb, la, lb, rho)
+            cells.append((ga, gb, p))
+            total += p
+
+    home_w = draw = away_w = 0.0
+    over25 = btts = 0.0
+    for ga, gb, p in cells:
+        p /= total
+        if ga > gb:
+            home_w += p
+        elif gb > ga:
+            away_w += p
+        else:
+            draw += p
+        if (ga + gb) >= 3:
+            over25 += p
+        if ga > 0 and gb > 0:
+            btts += p
     return {
         "match_winner_home": round(home_w * 100, 1),
         "match_winner_draw": round(draw   * 100, 1),

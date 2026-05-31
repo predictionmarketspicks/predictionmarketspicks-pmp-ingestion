@@ -10,7 +10,21 @@
 import { describe, it, expect } from 'vitest';
 import { __test__ } from '../src/feeds/polymarket-gamma.js';
 
-const { normalizeMarket, parseTags, parseOutcomes, parseTimestamp, toNumOrNull } = __test__;
+const { normalizeMarket, parseTags, parseOutcomes, parseTimestamp, toNumOrNull, keepSportsGameRow } =
+  __test__;
+
+// Minimal Gamma market builder for the sports-game filter tests.
+function gameMarket({ slug, vol = 50000 }) {
+  return {
+    conditionId: `0x${slug}`,
+    slug,
+    question: 'A vs. B',
+    tags: [{ slug: 'sports' }, { slug: 'games' }],
+    volume24hr: vol,
+    outcomes: '["A","B"]',
+    outcomePrices: '["0.5","0.5"]',
+  };
+}
 
 describe('toNumOrNull', () => {
   it('returns null for null/undefined/garbage (NUMERIC column is nullable)', () => {
@@ -191,5 +205,58 @@ describe('normalizeMarket', () => {
     expect(row.volume_24h_usdc).toBeNull();
     expect(row.tags).toBeNull();
     expect(row.outcomes).toBeNull();
+  });
+});
+
+describe('keepSportsGameRow — daily game coverage + noise gate', () => {
+  it('keeps a dated arb-league game above the floor, forces category=sports', () => {
+    const row = keepSportsGameRow(gameMarket({ slug: 'mlb-tor-bal-2026-05-31', vol: 50000 }), 2000);
+    expect(row).not.toBeNull();
+    expect(row.slug).toBe('mlb-tor-bal-2026-05-31');
+    expect(row.category).toBe('sports'); // overrides whatever pickCategory derived
+    expect(row.volume_24h_usdc).toBe(50000);
+  });
+
+  it('keeps NBA / NHL / NFL / WC dated games', () => {
+    for (const slug of [
+      'nba-bos-nyk-2026-06-02',
+      'nhl-edm-fla-2026-06-04',
+      'nfl-kc-buf-2026-09-13',
+      'fifwc-usa-mex-2026-06-11',
+    ]) {
+      expect(keepSportsGameRow(gameMarket({ slug }), 2000), slug).not.toBeNull();
+    }
+  });
+
+  it('rejects futures/props with no trailing date (the false-match hole)', () => {
+    for (const slug of [
+      'will-arizona-cardinals-win-the-2027-nfl-nfc-championship-199',
+      'mlb-world-series-champion-2026',
+      'pro-baseball-2026-al-mvp',
+      'new-mlb-cba-by-dec-1',
+    ]) {
+      expect(keepSportsGameRow(gameMarket({ slug }), 2000), slug).toBeNull();
+    }
+  });
+
+  it('rejects dated games from non-arb leagues (tennis/esports/cricket)', () => {
+    for (const slug of [
+      'atp-djokovic-alcaraz-2026-05-31',
+      'lol-t1-geng-2026-05-31',
+      'cs2-navi-faze-2026-05-31',
+      'crict20blast-x-y-2026-05-31',
+    ]) {
+      expect(keepSportsGameRow(gameMarket({ slug }), 2000), slug).toBeNull();
+    }
+  });
+
+  it('enforces the volume floor (thin market that would post a fake edge)', () => {
+    expect(keepSportsGameRow(gameMarket({ slug: 'mlb-tor-bal-2026-05-31', vol: 1999 }), 2000)).toBeNull();
+    expect(keepSportsGameRow(gameMarket({ slug: 'mlb-tor-bal-2026-05-31', vol: 2000 }), 2000)).not.toBeNull();
+  });
+
+  it('rejects rows missing identity fields (NOT NULL columns)', () => {
+    expect(keepSportsGameRow({ slug: 'mlb-tor-bal-2026-05-31', volume24hr: 50000 }, 2000)).toBeNull(); // no conditionId
+    expect(keepSportsGameRow(null, 2000)).toBeNull();
   });
 });

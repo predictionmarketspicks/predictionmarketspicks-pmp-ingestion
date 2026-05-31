@@ -12,7 +12,7 @@
 // parallel stream — extra Gamma calls but identical answers, with a stable
 // row shape that the downstream callers can switch onto one PR at a time.
 
-import { fetchTopMarkets } from '../feeds/polymarket-gamma.js';
+import { fetchTopMarkets, fetchSportsGameMarkets } from '../feeds/polymarket-gamma.js';
 import { insertPolymarketSnapshots } from '../delivery/supabase.js';
 import { isOptionsMarketOpen } from '../feeds/massive.js';
 import { recordTick, registerFeed } from '../observability/health.js';
@@ -47,11 +47,25 @@ export async function runPolymarketSnapshotOnce() {
   state.scans += 1;
   state.lastRunAt = new Date().toISOString();
   try {
-    const rows = await fetchTopMarkets({ limit: SNAPSHOT_LIMIT });
+    // Two pulls: the global top-N-by-volume set + the full daily game slate for
+    // arb leagues (which the top-N cut otherwise drops). Union, dedupe by
+    // condition_id (top-N wins ties — identical row either way). The sports
+    // games pull is fail-soft: a Gamma hiccup on it must not lose the main scan.
+    const [topRows, gameRows] = await Promise.all([
+      fetchTopMarkets({ limit: SNAPSHOT_LIMIT }),
+      fetchSportsGameMarkets().catch((err) => {
+        console.warn('[polymarket-snapshot] sports-games pull failed (continuing):', err?.message || err);
+        return [];
+      }),
+    ]);
+    const byCond = new Map();
+    for (const r of [...gameRows, ...topRows]) if (r?.condition_id) byCond.set(r.condition_id, r);
+    const rows = Array.from(byCond.values());
     if (rows.length === 0) {
       console.warn('[polymarket-snapshot] fetched 0 rows — Gamma returned nothing or all dead-tail');
       return { rowsFetched: 0, rowsWritten: 0 };
     }
+    console.log(`[polymarket-snapshot] top=${topRows.length} games=${gameRows.length} union=${rows.length}`);
     const { count } = await insertPolymarketSnapshots(rows);
     state.rowsWritten += count;
     recordTick('polymarket_engine');

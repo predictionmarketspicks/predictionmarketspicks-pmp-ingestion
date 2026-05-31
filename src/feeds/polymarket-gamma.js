@@ -40,6 +40,93 @@ export const POLY_TAG_ALLOWLIST = [
   'culture',        // entertainment / cultural moments
 ];
 
+// ── Sports daily-game coverage ───────────────────────────────────────────────
+// The top-N-by-volume pull above competes sports games against crypto/politics
+// for SNAPSHOT_LIMIT slots, so daily MLB/NBA/NHL/WC games below the global cut
+// never get ingested — and the Kalshi↔Poly arb engine can't match what isn't
+// there. fetchSportsGameMarkets() pulls the full daily game slate directly off
+// Gamma's `games` tag (id 100639 — binary game-outcome markets ONLY; futures
+// like World Series / MVP live under `mlb`/`mlb-playoffs`, NOT `games`).
+// Verified live 2026-05-31. Numeric tag_id is required — Gamma's /markets
+// ignores tag_slug.
+const GAMES_TAG_ID = 100639;
+
+// Only the leagues the site arb engine actually matches (lib/arb SPORT_CONFIG:
+// MLB/NBA/NHL/NFL + FIFA World Cup). Storing other leagues' games would write
+// rows nothing consumes. WC slug prefix isn't final pre-tournament; cover the
+// observed FIFA variants.
+const ARB_LEAGUE_PREFIXES = new Set(['mlb', 'nba', 'nhl', 'nfl', 'wc', 'fifwc', 'fif']);
+
+// Date-stamped game slug: <league>-<away>-<home>-YYYY-MM-DD (matches the PR #151
+// site matcher). The trailing date anchor rejects futures/props
+// (will-…-championship-199, mlb-world-series-champion-2026, …-al-mvp).
+const GAME_SLUG_RE = /^[a-z0-9]+-.+-\d{4}-\d{2}-\d{2}$/;
+
+// Thin-market noise gate. A Poly game with trivial 24h volume can post a stale
+// last-trade price that manufactures a fake edge vs Kalshi. Live distribution
+// (2026-05-31): real games $1.3k–$3.4M; the <$2k tail was just-opened/illiquid.
+// $2k keeps ~18/20 and kills the noise. Retune via env — no redeploy.
+const SPORTS_GAME_MIN_VOL_USDC = Number(process.env.POLY_SPORTS_MIN_VOL_USDC || 2000);
+
+// Pure per-row decision (unit-testable without a live Gamma call): returns a
+// normalized, sports-categorized row if the market is an arb-league game market
+// at/above the floor, else null.
+export function keepSportsGameRow(m, minVolumeUsdc = SPORTS_GAME_MIN_VOL_USDC) {
+  const slug = typeof m?.slug === 'string' ? m.slug : '';
+  if (!GAME_SLUG_RE.test(slug)) return null; // futures/props/non-game
+  if (!ARB_LEAGUE_PREFIXES.has(slug.split('-')[0])) return null; // non-arb league
+  const row = normalizeMarket(m);
+  if (!row) return null;
+  if ((row.volume_24h_usdc ?? 0) < minVolumeUsdc) return null; // noise gate
+  row.category = 'sports'; // arb read filters on category='sports'
+  return row;
+}
+
+// Pull the full daily game slate for arb leagues, floored to kill thin-market
+// noise. Paginates the `games` tag by volume desc and stops once a page's top
+// volume is already below the floor (nothing useful past it) — so it never
+// walks the whole tag. Row shape matches fetchTopMarkets (category='sports').
+export async function fetchSportsGameMarkets({
+  minVolumeUsdc = SPORTS_GAME_MIN_VOL_USDC,
+  maxPages = 5,
+  timeoutMs = GAMMA_FETCH_TIMEOUT_MS,
+} = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const nowIso = new Date().toISOString();
+  const rows = [];
+  try {
+    for (let page = 0; page < maxPages; page++) {
+      const url =
+        `${GAMMA_API_BASE}/markets?active=true&closed=false&tag_id=${GAMES_TAG_ID}` +
+        `&order=volume24hr&ascending=false&end_date_min=${encodeURIComponent(nowIso)}` +
+        `&limit=100&offset=${page * 100}&include_tag=true`;
+      const res = await gammaGet(url, { signal: controller.signal, label: 'poly-sports-games' });
+      if (!res.ok) {
+        console.warn(`[poly-sports-games] HTTP ${res.status} on page ${page} — stopping`);
+        break;
+      }
+      const json = await res.json();
+      const markets = Array.isArray(json) ? json : Array.isArray(json?.markets) ? json.markets : [];
+      if (markets.length === 0) break;
+      const pageMaxVol = markets.reduce(
+        (mx, m) => Math.max(mx, toNumOrNull(m?.volume24hr ?? m?.volumeNum) ?? 0),
+        0,
+      );
+      for (const m of markets) {
+        const row = keepSportsGameRow(m, minVolumeUsdc);
+        if (row) rows.push(row);
+      }
+      // Everything past this page is below the floor (volume-desc order) — stop.
+      if (pageMaxVol < minVolumeUsdc || markets.length < 100) break;
+    }
+    console.log(`[poly-sports-games] kept ${rows.length} game markets >= $${minVolumeUsdc} 24h vol`);
+    return rows;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Pick the most-specific allowlist tag as category. Falls through priority
 // order so `us-election-2028` wins over generic `politics`.
 export function pickCategory(tags) {
@@ -234,4 +321,4 @@ export function parseTimestamp(v) {
   return new Date(t).toISOString();
 }
 
-export const __test__ = { normalizeMarket, parseTags, parseOutcomes, parseTimestamp, toNumOrNull, pickCategory };
+export const __test__ = { normalizeMarket, parseTags, parseOutcomes, parseTimestamp, toNumOrNull, pickCategory, keepSportsGameRow };

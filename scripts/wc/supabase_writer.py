@@ -32,7 +32,7 @@ def insert_simulation_rows(rows: List[dict]) -> int:
       {
         "entity_id":         "team:france",
         "kind":              "champion",
-        "sim_run_id":        "v3_20260506_022300",
+        "sim_run_id":        "v4_20260531_120000",
         "sim_pct":           15.20,
         "sim_american_odds": 558,                # or None
         "metadata":          {...},

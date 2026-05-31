@@ -9,7 +9,7 @@ Inputs (env):
   WC_SIM_ITERATIONS                optional override (default 10000)
 
 Outputs (DB):
-  world_cup_simulation             ~600 rows under new sim_run_id v3_<TS>
+  world_cup_simulation             ~600 rows under new sim_run_id v4_<TS> (market-anchored)
   world_cup_player_simulation      25 rows
   world_cup_simulation_latest      matview refreshed
   world_cup_player_simulation_latest matview refreshed
@@ -145,7 +145,7 @@ def main() -> int:
                         help="Skip market backdrop fetch (faster local runs)")
     args = parser.parse_args()
 
-    sim_run_id = f"v3_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    sim_run_id = f"v4_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     ran_at_iso = datetime.now(timezone.utc).isoformat()
     print(f"[wc-sim] starting run {sim_run_id} ({args.iterations} iterations, seed={args.seed})")
 

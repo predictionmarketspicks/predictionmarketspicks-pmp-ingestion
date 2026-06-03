@@ -9,7 +9,7 @@ Inputs (env):
   WC_SIM_ITERATIONS                optional override (default 10000)
 
 Outputs (DB):
-  world_cup_simulation             ~600 rows under new sim_run_id v4_<TS> (market-anchored)
+  world_cup_simulation             ~648 rows under new sim_run_id v4_<TS> (288 team + 360 match)
   world_cup_player_simulation      25 rows
   world_cup_simulation_latest      matview refreshed
   world_cup_player_simulation_latest matview refreshed
@@ -62,7 +62,7 @@ def pct_to_american(pct: float) -> Optional[int]:
 
 # ── Row builders ──────────────────────────────────────────────────────────────
 def build_team_rows(sim_run_id: str, agg: dict, ran_at_iso: str, backdrop) -> List[dict]:
-    """Convert aggregated progression rates into 240 sim rows (48 teams × 5 kinds)."""
+    """Convert aggregated progression rates into 288 sim rows (48 teams × 6 kinds)."""
     from wc.markets import attach_to_metadata
     from wc.teams import GROUPS
     team_to_group = {t: g for g, members in GROUPS.items() for t in members}
@@ -74,6 +74,7 @@ def build_team_rows(sim_run_id: str, agg: dict, ran_at_iso: str, backdrop) -> Li
         "sf":          "reach_sf",
         "qf":          "reach_qf",
         "r16":         "reach_r16",
+        "advance":     "advance",      # qualify from group → reach R32 (≠ reach_r16 in 48-team format)
     }
     for team_name, progression in agg.items():
         slug = NAME_TO_SLUG[team_name]

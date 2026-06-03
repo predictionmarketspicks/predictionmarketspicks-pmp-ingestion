@@ -158,9 +158,14 @@ def run_one_tournament() -> Dict[str, int]:
 def aggregate_team_progression(stages_per_iteration: List[Dict[str, int]]) -> Dict[str, Dict[str, float]]:
     """Aggregate N tournament runs into per-team progression rates (percent)."""
     n = len(stages_per_iteration)
-    counts = {t: {"r16": 0, "qf": 0, "sf": 0, "final": 0, "champion": 0} for t in ALL_TEAMS}
+    # stage codes: 1=advanced from group (R32), 2=R16, 3=QF, 4=SF, 5=Final, 6=Champion.
+    # `advance` (s>=1) = qualify from group → reach Round of 32. In the 48-team format this
+    # is a DIFFERENT event from reach_r16 (s>=2); they coincided only in the old 32-team
+    # bracket. Matches Kalshi KXWCGROUPQUAL (kind=advance in ingest-wc-kalshi-markets).
+    counts = {t: {"advance": 0, "r16": 0, "qf": 0, "sf": 0, "final": 0, "champion": 0} for t in ALL_TEAMS}
     for stage in stages_per_iteration:
         for t, s in stage.items():
+            if s >= 1: counts[t]["advance"]  += 1
             if s >= 2: counts[t]["r16"]      += 1
             if s >= 3: counts[t]["qf"]       += 1
             if s >= 4: counts[t]["sf"]       += 1

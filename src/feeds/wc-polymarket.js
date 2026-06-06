@@ -202,7 +202,17 @@ export async function fetchWcPolymarketRows({ timeoutMs = GAMMA_FETCH_TIMEOUT_MS
         continue;
       }
       const yes = yesPriceFromMarket(norm);
-      const cents = priceToCents(yes);
+      let cents = priceToCents(yes);
+      // Clamp real positive longshots/near-locks into the [1,99] storage range
+      // instead of dropping them. WC champion longshots (Haiti, Curaçao, Congo
+      // DR…) trade <1% and priceToCents returns null when the rounded cent
+      // falls outside 1–99 — which silently halved the 48-team board. Only
+      // rescue a genuine positive fractional price; null/≤0 prices still drop.
+      if (cents == null && typeof yes === 'number' && Number.isFinite(yes) && yes > 0) {
+        const pct = yes <= 1 ? yes * 100 : yes;
+        if (pct > 0 && pct < 1) cents = 1;
+        else if (pct > 99 && pct < 100) cents = 99;
+      }
       if (cents == null) {
         dropped++;
         continue;

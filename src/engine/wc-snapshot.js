@@ -14,7 +14,9 @@
 
 import { fetchWcKalshiRows } from '../feeds/wc-kalshi.js';
 import { fetchWcPolymarketRows } from '../feeds/wc-polymarket.js';
-import { fetchWcOddsApiRows, getOddsApiQuotaRemaining } from '../feeds/wc-odds-api.js';
+// DraftKings (The Odds API) feed killed 2026-06-07 — its champion outrights were
+// a corrupt non-champion market (Σ implied ≈ 753%, longshots ranked as favorites)
+// and it burned the shared Odds API quota. WC is Kalshi↔Polymarket-only.
 import { fetchWcEspnGames } from '../feeds/wc-espn.js';
 import { insertWorldCupMarketSnapshots, refreshWcMarketMatviews } from '../delivery/supabase.js';
 import { recordTick, registerFeed } from '../observability/health.js';
@@ -38,7 +40,6 @@ const state = {
   perFeed: {
     kalshi: { rows: 0, lastError: null },
     polymarket: { rows: 0, lastError: null },
-    draftkings: { rows: 0, lastError: null },
     espn: { games: 0, lastError: null },
   },
 };
@@ -64,25 +65,23 @@ export async function runWcSnapshotOnce() {
   state.scans += 1;
   state.lastRunAt = new Date().toISOString();
 
-  const [kalshiRows, polyRows, dkRows, espnGames] = await Promise.all([
+  const [kalshiRows, polyRows, espnGames] = await Promise.all([
     runFeed('kalshi', fetchWcKalshiRows),
     runFeed('polymarket', fetchWcPolymarketRows),
-    runFeed('draftkings', fetchWcOddsApiRows),
     runFeed('espn', fetchWcEspnGames),
   ]);
 
   state.perFeed.kalshi.rows = kalshiRows.length;
   state.perFeed.polymarket.rows = polyRows.length;
-  state.perFeed.draftkings.rows = dkRows.length;
   state.perFeed.espn.games = espnGames.length;
   state.espnGames = espnGames;
   state.espnUpdatedAt = new Date().toISOString();
 
-  const allRows = [...kalshiRows, ...polyRows, ...dkRows];
+  const allRows = [...kalshiRows, ...polyRows];
 
   if (allRows.length === 0) {
     recordTick('wc_engine');
-    console.warn('[wc-snapshot] zero market rows produced — three platforms returned nothing parseable');
+    console.warn('[wc-snapshot] zero market rows produced — Kalshi and Polymarket returned nothing parseable');
     return { rowsFetched: 0, rowsWritten: 0, espnGames: espnGames.length };
   }
 
@@ -93,7 +92,7 @@ export async function runWcSnapshotOnce() {
     writeResult = { rowsFetched: allRows.length, rowsWritten: count, espnGames: espnGames.length };
     recordTick('wc_engine');
     console.log(
-      `[wc-snapshot] wrote ${count} rows (kalshi=${kalshiRows.length} poly=${polyRows.length} dk=${dkRows.length} espn=${espnGames.length} quota=${getOddsApiQuotaRemaining()})`,
+      `[wc-snapshot] wrote ${count} rows (kalshi=${kalshiRows.length} poly=${polyRows.length} espn=${espnGames.length})`,
     );
   } catch (err) {
     state.lastErrorAt = new Date().toISOString();
@@ -171,7 +170,6 @@ export function getWcSnapshotState() {
     lastErrorAt: state.lastErrorAt,
     lastError: state.lastError,
     perFeed: state.perFeed,
-    oddsApiQuotaRemaining: getOddsApiQuotaRemaining(),
   };
 }
 

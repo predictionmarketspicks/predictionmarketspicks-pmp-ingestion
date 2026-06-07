@@ -49,7 +49,6 @@ export const ALERT_MIN_VOL_24H = 250;
 export const KALSHI_MIN_VOL = 100;
 export const POLY_MIN_VOL = 500;
 export const STALE_LIVE_SEC = 1800; // 30 min
-export const STALE_DK_SEC = 86400; // 24 hr (Odds API quota)
 
 const DISCORD_COOLDOWN_HOURS = 6;
 
@@ -84,10 +83,8 @@ export function selectDisplayPlatform(latestRows) {
   ) {
     return { platform: 'polymarket', row: p };
   }
-  const d = byPlatform.draftkings;
-  if (d && Number(d.as_of_age_seconds ?? Infinity) < STALE_DK_SEC) {
-    return { platform: 'draftkings', row: d };
-  }
+  // DraftKings fallback removed 2026-06-07 — DK feed killed (corrupt champion
+  // data + Odds API quota drain). WC display is Kalshi → Polymarket only.
   return null;
 }
 

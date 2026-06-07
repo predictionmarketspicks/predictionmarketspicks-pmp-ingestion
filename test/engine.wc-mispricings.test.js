@@ -63,17 +63,9 @@ describe('selectDisplayPlatform', () => {
     expect(selectDisplayPlatform(rows).platform).toBe('polymarket');
   });
 
-  it('falls through to DraftKings when Polymarket volume too low', () => {
+  it('returns null when Polymarket volume too low (DraftKings fallback removed 2026-06-07)', () => {
     const rows = [
       { platform: 'polymarket', volume_24h: 100, ...fresh },
-      { platform: 'draftkings', volume_24h: null, as_of_age_seconds: 3600 },
-    ];
-    expect(selectDisplayPlatform(rows).platform).toBe('draftkings');
-  });
-
-  it('returns null when DraftKings is older than 24h', () => {
-    const rows = [
-      { platform: 'draftkings', volume_24h: null, as_of_age_seconds: 90000 },
     ];
     expect(selectDisplayPlatform(rows)).toBeNull();
   });

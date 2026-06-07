@@ -114,6 +114,86 @@ def match_probs(
     }
 
 
+def match_grid_detail(
+    team_a: str,
+    team_b: str,
+    host_a: bool = False,
+    host_b: bool = False,
+    rho: float = DC_RHO,
+    home_mult: float = 1.0,
+    away_mult: float = 1.0,
+    top_n: int = 5,
+) -> Dict:
+    """Rich per-match detail from the SAME DC-corrected grid as match_probs().
+
+    Returns home_xg (la), away_xg (lb), total_xg, the full W/D/L + over/under +
+    BTTS ladder, and the top-N most-likely exact scores ("H-A", H = team_a).
+
+    Kept deliberately SEPARATE from match_probs(): run-wc-sim.py iterates
+    match_probs()'s returned dict and writes ONE DB row per key (kind=key,
+    pct=value). Adding xG / score-list fields there would inject bogus sim rows
+    and crash pct_to_american on a list. This detail powers ONLY the static
+    site card export (scripts/export-wc-match-detail.py); nothing writes it to
+    the DB, so the nightly sim + champion seed are untouched.
+
+    Percentages are 0-100 rounded to 1 decimal; xG rounded to 2 — matching the
+    site card's display precision.
+    """
+    oa, da = TEAMS[team_a]
+    ob, db = TEAMS[team_b]
+    la = expected_goals(oa, db, host_a) * home_mult
+    lb = expected_goals(ob, da, host_b) * away_mult
+
+    cells: List[Tuple[int, int, float]] = []
+    total = 0.0
+    for ga in range(SCORE_GRID):
+        for gb in range(SCORE_GRID):
+            p = _pmf(ga, la) * _pmf(gb, lb) * _dc_tau(ga, gb, la, lb, rho)
+            cells.append((ga, gb, p))
+            total += p
+
+    home_w = draw = away_w = 0.0
+    o15 = o25 = o35 = btts = 0.0
+    scored: List[Tuple[float, int, int]] = []
+    for ga, gb, p in cells:
+        p /= total
+        if ga > gb:
+            home_w += p
+        elif gb > ga:
+            away_w += p
+        else:
+            draw += p
+        tot = ga + gb
+        if tot >= 2:
+            o15 += p
+        if tot >= 3:
+            o25 += p
+        if tot >= 4:
+            o35 += p
+        if ga > 0 and gb > 0:
+            btts += p
+        scored.append((p, ga, gb))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_scores = [
+        {"score": f"{ga}-{gb}", "pct": round(p * 100, 1)}
+        for p, ga, gb in scored[:top_n]
+    ]
+    return {
+        "home_xg":    round(la, 2),
+        "away_xg":    round(lb, 2),
+        "total_xg":   round(la + lb, 2),
+        "hw":         round(home_w * 100, 1),
+        "d":          round(draw   * 100, 1),
+        "aw":         round(away_w * 100, 1),
+        "o15":        round(o15  * 100, 1),
+        "o25":        round(o25  * 100, 1),
+        "o35":        round(o35  * 100, 1),
+        "btts":       round(btts * 100, 1),
+        "top_scores": top_scores,
+    }
+
+
 def _matchday_pairs(group_teams: List[str]) -> List[Tuple[int, str, str]]:
     """Return [(matchday, home, away), ...] following standard FIFA group order:
         MD1: T1 vs T2, T3 vs T4

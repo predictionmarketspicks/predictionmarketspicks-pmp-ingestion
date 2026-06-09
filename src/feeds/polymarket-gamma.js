@@ -127,6 +127,76 @@ export async function fetchSportsGameMarkets({
   }
 }
 
+// ── Tag-scoped category coverage (crypto, macro) ─────────────────────────────
+// fetchTopMarkets takes the GLOBAL top-N by 24h volume then filters to the
+// allowlist, so crypto/macro markets ranked below the politics-dominated global
+// cut never get ingested (live 2026-06-09: only 1 crypto + 5 macro markets
+// reached the site). fetchTaggedMarkets pulls a single tag ranked WITHIN itself
+// — same pagination + floor + row shape as fetchSportsGameMarkets, but category
+// is left to pickCategory so each market keeps its most-specific allowlist tag.
+// Numeric tag_id is required (Gamma /markets ignores tag_slug). Verified live
+// 2026-06-09: crypto = 21, economy/macro = 100328.
+export const POLY_CRYPTO_TAG_ID = Number(process.env.POLY_CRYPTO_TAG_ID || 21);
+export const POLY_MACRO_TAG_ID = Number(process.env.POLY_MACRO_TAG_ID || 100328);
+
+// Thin-market floor for tag pulls — crypto/macro carry a long low-volume tail of
+// just-opened markets. $2k matches the sports floor's intent. Retune via env.
+const TAGGED_MIN_VOL_USDC = Number(process.env.POLY_TAGGED_MIN_VOL_USDC || 2000);
+
+// Pull one tag's markets ranked within the tag (not against the global book),
+// floored to kill thin-market noise. Stops once a page's top volume drops below
+// the floor (volume-desc → nothing useful past it). Row shape matches
+// fetchTopMarkets; the delivery layer unions + dedupes by condition_id.
+// maxRows caps each tag's contribution so a deep tag (crypto has a long tail of
+// recurring BTC strike-ladder markets) can't flood the snapshot table — the
+// 2026-05-15 storage cleanup deliberately trimmed this writer's row budget.
+// The site category pages only render the top ~60 by volume anyway.
+const TAGGED_MAX_ROWS = Number(process.env.POLY_TAGGED_MAX_ROWS || 50);
+
+export async function fetchTaggedMarkets(tagId, {
+  minVolumeUsdc = TAGGED_MIN_VOL_USDC,
+  maxRows = TAGGED_MAX_ROWS,
+  maxPages = 5,
+  label = `poly-tag-${tagId}`,
+  timeoutMs = GAMMA_FETCH_TIMEOUT_MS,
+} = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const rows = [];
+  try {
+    for (let page = 0; page < maxPages && rows.length < maxRows; page++) {
+      const url =
+        `${GAMMA_API_BASE}/markets?active=true&closed=false&tag_id=${tagId}` +
+        `&order=volume24hr&ascending=false&limit=100&offset=${page * 100}&include_tag=true`;
+      const res = await gammaGet(url, { signal: controller.signal, label });
+      if (!res.ok) {
+        console.warn(`[${label}] HTTP ${res.status} on page ${page} — stopping`);
+        break;
+      }
+      const json = await res.json();
+      const markets = Array.isArray(json) ? json : Array.isArray(json?.markets) ? json.markets : [];
+      if (markets.length === 0) break;
+      const pageMaxVol = markets.reduce(
+        (mx, m) => Math.max(mx, toNumOrNull(m?.volume24hr ?? m?.volumeNum) ?? 0),
+        0,
+      );
+      for (const m of markets) {
+        if (rows.length >= maxRows) break; // capped — API returns volume-desc
+        const row = normalizeMarket(m);
+        if (!row) continue;
+        if ((row.volume_24h_usdc ?? 0) < minVolumeUsdc) continue;
+        rows.push(row);
+      }
+      // Volume-desc: once a page's top is below the floor, the rest are too.
+      if (pageMaxVol < minVolumeUsdc || markets.length < 100) break;
+    }
+    console.log(`[${label}] kept ${rows.length} markets >= $${minVolumeUsdc} 24h vol (cap ${maxRows})`);
+    return rows;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Pick the most-specific allowlist tag as category. Falls through priority
 // order so `us-election-2028` wins over generic `politics`.
 export function pickCategory(tags) {

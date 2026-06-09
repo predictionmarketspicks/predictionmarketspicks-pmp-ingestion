@@ -12,7 +12,13 @@
 // parallel stream — extra Gamma calls but identical answers, with a stable
 // row shape that the downstream callers can switch onto one PR at a time.
 
-import { fetchTopMarkets, fetchSportsGameMarkets } from '../feeds/polymarket-gamma.js';
+import {
+  fetchTopMarkets,
+  fetchSportsGameMarkets,
+  fetchTaggedMarkets,
+  POLY_CRYPTO_TAG_ID,
+  POLY_MACRO_TAG_ID,
+} from '../feeds/polymarket-gamma.js';
 import { insertPolymarketSnapshots } from '../delivery/supabase.js';
 import { isOptionsMarketOpen } from '../feeds/massive.js';
 import { recordTick, registerFeed } from '../observability/health.js';
@@ -47,25 +53,34 @@ export async function runPolymarketSnapshotOnce() {
   state.scans += 1;
   state.lastRunAt = new Date().toISOString();
   try {
-    // Two pulls: the global top-N-by-volume set + the full daily game slate for
-    // arb leagues (which the top-N cut otherwise drops). Union, dedupe by
-    // condition_id (top-N wins ties — identical row either way). The sports
-    // games pull is fail-soft: a Gamma hiccup on it must not lose the main scan.
-    const [topRows, gameRows] = await Promise.all([
+    // Four pulls, unioned + deduped by condition_id (top-N wins ties — identical
+    // row either way):
+    //   1. global top-N by 24h volume,
+    //   2. the full daily game slate for arb leagues (dropped by the top-N cut),
+    //   3. crypto tag, 4. macro/economy tag — both ranked WITHIN their tag, since
+    //      the politics-dominated global top-N otherwise starves them.
+    // Every pull except the primary top-N is fail-soft: a Gamma hiccup on one
+    // must not lose the main scan.
+    const failSoft = (name) => (err) => {
+      console.warn(`[polymarket-snapshot] ${name} pull failed (continuing):`, err?.message || err);
+      return [];
+    };
+    const [topRows, gameRows, cryptoRows, macroRows] = await Promise.all([
       fetchTopMarkets({ limit: SNAPSHOT_LIMIT }),
-      fetchSportsGameMarkets().catch((err) => {
-        console.warn('[polymarket-snapshot] sports-games pull failed (continuing):', err?.message || err);
-        return [];
-      }),
+      fetchSportsGameMarkets().catch(failSoft('sports-games')),
+      fetchTaggedMarkets(POLY_CRYPTO_TAG_ID, { label: 'poly-crypto' }).catch(failSoft('crypto')),
+      fetchTaggedMarkets(POLY_MACRO_TAG_ID, { label: 'poly-macro' }).catch(failSoft('macro')),
     ]);
     const byCond = new Map();
-    for (const r of [...gameRows, ...topRows]) if (r?.condition_id) byCond.set(r.condition_id, r);
+    for (const r of [...gameRows, ...cryptoRows, ...macroRows, ...topRows]) {
+      if (r?.condition_id) byCond.set(r.condition_id, r);
+    }
     const rows = Array.from(byCond.values());
     if (rows.length === 0) {
       console.warn('[polymarket-snapshot] fetched 0 rows — Gamma returned nothing or all dead-tail');
       return { rowsFetched: 0, rowsWritten: 0 };
     }
-    console.log(`[polymarket-snapshot] top=${topRows.length} games=${gameRows.length} union=${rows.length}`);
+    console.log(`[polymarket-snapshot] top=${topRows.length} games=${gameRows.length} crypto=${cryptoRows.length} macro=${macroRows.length} union=${rows.length}`);
     const { count } = await insertPolymarketSnapshots(rows);
     state.rowsWritten += count;
     recordTick('polymarket_engine');

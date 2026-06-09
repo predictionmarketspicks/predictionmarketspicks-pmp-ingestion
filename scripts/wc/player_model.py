@@ -23,6 +23,11 @@ Approach for v3:
 The roster is intentionally hardcoded: it represents an editorial decision about
 which 25 players to surface as Golden Boot contenders. Adding a player here means
 we're publishing a projection for them; removing one means we're not.
+
+2026-06-08 final-squad correction: En-Nesyri → Ayoub El Kaabi (Morocco; El Kaabi is
+the striker, pk=False since Brahim Diaz takes Morocco's PKs) and Morata → Mikel
+Oyarzabal (Spain PK taker). Both cut players were off their nation's final 26.
+Shares/clubs reuse the vacated slot per the clean-sweep placeholder rule.
 """
 from __future__ import annotations
 
@@ -66,9 +71,9 @@ ROSTER: List[Dict] = [
     {"slug":"al-hammadi",    "name":"Ali Al-Hammadi",       "team":"Iraq",           "share":0.40, "pk":True,  "club":"Al Ain"},
     {"slug":"gimenez",       "name":"Santiago Gimenez",     "team":"Mexico",         "share":0.28, "pk":True,  "club":"AC Milan"},
     {"slug":"pulisic",       "name":"Christian Pulisic",    "team":"United States",  "share":0.29, "pk":True,  "club":"AC Milan"},
-    {"slug":"en-nesyri",     "name":"Youssef En-Nesyri",    "team":"Morocco",        "share":0.28, "pk":True,  "club":"Fenerbahce"},
+    {"slug":"el-kaabi",      "name":"Ayoub El Kaabi",       "team":"Morocco",        "share":0.28, "pk":False, "club":"Olympiacos"},
     {"slug":"havertz",       "name":"Kai Havertz",          "team":"Germany",        "share":0.24, "pk":True,  "club":"Arsenal"},
-    {"slug":"morata",        "name":"Alvaro Morata",        "team":"Spain",          "share":0.22, "pk":True,  "club":"AC Milan"},
+    {"slug":"oyarzabal",     "name":"Mikel Oyarzabal",      "team":"Spain",          "share":0.22, "pk":True,  "club":"Real Sociedad"},
     {"slug":"embolo",        "name":"Breel Embolo",         "team":"Switzerland",    "share":0.28, "pk":False, "club":"Monaco"},
     {"slug":"bakambu",       "name":"Cédric Bakambu",       "team":"DR Congo",       "share":0.32, "pk":True,  "club":"Galatasaray"},
     {"slug":"darwin",        "name":"Darwin Nunez",         "team":"Uruguay",        "share":0.25, "pk":True,  "club":"Liverpool"},

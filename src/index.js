@@ -34,7 +34,7 @@ import { startFlowAlerts } from './engine/flow-alerts.js';
 import { ARB_MAPPINGS, getPolymarketYesTokenIds } from './engine/arb-mappings.js';
 import { evaluateAll as evaluateArbAll } from './engine/comparator.js';
 import { ARB_COMPARE_INTERVAL_MS } from './engine/arb-thresholds.js';
-import { EXPIRATION_BURST_WINDOW_MS } from './engine/thresholds.js';
+import { EXPIRATION_BURST_WINDOW_MS, BTC_STRIKE_COUNT_WARN } from './engine/thresholds.js';
 import {
   upsertCommodityEdgeRows,
   upsertGammaSnapshot,
@@ -43,7 +43,7 @@ import {
   recordPostedAlerts,
   recordFeedPerformance,
 } from './delivery/supabase.js';
-import { postCommodityAlert, postMoversAlert } from './delivery/discord.js';
+import { postCommodityAlert, postMoversAlert, postBotLog } from './delivery/discord.js';
 import { revalidateCommodityEdge } from './delivery/revalidate.js';
 import { findActiveRollover as findOilRollover } from './engine/wti-rollover.js';
 import { fetchKalshiCandidates } from './feeds/movers.js';
@@ -227,6 +227,26 @@ async function refreshEvent(state) {
 
 async function runSnapshotOnce(state) {
   const { config } = state;
+  // Skip-if-running guard (2026-06-10 BITCOIN_EDGE_STRIKE_BAND handoff pre-check
+  // a). The scheduler already chains the next pass only after this one resolves,
+  // so the timer can't overlap; this is belt-and-suspenders against any other
+  // caller (bootstrap first-fire, a future on-demand trigger) re-entering while
+  // a 15s-cadence bitcoin pass is mid-flight. A pass that runs longer than the
+  // interval just stretches the effective cadence instead of stacking.
+  if (state.snapshotInFlight) {
+    console.warn(`[${config.commodity}] snapshot already in flight — skipping this tick`);
+    return;
+  }
+  state.snapshotInFlight = true;
+  try {
+    await runSnapshotOnceInner(state);
+  } finally {
+    state.snapshotInFlight = false;
+  }
+}
+
+async function runSnapshotOnceInner(state) {
+  const { config } = state;
   // On-demand event refresh. The 30-min setInterval is too coarse for
   // commodities with frequently-rotating events (bitcoin's hourly KXBTCD).
   // If currentEvent is missing or already past its close time, try one
@@ -251,6 +271,28 @@ async function runSnapshotOnce(state) {
     state.snapshotCount += 1;
     state.lastSnapshotMeta = snap.meta;
     recordTick(`${config.commodity}_engine`);
+
+    // Strike-count sanity (2026-06-10 BITCOIN_EDGE_STRIKE_BAND handoff). A banded
+    // bitcoin snapshot runs ~75–90 strikes; > BTC_STRIKE_COUNT_WARN means the
+    // band filter regressed (or spot went null and the filter no-op'd) and we're
+    // back to writing the full dead ladder. Warn to #bot-logs, throttled to one
+    // post per 30 min so a persistent regression doesn't spam at 15s cadence.
+    if (
+      config.strikeBandPct != null &&
+      snap.meta.strikeCount != null &&
+      snap.meta.strikeCount > BTC_STRIKE_COUNT_WARN
+    ) {
+      const nowMs = Date.now();
+      if (!state.lastStrikeWarnMs || nowMs - state.lastStrikeWarnMs > 30 * 60 * 1000) {
+        state.lastStrikeWarnMs = nowMs;
+        const msg =
+          `⚠️ [${config.commodity}] snapshot wrote ${snap.meta.strikeCount} strikes ` +
+          `(> ${BTC_STRIKE_COUNT_WARN} ceiling) — strike band may have regressed; ` +
+          `spot=$${snap.meta.spotPrice?.toFixed?.(0) ?? '?'}`;
+        console.warn(msg);
+        postBotLog(msg).catch(() => {});
+      }
+    }
 
     const { count, tag } = await upsertCommodityEdgeRows(snap.rows);
     const top = snap.meta.topEdge;

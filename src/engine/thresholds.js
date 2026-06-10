@@ -96,6 +96,38 @@ export const EXPIRATION_BURST_WINDOW_MS = 60 * 60 * 1000; // 60 min before close
 export const SILVER_SNAPSHOT_INTERVAL_MARKET_MS = SNAPSHOT_INTERVAL_MARKET_MS;
 export const SILVER_SNAPSHOT_INTERVAL_OFF_MS = SNAPSHOT_INTERVAL_OFF_MS;
 
+// --- Bitcoin-only knobs (2026-06-10 strike-band + 15s cadence handoff) ---
+// hourly contract — daily commodities keep wider band. KXBTCD is HOURLY with
+// $100 strike spacing: ±15% of ~$62K spot = ~188 strikes/snapshot, ~85% of them
+// dead (zero vol / no book / prob saturated at 0 or 1). Hourly BTC σ ≈ 0.4–0.7%
+// (1–2% in violent hours), so anything past ±6% is unreachable within the
+// contract's life. Keep a strike iff |strike/spot − 1| ≤ this OR it has a live
+// two-sided book (Benny call 2026-06-10: BTC can move 5%+ in an hour; cascade
+// hours need the wider book-based capture). Bitcoin-only via config.strikeBandPct;
+// silver/gold/oil leave it unset and keep the full ladder.
+export const BTC_STRIKE_BAND_PCT = 0.06;
+
+// Bitcoin pass cadence — every 15s during the market window (down from the 5min
+// shared market cadence). The WHOLE pass stays atomic: Databento IBIT NBBO (in-
+// memory sidecar read) + Kalshi book refetch (one with_nested_markets call) +
+// Pyth spot (in-memory) all advance together each pass. NOT a per-leg fast timer
+// — that's the leg-skew bug fixed in BITCOIN_EDGE_STALE_KALSHI_2026-06-10. The
+// scheduler chains the next pass only after the current one resolves, so passes
+// can't overlap; a skip-if-running guard in index.js is the belt-and-suspenders.
+export const BTC_SNAPSHOT_INTERVAL_MARKET_MS = 15 * 1000; // 15s
+
+// WATCH tier (2026-06-10) — mirrors the sports-arb WATCH 3pp / signal-locked
+// convention. Bitcoin rows with WATCH_EDGE_PP ≤ |edge| < MIN_EDGE_PP are a
+// directional LEAN, not a BUY (those stay ≥5pp). Surfaced as confidence='watch'
+// so the public board stays alive in calm hours (0–4pp gaps) without faking
+// signals. Bitcoin-only via config.watchTierEnabled.
+export const WATCH_EDGE_PP = 0.03;
+
+// Post-band sanity ceiling. A banded bitcoin snapshot runs ~75–90 strikes; more
+// than this means the band filter regressed (or spot went null) and we're back
+// to writing the full dead ladder — warn to #bot-logs.
+export const BTC_STRIKE_COUNT_WARN = 150;
+
 // --- Kalshi leg-skew guards (2026-06-10 stale-Kalshi-leg fix) ---
 // The Kalshi book is now refetched atomically per snapshot (one
 // with_nested_markets call → kalshi_quoted_at), so legs normally agree within

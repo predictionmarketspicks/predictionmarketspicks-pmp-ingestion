@@ -38,6 +38,7 @@ import {
   KALSHI_MAX_SKEW_SECONDS,
   EDGE_IMPLAUSIBLE_MINUTES_TO_CLOSE,
   EDGE_IMPLAUSIBLE_PP,
+  WATCH_EDGE_PP,
 } from './thresholds.js';
 import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/options-provider.js';
@@ -622,6 +623,30 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   const kalshiSkewSeconds =
     kalshiQuotedAtMs != null ? Math.max(0, Math.round((now.getTime() - kalshiQuotedAtMs) / 1000)) : null;
 
+  // --- Bitcoin-only strike band (2026-06-10 BITCOIN_EDGE_STRIKE_BAND handoff) ---
+  // Persist + evaluate only strikes within ±strikeBandPct of spot OR with a live
+  // two-sided book (union). The hourly KXBTCD ladder spans the whole wing (~188
+  // strikes), but hourly BTC σ ≈ 0.4–0.7% makes anything past ±6% unreachable
+  // within the contract's life — 85% of those strikes carry zero volume, no
+  // book, or a prob saturated at 0/1. Filtering here (not just on display) means
+  // skipped strikes write no row at all — no dead-weight flag rows. Bitcoin-only
+  // via config.strikeBandPct; silver/gold/oil leave it unset and keep the full
+  // (already-narrow) ladder. The live-book arm still captures cascade-hour wing
+  // strikes that traders are actively quoting beyond ±6%.
+  if (config.strikeBandPct != null && spotPrice > 0) {
+    const band = config.strikeBandPct;
+    const before = snapshotMarkets.length;
+    snapshotMarkets = snapshotMarkets.filter((m) => {
+      if (m.floorStrike == null) return false;
+      const withinBand = Math.abs(m.floorStrike / spotPrice - 1) <= band;
+      const liveBook = (m.yesBid ?? 0) > 0 && (m.yesAsk ?? 0) > 0;
+      return withinBand || liveBook;
+    });
+    console.log(
+      `[${config.commodity}] strike band ±${(band * 100).toFixed(0)}% of $${spotPrice.toFixed(0)}: ${snapshotMarkets.length}/${before} strikes kept`,
+    );
+  }
+
   // Flags that force a non-actionable row regardless of which guard set them,
   // so any downstream consumer that doesn't filter quality_flag still sees
   // PASS/skip rather than a phantom BUY (the tool_picks feed reads engine
@@ -799,8 +824,28 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
         rationale = 'No Kalshi quote (zero bid, no recent print)';
       }
     } else if (Math.abs(chosenEdge) < MIN_EDGE_PP) {
-      confidence = 'low';
-      rationale = `Edge ${(chosenEdge * 100).toFixed(1)}pp below ${(MIN_EDGE_PP * 100).toFixed(0)}pp threshold`;
+      // WATCH lean (2026-06-10). 0.03 ≤ |edge| < 0.05 on a real two-sided book
+      // is a directional lean, not a BUY (those stay ≥5pp). confidence='watch';
+      // direction stays PASS so it's excluded from topEdge/Discord. The read
+      // side derives the lean side from the edge sign and renders an amber
+      // WATCH chip. Requires an actual book (tight/live/wide) — a stale print or
+      // no-market stays the old non-actionable 'low' so we never lean on a
+      // ghost quote. Bitcoin-only via config.watchTierEnabled.
+      const hasBook =
+        kalshiView === 'tight_book' || kalshiView === 'live' || kalshiView === 'wide_spread';
+      if (config.watchTierEnabled === true && Math.abs(chosenEdge) >= WATCH_EDGE_PP && hasBook) {
+        confidence = 'watch';
+        const leanYes = chosenEdge > 0;
+        const modelPct = (chosenProb * 100).toFixed(0);
+        const kpPct = (kalshiProb * 100).toFixed(0);
+        const edgePct = Math.abs(chosenEdge * 100).toFixed(1);
+        rationale =
+          `WATCH lean ${leanYes ? 'YES' : 'NO'}: model implies ${modelPct}% vs market ${kpPct}% ` +
+          `— ${edgePct}pp gap, below the ${(MIN_EDGE_PP * 100).toFixed(0)}pp BUY threshold. Lean, not actionable.`;
+      } else {
+        confidence = 'low';
+        rationale = `Edge ${(chosenEdge * 100).toFixed(1)}pp below ${(MIN_EDGE_PP * 100).toFixed(0)}pp threshold`;
+      }
     } else if (kalshiView === 'no_market') {
       rationale = 'No Kalshi market depth — cannot execute';
     } else {
@@ -964,7 +1009,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     // filter quality_flag can't surface a phantom BUY. No-op for flags whose
     // guard already set PASS — just closes the gap for kalshi_stale /
     // edge_implausible, which set only the flag above.
-    if (HARD_SUPPRESS_FLAGS.has(qualityFlag) && direction !== 'PASS') {
+    if (HARD_SUPPRESS_FLAGS.has(qualityFlag) && (direction !== 'PASS' || confidence === 'watch')) {
       direction = 'PASS';
       confidence = 'skip';
     }

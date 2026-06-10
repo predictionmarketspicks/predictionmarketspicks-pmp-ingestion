@@ -33,6 +33,8 @@ import {
   SNAPSHOT_INTERVAL_MARKET_MS,
   SNAPSHOT_INTERVAL_OFF_MS,
   SNAPSHOT_INTERVAL_EXPIRATION_MS,
+  BTC_SNAPSHOT_INTERVAL_MARKET_MS,
+  BTC_STRIKE_BAND_PCT,
 } from './thresholds.js';
 
 export const COMMODITIES = {
@@ -162,9 +164,24 @@ export const COMMODITIES = {
     // cross-check that protects oil from a frozen CL=F print doesn't apply
     // when Pyth itself is the canonical real-time feed.
     fredSeriesId: null,
-    snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
+    // 15s atomic full-pass cadence (2026-06-10 BITCOIN_EDGE_STRIKE_BAND handoff).
+    // Both market and burst windows run at 15s so the whole market window is
+    // 15s — burst (60min pre-close) must not be slower than the market cadence.
+    // The pass is one Kalshi HTTP call + two in-memory reads (Databento sidecar
+    // chain, Pyth spot), so 4 Kalshi req/min is the only added network cost —
+    // trivially within the public API budget, and Databento has no per-request
+    // cost (streaming sidecar). Off-hours stays slow (engine pauses writes).
+    snapshotIntervalMarketMs: BTC_SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
-    snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
+    snapshotIntervalExpirationMs: BTC_SNAPSHOT_INTERVAL_MARKET_MS,
+    // Strike band: persist/evaluate only strikes within ±6% of spot OR with a
+    // live two-sided book (union). Drops the ~85% dead-row ladder that ±15%
+    // produced on the hourly $100-spaced KXBTCD chain. Applied at persist time
+    // in commodity-base.js — skipped strikes write no row at all.
+    strikeBandPct: BTC_STRIKE_BAND_PCT,
+    // WATCH tier: 3-5pp directional leans surface as confidence='watch' (not a
+    // BUY). Keeps the public board alive in calm hours without faking signals.
+    watchTierEnabled: true,
     // OPRA closes at 4pm ET. IBIT chain stops updating overnight even
     // though BTC spot keeps moving on 24/7 venues — running edge math
     // against a frozen IV smile + a moving Pyth spot would surface

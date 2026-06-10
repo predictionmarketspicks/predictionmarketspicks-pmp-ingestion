@@ -96,6 +96,24 @@ export const EXPIRATION_BURST_WINDOW_MS = 60 * 60 * 1000; // 60 min before close
 export const SILVER_SNAPSHOT_INTERVAL_MARKET_MS = SNAPSHOT_INTERVAL_MARKET_MS;
 export const SILVER_SNAPSHOT_INTERVAL_OFF_MS = SNAPSHOT_INTERVAL_OFF_MS;
 
+// --- Kalshi leg-skew guards (2026-06-10 stale-Kalshi-leg fix) ---
+// The Kalshi book is now refetched atomically per snapshot (one
+// with_nested_markets call → kalshi_quoted_at), so legs normally agree within
+// a couple seconds. If the refetch failed and we fell back to the discovery
+// snapshot, snapshot_at - kalshi_quoted_at exceeds this and the row is flagged
+// quality_flag='kalshi_stale' (suppressed on the read side, same as
+// kalshi_no_book) — any edge against a book this far behind live spot is a
+// leg-skew artifact, not a tradeable signal.
+export const KALSHI_MAX_SKEW_SECONDS = 90;
+
+// Sanity cap / defense-in-depth. Within EDGE_IMPLAUSIBLE_MINUTES_TO_CLOSE of an
+// event close, a genuine edge on a liquid hourly book is never this large —
+// anything above EDGE_IMPLAUSIBLE_PP is a data fault by construction (a stale
+// quote the freshness guards above didn't catch). Flagged 'edge_implausible'
+// and suppressed rather than published as a phantom BUY.
+export const EDGE_IMPLAUSIBLE_MINUTES_TO_CLOSE = 30;
+export const EDGE_IMPLAUSIBLE_PP = 0.25; // 25pp
+
 // Massive chain delta filter (plan §10) — keeps the in-memory map under control
 // across four ETFs. `null` delta passes through, so Phase 1 bridge-week traffic
 // (15-min delayed tier returns greeks: {} on weekends and off-hours) still

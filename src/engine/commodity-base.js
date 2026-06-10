@@ -35,6 +35,9 @@ import {
   FRED_MAX_AGE_HOURS,
   OPTION_QUALITY_MIN_VOLUME,
   OPTION_QUALITY_MIN_OI,
+  KALSHI_MAX_SKEW_SECONDS,
+  EDGE_IMPLAUSIBLE_MINUTES_TO_CLOSE,
+  EDGE_IMPLAUSIBLE_PP,
 } from './thresholds.js';
 import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/options-provider.js';
@@ -42,7 +45,7 @@ import { getPrice } from '../feeds/pyth.js';
 import { getOilSpot, getContractSpot } from '../feeds/yahoo-oil.js';
 import { synthesizeWtiSpot } from '../feeds/uso-synthetic.js';
 import { getFredDailyClose } from '../feeds/fred.js';
-import { fetchEvent, getNextEvent } from '../feeds/kalshi-event.js';
+import { fetchEvent, getNextEvent, refetchEventMarkets } from '../feeds/kalshi-event.js';
 import { getActiveSettleContract } from '../feeds/kalshi-series.js';
 import { isOptionsMarketOpen } from '../feeds/massive.js';
 import { recordGuardRejection, recordGuardOk } from '../observability/health.js';
@@ -589,8 +592,51 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     }
   }
 
+  // --- Atomic Kalshi leg (2026-06-10 stale-Kalshi-leg fix) ---
+  // event.markets was captured at discovery and the event-refresh timer only
+  // re-pulls every 30 min — for hourly KXBTCD that book could be ~1h stale
+  // while spot + the IBIT chain ran live every snapshot, surfacing any BTC move
+  // since discovery as a phantom edge. The Kalshi WS overlay was meant to keep
+  // it fresh but only ~12% of bitcoin strikes ever get a live frame. Re-pull
+  // the whole book in one with_nested_markets call here, in the same pass as
+  // spot, and stamp kalshi_quoted_at. The WS overlay (mergeLiveQuote) still
+  // applies on top; this guarantees the REST base is current, not hours old.
+  // On refetch failure we fall back to the discovery markets and let the
+  // staleness guard below flag them via event.fetchedAtMs.
+  let snapshotMarkets = event.markets;
+  let kalshiQuotedAtMs = event.fetchedAtMs ?? null;
+  try {
+    const refreshed = await refetchEventMarkets(event.eventTicker);
+    if (refreshed.markets.length > 0) {
+      snapshotMarkets = refreshed.markets;
+      kalshiQuotedAtMs = refreshed.fetchedAtMs;
+    } else {
+      console.warn(`[${config.commodity}] kalshi book refetch returned 0 markets — using discovery snapshot`);
+    }
+  } catch (err) {
+    console.warn(
+      `[${config.commodity}] kalshi book refetch failed: ${err?.message || err} — using discovery snapshot`,
+    );
+  }
+  const kalshiQuotedAtIso = kalshiQuotedAtMs != null ? new Date(kalshiQuotedAtMs).toISOString() : null;
+  const kalshiSkewSeconds =
+    kalshiQuotedAtMs != null ? Math.max(0, Math.round((now.getTime() - kalshiQuotedAtMs) / 1000)) : null;
+
+  // Flags that force a non-actionable row regardless of which guard set them,
+  // so any downstream consumer that doesn't filter quality_flag still sees
+  // PASS/skip rather than a phantom BUY (the tool_picks feed reads engine
+  // output directly). Applied per-row just before push.
+  const HARD_SUPPRESS_FLAGS = new Set([
+    'kalshi_no_book',
+    'kalshi_stale',
+    'edge_implausible',
+    'kalshi_stale_divergence',
+    'kalshi_thin_book_large_edge',
+    'twap_settle_window',
+  ]);
+
   const rows = [];
-  for (const rawMarket of event.markets) {
+  for (const rawMarket of snapshotMarkets) {
     if (rawMarket.floorStrike == null) continue;
     const market = mergeLiveQuote(rawMarket);
     const kSpot = market.floorStrike;
@@ -691,6 +737,19 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     // empty / stale this tick. Row uses the σ × shortHorizonVolScale fallback
     // — site reader suppresses these so the public surface stays clean.
     if (eventColdBuffer && qualityFlag == null) qualityFlag = 'cold_buffer';
+    // Kalshi staleness guard (2026-06-10). kalshi_quoted_at is the actual fetch
+    // time of the Kalshi book leg; spot + chain are live per snapshot. If the
+    // book leg is more than KALSHI_MAX_SKEW_SECONDS behind this snapshot — the
+    // per-snapshot refetch failed and we fell back to the discovery payload, or
+    // the API is lagging — any computed edge is a leg-skew artifact. Suppress
+    // like kalshi_no_book; the row persists for audit, the site reader hides it.
+    if (
+      qualityFlag == null &&
+      kalshiSkewSeconds != null &&
+      kalshiSkewSeconds > KALSHI_MAX_SKEW_SECONDS
+    ) {
+      qualityFlag = 'kalshi_stale';
+    }
 
     let edge = null;
     if (optProb != null && kalshiProb != null && kalshiProb > 0) edge = optProb - kalshiProb;
@@ -832,6 +891,23 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       }
     }
 
+    // Sanity cap / defense-in-depth (2026-06-10 stale-Kalshi-leg fix). Near
+    // close, a real edge on a liquid hourly book is never 25pp+ — anything
+    // larger is a data fault by construction (leg skew or a stale quote the
+    // freshness guards above didn't catch, e.g. the 62c/75c-vs-21%/38% phantom
+    // BUY NO rows Benny saw 2026-06-10). Suppress instead of publishing.
+    if (
+      qualityFlag == null &&
+      chosenEdge != null &&
+      minutesToClose <= EDGE_IMPLAUSIBLE_MINUTES_TO_CLOSE &&
+      Math.abs(chosenEdge) > EDGE_IMPLAUSIBLE_PP
+    ) {
+      qualityFlag = 'edge_implausible';
+      rationale =
+        `edge_implausible: |edge|=${(Math.abs(chosenEdge) * 100).toFixed(1)}pp ` +
+        `with ${minutesToClose.toFixed(1)}min to close — data fault, not a tradeable edge`;
+    }
+
     let fusedTierStr = chosenEdge != null ? fusedTier(Math.abs(chosenEdge)) : 'NO_EDGE';
     let tierInt = confidenceTierInt(fusedTierStr);
 
@@ -883,8 +959,19 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       rationale = (rationale ?? '') + caveat;
     }
 
+    // Hard-suppress normalization (2026-06-10). Any flag in HARD_SUPPRESS_FLAGS
+    // means the row is non-tradeable; force PASS/skip so a consumer that doesn't
+    // filter quality_flag can't surface a phantom BUY. No-op for flags whose
+    // guard already set PASS — just closes the gap for kalshi_stale /
+    // edge_implausible, which set only the flag above.
+    if (HARD_SUPPRESS_FLAGS.has(qualityFlag) && direction !== 'PASS') {
+      direction = 'PASS';
+      confidence = 'skip';
+    }
+
     rows.push({
       snapshot_at: now.toISOString(),
+      kalshi_quoted_at: kalshiQuotedAtIso,
       commodity: config.commodity,
       event_ticker: event.eventTicker,
       event_close_at: new Date(closeMs).toISOString(),

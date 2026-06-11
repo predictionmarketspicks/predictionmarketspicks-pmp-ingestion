@@ -69,7 +69,7 @@ ROSTER: List[Dict] = [
     {"slug":"jonathan-david","name":"Jonathan David",       "team":"Canada",         "share":0.32, "pk":True,  "club":"Lille"},
     {"slug":"gakpo",         "name":"Cody Gakpo",           "team":"Netherlands",    "share":0.27, "pk":True,  "club":"Liverpool"},
     {"slug":"al-hammadi",    "name":"Ali Al-Hammadi",       "team":"Iraq",           "share":0.40, "pk":True,  "club":"Al Ain"},
-    {"slug":"gimenez",       "name":"Santiago Gimenez",     "team":"Mexico",         "share":0.28, "pk":True,  "club":"AC Milan"},
+    {"slug":"raul-jimenez",  "name":"Raul Jimenez",         "team":"Mexico",         "share":0.28, "pk":True,  "club":"Wolves"},
     {"slug":"pulisic",       "name":"Christian Pulisic",    "team":"United States",  "share":0.29, "pk":True,  "club":"AC Milan"},
     {"slug":"el-kaabi",      "name":"Ayoub El Kaabi",       "team":"Morocco",        "share":0.28, "pk":False, "club":"Olympiacos"},
     {"slug":"havertz",       "name":"Kai Havertz",          "team":"Germany",        "share":0.24, "pk":True,  "club":"Arsenal"},

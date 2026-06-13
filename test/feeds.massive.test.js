@@ -8,6 +8,8 @@ import {
   passesDeltaFilter,
   passesQualityFilters,
   isSpeculativeOption,
+  isOptionsMarketOpen,
+  isUsMarketHoliday,
 } from '../src/feeds/massive.js';
 
 describe('passesDeltaFilter', () => {
@@ -106,5 +108,55 @@ describe('isSpeculativeOption', () => {
   it('null volume is not speculative (passthrough — handled by quality filter)', () => {
     expect(isSpeculativeOption({})).toBe(false);
     expect(isSpeculativeOption({ volume24h: null })).toBe(false);
+  });
+});
+
+// Market-hours gate — the single source of truth that keeps the trading bot
+// from firing when OPRA is dark. Dates are constructed in UTC and map to ET
+// (EDT = UTC-4 in June). Regression guard for the 2026-06-13 Saturday incident
+// where bitcoin snapshotted every 15s on a closed market.
+describe('isOptionsMarketOpen', () => {
+  it('is CLOSED on a Saturday inside the 10–4 ET window', () => {
+    // Sat 2026-06-13 13:51 ET (the incident timestamp) = 17:51 UTC
+    expect(isOptionsMarketOpen(new Date('2026-06-13T17:51:00Z'))).toBe(false);
+  });
+
+  it('is CLOSED on a Sunday inside the 10–4 ET window', () => {
+    expect(isOptionsMarketOpen(new Date('2026-06-14T18:00:00Z'))).toBe(false);
+  });
+
+  it('is OPEN on a normal weekday during RTH', () => {
+    // Wed 2026-06-10 14:00 ET = 18:00 UTC
+    expect(isOptionsMarketOpen(new Date('2026-06-10T18:00:00Z'))).toBe(true);
+  });
+
+  it('is CLOSED before 9:30 AM ET on a weekday', () => {
+    // Wed 2026-06-10 09:00 ET = 13:00 UTC
+    expect(isOptionsMarketOpen(new Date('2026-06-10T13:00:00Z'))).toBe(false);
+  });
+
+  it('is CLOSED at/after 4:00 PM ET on a weekday', () => {
+    // Wed 2026-06-10 16:00 ET = 20:00 UTC (4pm is exclusive)
+    expect(isOptionsMarketOpen(new Date('2026-06-10T20:00:00Z'))).toBe(false);
+  });
+
+  it('is CLOSED on a full-closure holiday that falls on a weekday', () => {
+    // Juneteenth — Fri 2026-06-19 14:00 ET = 18:00 UTC
+    expect(isOptionsMarketOpen(new Date('2026-06-19T18:00:00Z'))).toBe(false);
+  });
+});
+
+describe('isUsMarketHoliday', () => {
+  it('flags a verified 2026 NYSE full-closure holiday (Juneteenth)', () => {
+    expect(isUsMarketHoliday(new Date('2026-06-19T18:00:00Z'))).toBe(true);
+  });
+
+  it('flags a verified 2027 holiday (Good Friday)', () => {
+    // 2027-03-26 14:00 ET = 18:00 UTC (EDT)
+    expect(isUsMarketHoliday(new Date('2027-03-26T18:00:00Z'))).toBe(true);
+  });
+
+  it('does not flag an ordinary trading day', () => {
+    expect(isUsMarketHoliday(new Date('2026-06-10T18:00:00Z'))).toBe(false);
   });
 });

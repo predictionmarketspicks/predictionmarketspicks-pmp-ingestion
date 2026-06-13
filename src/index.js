@@ -410,17 +410,32 @@ const OFF_HOURS_DORMANT_CHECK_MS = 10 * 60 * 1000;
 function scheduleSnapshot(state) {
   if (stopRequested) return;
   const { config } = state;
-  const inBurst = isInExpirationWindow(state.currentEvent);
   const marketOpen = isOptionsMarketOpen();
+  // The expiration burst only counts while the options market is actually open.
+  // KXBTCD (bitcoin) is an hourly 24/7 contract, so its currentEvent is ALWAYS
+  // inside the 60-min pre-close window — without this gate every weekend,
+  // holiday, and overnight hour reads as `inBurst`, bypasses the
+  // pauseSnapshotsOffHours dormancy check below, and fires a 15s-cadence
+  // snapshot against a dark/frozen IBIT chain. That is exactly the 2026-06-13
+  // (Saturday) incident: bitcoin snapshotting every 15s with no live OPRA feed.
+  // No commodity has an honest smile to price against when the market is
+  // closed, so the burst must never fire outside an open trading session.
+  const inBurst = marketOpen && isInExpirationWindow(state.currentEvent);
 
-  // Commodities flagged pauseSnapshotsOffHours (silver/gold on Databento)
-  // skip the off-hours write loop entirely — OPRA is dark, the book hasn't
-  // moved, and re-upserting identical rows into commodity_edge_signals only
-  // wastes DB writes. Still tick on a slow timer so we resume cleanly at
-  // 9:30 AM ET without waiting for the next bootstrap.
-  if (config.pauseSnapshotsOffHours && !inBurst && !marketOpen) {
+  // Hard market-hours gate (2026-06-13): when the options market is closed and
+  // we're not in a (now market-gated) burst, NO commodity fires a snapshot —
+  // weekends, holidays, and overnight are dead. OPRA is dark, the book hasn't
+  // moved, and pricing an edge against a frozen smile produces basis-mismatch
+  // artifacts, not real signals. We still tick on a slow timer so the engine
+  // resumes cleanly at the next 9:30 AM ET open without waiting for a redeploy.
+  //
+  // This used to be gated on config.pauseSnapshotsOffHours, but the directive
+  // is universal: the bot only trades 10–4 on trading days the market is open.
+  // (Every enabled commodity already sets pauseSnapshotsOffHours=true; dropping
+  // the condition just makes any future non-pause commodity safe by default.)
+  if (!inBurst && !marketOpen) {
     if (state.lastCadence !== 'dormant') {
-      console.log(`[${config.commodity}] cadence → dormant (off-hours, snapshots paused)`);
+      console.log(`[${config.commodity}] cadence → dormant (market closed — snapshots paused)`);
       state.lastCadence = 'dormant';
     }
     state.snapshotTimer = setTimeout(() => scheduleSnapshot(state), OFF_HOURS_DORMANT_CHECK_MS);

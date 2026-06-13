@@ -48,13 +48,67 @@ const chainCache = new Map();
 let stopRequested = false;
 const timers = new Map(); // underlying → setTimeout id
 
-// US options market hours: Mon–Fri 9:30 AM – 4:00 PM ET. We approximate by
-// converting "now" to ET via toLocaleString and checking the ET wall clock.
-// This handles DST automatically without pulling in a tz library.
+// US equity/options market full-closure holidays (NYSE / Cboe / OPRA). Keyed
+// by the ET calendar date (YYYY-MM-DD). Verified against the NYSE Group
+// 2025–2027 holiday calendar (ir.theice.com, 2024-11 announcement).
+//
+// Half-day early closes (1 PM ET: day after Thanksgiving, Christmas Eve) are
+// deliberately NOT special-cased. On those days the chain is live 9:30 AM–1 PM
+// and the engine running its normal RTH cadence until the 1 PM close is fine;
+// post-1 PM the OPRA book simply stops printing and the existing staleness /
+// quality filters absorb it. Only full closures must zero out the session.
+//
+// UPDATE ANNUALLY: append the next year's dates from the NYSE calendar before
+// the prior year lapses, or the bot will treat new-year holidays as trading
+// days. (Tracked: handoffs/FLY_BOT_MARKET_HOURS_GATE_2026-06-13.md)
+const US_MARKET_HOLIDAYS = new Set([
+  // 2026
+  '2026-01-01', // New Year's Day
+  '2026-01-19', // Martin Luther King Jr. Day
+  '2026-02-16', // Washington's Birthday
+  '2026-04-03', // Good Friday
+  '2026-05-25', // Memorial Day
+  '2026-06-19', // Juneteenth
+  '2026-07-03', // Independence Day (observed — Jul 4 is a Saturday)
+  '2026-09-07', // Labor Day
+  '2026-11-26', // Thanksgiving Day
+  '2026-12-25', // Christmas Day
+  // 2027
+  '2027-01-01', // New Year's Day
+  '2027-01-18', // Martin Luther King Jr. Day
+  '2027-02-15', // Washington's Birthday
+  '2027-03-26', // Good Friday
+  '2027-05-31', // Memorial Day
+  '2027-06-18', // Juneteenth (observed — Jun 19 is a Saturday)
+  '2027-07-05', // Independence Day (observed — Jul 4 is a Sunday)
+  '2027-09-06', // Labor Day
+  '2027-11-25', // Thanksgiving Day
+  '2027-12-24', // Christmas Day (observed — Dec 25 is a Saturday)
+]);
+
+// ET calendar date as YYYY-MM-DD, DST-safe via the en-CA locale (which formats
+// as ISO-style YYYY-MM-DD). Used for the holiday-set lookup.
+function etDateKey(now = new Date()) {
+  return new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
+
+function isUsMarketHoliday(now = new Date()) {
+  return US_MARKET_HOLIDAYS.has(etDateKey(now));
+}
+
+// US options market hours: Mon–Fri 9:30 AM – 4:00 PM ET, excluding full-closure
+// market holidays. We convert "now" to ET via toLocaleString and check the ET
+// wall clock — this handles DST automatically without pulling in a tz library.
+//
+// This is the single source of truth for "is the trading bot allowed to fire?"
+// Both the per-commodity snapshot scheduler AND the expiration-burst gate in
+// src/index.js depend on it returning false on weekends and holidays, so the
+// engine never prices an edge against a dark/frozen OPRA chain.
 function isOptionsMarketOpen(now = new Date()) {
   const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
   const day = et.getDay(); // 0=Sun, 6=Sat
   if (day === 0 || day === 6) return false;
+  if (isUsMarketHoliday(now)) return false;
   const minutes = et.getHours() * 60 + et.getMinutes();
   return minutes >= 9 * 60 + 30 && minutes < 16 * 60;
 }
@@ -261,4 +315,4 @@ export async function fetchPrevClose(ticker) {
   return close;
 }
 
-export { isOptionsMarketOpen, passesDeltaFilter, passesQualityFilters, isSpeculativeOption };
+export { isOptionsMarketOpen, isUsMarketHoliday, passesDeltaFilter, passesQualityFilters, isSpeculativeOption };

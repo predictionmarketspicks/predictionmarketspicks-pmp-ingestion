@@ -182,6 +182,17 @@ export const COMMODITIES = {
     // WATCH tier: 3-5pp directional leans surface as confidence='watch' (not a
     // BUY). Keeps the public board alive in calm hours without faking signals.
     watchTierEnabled: true,
+    // Post-spread, side-aware BUY gate (BITCOIN_EDGE_NO_SIDE_FIX_2026-06-16).
+    // bitcoin-only. When true, the BUY gate charges each side its actual ask-side
+    // spread off the live Kalshi book instead of comparing |edge| to one symmetric
+    // threshold: YES needs chosenProb - yesAsk >= MIN_EDGE_PP; NO needs
+    // yesBid - chosenProb >= minEdgePpNoSide. confidence/tier magnitude is then
+    // driven off the NET side edge so spread cost shows up in the tier too. Rows
+    // that clear MIN_EDGE_PP gross but fail their side's net floor go PASS/low.
+    // Silver/gold/oil leave postSpreadGate unset -> byte-identical symmetric path.
+    postSpreadGate: true,
+    minEdgePpNoSide: 0.1, // NO-side post-spread floor (stricter than YES until optProb recalibrates)
+    noSideEnabled: true, // kill switch: set false to suppress every BUY NO without a redeploy of the gate math
     // OPRA closes at 4pm ET. IBIT chain stops updating overnight even
     // though BTC spot keeps moving on 24/7 venues — running edge math
     // against a frozen IV smile + a moving Pyth spot would surface

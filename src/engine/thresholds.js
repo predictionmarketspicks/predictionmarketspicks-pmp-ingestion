@@ -14,6 +14,17 @@
 // Minimum |edge| (in fraction, not pp) we'll surface as actionable.
 export const MIN_EDGE_PP = 0.05;
 
+// NO-side post-spread floor (bitcoin only — BITCOIN_EDGE_NO_SIDE_FIX_2026-06-16).
+// The symmetric MIN_EDGE_PP gate plus sign-only side selection emitted a BUY NO
+// on every negative-edge strike, which on hourly KXBTCD is a ~coin-flip that
+// bleeds: those are expensive favorites (NO at ~60-66c) where the optProb model
+// runs biased low, so "YES overpriced -> BUY NO" is often a model artifact, not
+// a market mispricing. Until the IBIT-chain -> BTC TWAP prob is recalibrated, the
+// NO side must clear a stricter POST-SPREAD edge (yesBid - chosenProb) before we
+// emit it. Bitcoin-only via config.minEdgePpNoSide; silver/gold/oil never read
+// this (they keep the symmetric path — config.postSpreadGate is unset for them).
+export const MIN_EDGE_PP_NO = 0.1;
+
 // Minimum 24h Kalshi volume to trust last_price as fair (else stale print).
 export const MIN_VOL_FOR_LIVE_PRICE = 50;
 

@@ -22,6 +22,7 @@ import { warmVolCache, estimateVol } from './vol.js';
 import { getShortHorizonStats } from './short-horizon-vol.js';
 import {
   MIN_EDGE_PP,
+  MIN_EDGE_PP_NO,
   MIN_VOL_FOR_LIVE_PRICE,
   MAX_BID_ASK_SPREAD,
   MAX_QUOTE_AGE_SEC,
@@ -386,6 +387,39 @@ export async function discoverEvent(config) {
   const ev = await getNextEvent(config.seriesTicker, { filter: config.eventFilter });
   if (!ev) return null;
   return fetchEvent(ev.event_ticker);
+}
+
+// Post-spread, side-aware BUY gate (bitcoin only — BITCOIN_EDGE_NO_SIDE_FIX_2026-06-16).
+//
+// The legacy gate compared |edge| to a single symmetric threshold and set the
+// side from the sign alone, so it flipped to BUY NO on every negative-edge strike
+// with no check that the NO contract clears a real edge after its own ask-side
+// spread. This charges each side its actual ask-side spread off the live Kalshi
+// book and holds the NO side to a stricter floor:
+//   - YES net edge = chosenProb - yesAsk   (the price to lift the YES offer)
+//   - NO  net edge = yesBid   - chosenProb   (NO ask = 1 - yesBid, so this is the
+//                                             post-spread NO edge, derived purely
+//                                             from the published bid)
+// YES is preferred when both sides somehow qualify (the profitable cluster). The
+// returned netEdge drives confidence/tier magnitude so spread cost is reflected
+// in the tier. pass=false => not a BUY (caller emits PASS/low). Pure + deterministic.
+export function postSpreadSideGate({
+  chosenProb,
+  yesBid,
+  yesAsk,
+  minEdgeYes,
+  minEdgeNo,
+  noSideEnabled = true,
+}) {
+  const yesNet = chosenProb != null && yesAsk != null ? chosenProb - yesAsk : null;
+  const noNet = chosenProb != null && yesBid != null ? yesBid - chosenProb : null;
+  if (yesNet != null && yesNet >= minEdgeYes) {
+    return { pass: true, dirYes: true, netEdge: yesNet, yesNet, noNet };
+  }
+  if (noNet != null && noNet >= minEdgeNo && noSideEnabled) {
+    return { pass: true, dirYes: false, netEdge: noNet, yesNet, noNet };
+  }
+  return { pass: false, dirYes: null, netEdge: null, yesNet, noNet };
 }
 
 // Returns { meta, rows } shaped for the supabase writer. Returns null if any
@@ -849,90 +883,137 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     } else if (kalshiView === 'no_market') {
       rationale = 'No Kalshi market depth — cannot execute';
     } else {
-      const dirYes = chosenEdge > 0;
-      direction = dirYes ? 'BUY YES' : 'BUY NO';
-      const modelPct = (chosenProb * 100).toFixed(0);
-      const kpPct = (kalshiProb * 100).toFixed(0);
-      const edgePct = Math.abs(chosenEdge * 100).toFixed(1);
-      rationale = `Model implies ${modelPct}% chance ${config.commodity} above $${kSpot.toFixed(2)}, market prices it at ${kpPct}%. ${dirYes ? 'YES' : 'NO'} is underpriced by ${edgePct}pp.`;
-      const mag = Math.abs(chosenEdge);
-      if (mag >= 0.15 && (kalshiView === 'live' || kalshiView === 'tight_book')) confidence = 'high';
-      else if (
-        mag >= 0.1 &&
-        (kalshiView === 'live' || kalshiView === 'tight_book' || kalshiView === 'wide_spread')
-      )
-        confidence = 'medium';
-      else confidence = 'low';
-      if (kalshiView === 'stale_print') {
-        confidence = 'low';
-        rationale += ' (caveat: stale Kalshi print, low recent volume)';
-      } else if (kalshiView === 'wide_spread') {
-        rationale += ` (caveat: wide bid-ask $${(market.yesBid ?? 0).toFixed(2)}-$${(market.yesAsk ?? 0).toFixed(2)}; verify book depth before sizing)`;
-        if (confidence === 'high') confidence = 'medium';
-      }
-      // Speculative IV cap (handoff §2.3): if the smile leaned on thin-volume
-      // contracts (vol ≤ 150), demote actionable rows to 'low' so the site
-      // renders advisory rather than tradeable.
-      if (ivSpeculative && (confidence === 'high' || confidence === 'medium')) {
-        confidence = 'low';
-        rationale += ' (caveat: thin options volume on contributing strikes — IV may be unreliable)';
-      }
-      // V2 Phase 2 liquidity gate: any 'high'/'medium' assignment that fails
-      // the explicit (volume, spread, quote age) gate gets demoted to 'low'.
-      // Source-of-truth check that catches the 26 silver alerts that shipped
-      // on kalshi_volume_24h=0 in May 2026 — the legacy kalshiView=tight_book
-      // path didn't enforce a min-volume floor.
-      const gate = passesLiquidityGate(market);
-      if ((confidence === 'high' || confidence === 'medium') && !gate.ok) {
-        confidence = 'low';
-        rationale += ` (caveat: liquidity gate failed — ${gate.reason})`;
+      // Side selection + actionability. Default (silver/gold/oil, and any
+      // commodity without the bitcoin post-spread gate): legacy symmetric path —
+      // side from the edge sign, confidence magnitude = |edge|. Unchanged.
+      let dirYes = chosenEdge > 0;
+      let mag = Math.abs(chosenEdge);
+      let buyOk = true;
+
+      // Bitcoin-only post-spread gate (BITCOIN_EDGE_NO_SIDE_FIX_2026-06-16).
+      // Replaces the symmetric |edge| < MIN_EDGE_PP gate + sign-only side pick.
+      // Charges each side its actual ask-side spread off the live Kalshi book and
+      // holds the NO side to a stricter floor. A gross |edge| that cleared
+      // MIN_EDGE_PP but whose chosen side doesn't clear its POST-SPREAD floor is
+      // NOT a BUY — emit PASS/low so both the bot (reads direction) and tool_picks
+      // (trigger records only direction IN ('BUY YES','BUY NO')) skip it.
+      if (config.postSpreadGate === true) {
+        const g = postSpreadSideGate({
+          chosenProb,
+          yesBid: market.yesBid,
+          yesAsk: market.yesAsk,
+          minEdgeYes: MIN_EDGE_PP,
+          minEdgeNo: config.minEdgePpNoSide ?? MIN_EDGE_PP_NO,
+          noSideEnabled: config.noSideEnabled ?? true,
+        });
+        if (g.pass) {
+          dirYes = g.dirYes;
+          mag = g.netEdge; // confidence/tier reflect the post-spread side edge
+        } else {
+          buyOk = false;
+          direction = 'PASS';
+          confidence = 'low';
+          const grossPct = Math.abs(chosenEdge * 100).toFixed(1);
+          const noFloor = config.minEdgePpNoSide ?? MIN_EDGE_PP_NO;
+          if (chosenEdge > 0) {
+            const netPct = g.yesNet != null ? (g.yesNet * 100).toFixed(1) : 'n/a';
+            rationale =
+              `YES underpriced by ${grossPct}pp gross, but only ${netPct}pp after the ` +
+              `YES ask-side spread — below the ${(MIN_EDGE_PP * 100).toFixed(0)}pp net floor. Not actionable.`;
+          } else {
+            const netPct = g.noNet != null ? (g.noNet * 100).toFixed(1) : 'n/a';
+            const off = (config.noSideEnabled ?? true) ? '' : ' (BUY NO disabled)';
+            rationale =
+              `NO underpriced by ${grossPct}pp gross, but only ${netPct}pp after the ` +
+              `NO ask-side spread${off} — below the ${(noFloor * 100).toFixed(0)}pp net NO floor. Not actionable.`;
+          }
+        }
       }
 
-      // 2026-05-21 unified bitcoin-edge fix (handoffs/BITCOIN_EDGE_KALSHI_STALE_QUOTE_FIX_2026-05-21.md).
-      //
-      // Edit D — Stale-print divergence ceiling. classifyKalshiView returns
-      // 'stale_print' when there's a lastPrice but no live two-sided book +
-      // recent volume. The options-implied prob is computed live from spot +
-      // chain every snapshot — it cannot be stale by construction. A >25pp
-      // gap is the signature of the 8c-vs-60c artifact: an ancient lastPrice
-      // from a prior spot regime sitting on a thin or one-sided book. The
-      // row stays in the table for audit; the quality_flag hides it from the
-      // public surface (site reader filters quality_flag IS NULL).
-      if (
-        kalshiView === 'stale_print' &&
-        chosenProb != null &&
-        kalshiProb != null &&
-        Math.abs(chosenProb - kalshiProb) > STALE_PRINT_DIVERGENCE_CEILING
-      ) {
-        qualityFlag = 'kalshi_stale_divergence';
-        direction = 'PASS';
-        confidence = 'skip';
-        rationale =
-          `kalshi: stale print ${(kalshiProb * 100).toFixed(0)}c diverges ` +
-          `${(Math.abs(chosenProb - kalshiProb) * 100).toFixed(1)}pp from live ` +
-          `model ${(chosenProb * 100).toFixed(0)}% — likely stale lastPrice from prior spot regime`;
-      }
+      if (buyOk) {
+        direction = dirYes ? 'BUY YES' : 'BUY NO';
+        const modelPct = (chosenProb * 100).toFixed(0);
+        const kpPct = (kalshiProb * 100).toFixed(0);
+        const edgePct = Math.abs(chosenEdge * 100).toFixed(1);
+        rationale = `Model implies ${modelPct}% chance ${config.commodity} above $${kSpot.toFixed(2)}, market prices it at ${kpPct}%. ${dirYes ? 'YES' : 'NO'} is underpriced by ${edgePct}pp.`;
+        if (mag >= 0.15 && (kalshiView === 'live' || kalshiView === 'tight_book')) confidence = 'high';
+        else if (
+          mag >= 0.1 &&
+          (kalshiView === 'live' || kalshiView === 'tight_book' || kalshiView === 'wide_spread')
+        )
+          confidence = 'medium';
+        else confidence = 'low';
+        if (kalshiView === 'stale_print') {
+          confidence = 'low';
+          rationale += ' (caveat: stale Kalshi print, low recent volume)';
+        } else if (kalshiView === 'wide_spread') {
+          rationale += ` (caveat: wide bid-ask $${(market.yesBid ?? 0).toFixed(2)}-$${(market.yesAsk ?? 0).toFixed(2)}; verify book depth before sizing)`;
+          if (confidence === 'high') confidence = 'medium';
+        }
+        // Speculative IV cap (handoff §2.3): if the smile leaned on thin-volume
+        // contracts (vol ≤ 150), demote actionable rows to 'low' so the site
+        // renders advisory rather than tradeable.
+        if (ivSpeculative && (confidence === 'high' || confidence === 'medium')) {
+          confidence = 'low';
+          rationale += ' (caveat: thin options volume on contributing strikes — IV may be unreliable)';
+        }
+        // V2 Phase 2 liquidity gate: any 'high'/'medium' assignment that fails
+        // the explicit (volume, spread, quote age) gate gets demoted to 'low'.
+        // Source-of-truth check that catches the 26 silver alerts that shipped
+        // on kalshi_volume_24h=0 in May 2026 — the legacy kalshiView=tight_book
+        // path didn't enforce a min-volume floor.
+        const gate = passesLiquidityGate(market);
+        if ((confidence === 'high' || confidence === 'medium') && !gate.ok) {
+          confidence = 'low';
+          rationale += ` (caveat: liquidity gate failed — ${gate.reason})`;
+        }
 
-      // Edit E — Thin-book large-edge ceiling. passesLiquidityGate.ok=false
-      // with a still-live bid/ask (kalshiView 'tight_book' or 'live') means
-      // the MM is quoting both sides but volume_24h is below the floor — the
-      // mid we computed against was a quote that may not have repriced since
-      // the last actual trade. An |edge| above 10pp on a market that hasn't
-      // traded is more likely a stale-MM-quote artifact than a real edge.
-      // Sub-10pp edges remain visible as LOW (the existing demotion ran above).
-      // Skip if Edit D already flagged the row.
-      if (
-        qualityFlag == null &&
-        !gate.ok &&
-        chosenEdge != null &&
-        Math.abs(chosenEdge) > THIN_BOOK_EDGE_CEILING
-      ) {
-        qualityFlag = 'kalshi_thin_book_large_edge';
-        direction = 'PASS';
-        confidence = 'skip';
-        rationale =
-          `kalshi: ${gate.reason} + |edge|=${(Math.abs(chosenEdge) * 100).toFixed(1)}pp ` +
-          `— thin-book mid likely stale relative to live model prob`;
+        // 2026-05-21 unified bitcoin-edge fix (handoffs/BITCOIN_EDGE_KALSHI_STALE_QUOTE_FIX_2026-05-21.md).
+        //
+        // Edit D — Stale-print divergence ceiling. classifyKalshiView returns
+        // 'stale_print' when there's a lastPrice but no live two-sided book +
+        // recent volume. The options-implied prob is computed live from spot +
+        // chain every snapshot — it cannot be stale by construction. A >25pp
+        // gap is the signature of the 8c-vs-60c artifact: an ancient lastPrice
+        // from a prior spot regime sitting on a thin or one-sided book. The
+        // row stays in the table for audit; the quality_flag hides it from the
+        // public surface (site reader filters quality_flag IS NULL).
+        if (
+          kalshiView === 'stale_print' &&
+          chosenProb != null &&
+          kalshiProb != null &&
+          Math.abs(chosenProb - kalshiProb) > STALE_PRINT_DIVERGENCE_CEILING
+        ) {
+          qualityFlag = 'kalshi_stale_divergence';
+          direction = 'PASS';
+          confidence = 'skip';
+          rationale =
+            `kalshi: stale print ${(kalshiProb * 100).toFixed(0)}c diverges ` +
+            `${(Math.abs(chosenProb - kalshiProb) * 100).toFixed(1)}pp from live ` +
+            `model ${(chosenProb * 100).toFixed(0)}% — likely stale lastPrice from prior spot regime`;
+        }
+
+        // Edit E — Thin-book large-edge ceiling. passesLiquidityGate.ok=false
+        // with a still-live bid/ask (kalshiView 'tight_book' or 'live') means
+        // the MM is quoting both sides but volume_24h is below the floor — the
+        // mid we computed against was a quote that may not have repriced since
+        // the last actual trade. An |edge| above 10pp on a market that hasn't
+        // traded is more likely a stale-MM-quote artifact than a real edge.
+        // Sub-10pp edges remain visible as LOW (the existing demotion ran above).
+        // Skip if Edit D already flagged the row.
+        if (
+          qualityFlag == null &&
+          !gate.ok &&
+          chosenEdge != null &&
+          Math.abs(chosenEdge) > THIN_BOOK_EDGE_CEILING
+        ) {
+          qualityFlag = 'kalshi_thin_book_large_edge';
+          direction = 'PASS';
+          confidence = 'skip';
+          rationale =
+            `kalshi: ${gate.reason} + |edge|=${(Math.abs(chosenEdge) * 100).toFixed(1)}pp ` +
+            `— thin-book mid likely stale relative to live model prob`;
+        }
       }
     }
 
@@ -1204,6 +1285,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 
 export const __test__ = {
   buildIvSmile,
+  postSpreadSideGate,
   kalshiYesImpliedProb,
   classifyKalshiView,
   passesLiquidityGate,

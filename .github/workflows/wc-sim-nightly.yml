@@ -36,6 +36,13 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           DISCORD_BOT_TOKEN:    ${{ secrets.DISCORD_BOT_TOKEN }}
           WC_SIM_ITERATIONS:    ${{ github.event.inputs.iterations || '10000' }}
+          # v5 conditions the group MC on completed results. CI only checks out the
+          # engine repo, so results come from the site's public route (default in
+          # wc/results.py; override here if the domain changes).
+          WC_MATCHES_URL:       https://predictionmarketspicks.com/api/wc/matches
+          # During the tournament, refuse to publish a stale full re-sim if results
+          # can't be loaded (loud fail → Discord). Remove after the group stage.
+          WC_SIM_REQUIRE_RESULTS: '1'
         run: |
           if [ "${{ github.event.inputs.validate_only }}" = "true" ]; then
             python scripts/run-wc-sim.py --validate-only

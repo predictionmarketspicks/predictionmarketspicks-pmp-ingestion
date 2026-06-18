@@ -1,68 +1,74 @@
 """
-Sim-output validation against the v4 market-anchored seed (see teams.py header).
+Sim-output validation (v5 — standings-conditioned).
 
-What we validate:
-  - Team progression (champion + reach_*) reproduces the seed within ±0.5pp,
-    because the algorithm is deterministic with seed=42 (we replicated the
-    original wc2026_sim_v2.py operator-precedence quirk on purpose; see
-    simulator.py for the load-bearing comment). The v4 seed swapped the team
-    ratings (market-anchored) but NOT the algorithm, so determinism is intact.
+v5 conditions the group-stage Monte Carlo on completed results (wc.results +
+simulator.sim_group), so progression probabilities deliberately MOVE off the
+pre-tournament seed as games are played (a favourite that loses MD1 sees its
+advance% fall toward the market). That means the old v4 gate — "champion% must
+reproduce the market-anchored seed within ±0.5pp" — is no longer a correctness
+signal; it would hard-fail on every real result. We replace it with structural
+invariants that must hold for ANY valid progression distribution:
+
   - Champion% across all 48 teams sums to 100.0 ± 0.5.
+  - Per team, the progression ladder is monotone non-increasing:
+    advance ≥ reach_r16 ≥ reach_qf ≥ reach_sf ≥ reach_final ≥ champion
+    (each is P(reach at least stage X); the counts are strictly nested, so this
+    must hold exactly up to rounding). A violation means the aggregation or the
+    conditioning is broken.
+  - Every team pct is within [0, 100].
   - Match-level (match_winner_*, match_o25, match_btts) — sanity only:
-    H+D+A sums to 100 ± 1 per match; all values in (0, 100).
-    NOT compared to seed: PR 2 upgrades match values from the edge function's
-    hand-tuned ALL_MATCHES table to analytical Poisson, so values WILL differ.
+    H+D+A sums to 100 ± 1 per match; all values in (0, 100). The analytical match
+    path is unchanged in v5 (still a pre-game DC-Poisson grid), so it is NOT
+    conditioned — match rows for already-played fixtures are pre-game numbers and
+    are intentionally left as sanity-only.
   - Player rows — sanity only: 25 rows, no nulls in required columns,
     exp_g_group in (0, 5), anytime_pct_group in (0, 100).
 
 Failure modes:
-  - validate_team_progression returns {"passed": False, "failures": [...]} if
-    any spot-check team is outside tolerance OR if the sum check fails.
+  - validate_team_progression returns {"passed": False, "failures": [...]} on any
+    structural violation.
   - run-wc-sim.py treats any "passed: False" as a Discord-alert + GH Action fail.
 """
 from typing import Dict, List
 
-# Spot-check teams + tolerance window — v4 MARKET-ANCHORED seed (May 2026).
-# expected = the actual champion% the baked teams.py ratings produce at the
-# production config (10000 iters, seed=42), which is a 50/50 blend of the Elo
-# model and the de-vigged DraftKings outright market (see teams.py header +
-# market_anchor.py). Because the run is deterministic, the nightly sim reproduces
-# these exactly; ±0.5pp catches any algorithmic drift. spec_band = expected ±1.0,
-# the acceptable market-anchored range. To re-anchor, regenerate via
-# `python -m wc.calibrate_ratings` and paste its printed SPOT_CHECKS block.
-SPOT_CHECKS = {
-    "team:spain":     {"kind": "champion", "expected": 16.7, "tol": 0.5, "spec_band": (15.7, 17.7)},
-    "team:france":    {"kind": "champion", "expected": 14.6, "tol": 0.5, "spec_band": (13.6, 15.6)},
-    "team:england":   {"kind": "champion", "expected": 12.7, "tol": 0.5, "spec_band": (11.7, 13.7)},
-    "team:brazil":    {"kind": "champion", "expected": 9.6,  "tol": 0.5, "spec_band": (8.6, 10.6)},
-    "team:argentina": {"kind": "champion", "expected": 9.7,  "tol": 0.5, "spec_band": (8.7, 10.7)},
-    "team:germany":   {"kind": "champion", "expected": 6.4,  "tol": 0.5, "spec_band": (5.4, 7.4)},
-}
-
 CHAMPION_SUM_TOLERANCE = 0.5  # sum of all 48 champion% should be 100 ± this
+
+# Progression ladder, deepest-reaching first. P(advance) ≥ P(reach_r16) ≥ … ≥
+# P(champion) because the per-iteration stage counts are strictly nested.
+PROGRESSION_LADDER = [
+    "advance", "reach_r16", "reach_qf", "reach_sf", "reach_final", "champion",
+]
+MONOTONE_TOLERANCE = 0.11  # absorb 1-decimal rounding on adjacent rungs
 
 
 def validate_team_progression(team_rows: List[dict]) -> dict:
     """team_rows: list of {entity_id, kind, sim_pct} dicts from this run."""
     failures: List[str] = []
-    by_key = {(r["entity_id"], r["kind"]): r["sim_pct"] for r in team_rows}
+    by_key = {(r["entity_id"], r["kind"]): float(r["sim_pct"]) for r in team_rows}
+    entities = sorted({r["entity_id"] for r in team_rows if r["entity_id"].startswith("team:")})
 
-    for entity_id, spec in SPOT_CHECKS.items():
-        actual = by_key.get((entity_id, spec["kind"]))
-        if actual is None:
-            failures.append(f"missing row for ({entity_id}, {spec['kind']})")
-            continue
-        diff = float(actual) - spec["expected"]
-        if abs(diff) > spec["tol"]:
-            band = spec["spec_band"]
-            inside_spec = band[0] <= float(actual) <= band[1]
-            failures.append(
-                f"{entity_id} {spec['kind']}: got {actual}, expected {spec['expected']} "
-                f"(diff {diff:+.2f}, tol ±{spec['tol']}), spec band {band} → "
-                f"{'inside spec band' if inside_spec else 'OUTSIDE spec band'}"
-            )
+    # Range check.
+    for (entity_id, kind), v in by_key.items():
+        if not (0.0 <= v <= 100.0):
+            failures.append(f"{entity_id} {kind}={v} outside [0,100]")
 
-    champ_sum = sum(float(r["sim_pct"]) for r in team_rows if r["kind"] == "champion")
+    # Per-team monotone non-increasing progression ladder.
+    for entity_id in entities:
+        prev_kind = None
+        prev_val = None
+        for kind in PROGRESSION_LADDER:
+            v = by_key.get((entity_id, kind))
+            if v is None:
+                failures.append(f"missing row for ({entity_id}, {kind})")
+                continue
+            if prev_val is not None and v > prev_val + MONOTONE_TOLERANCE:
+                failures.append(
+                    f"{entity_id} progression not monotone: {kind}={v} > "
+                    f"{prev_kind}={prev_val}"
+                )
+            prev_kind, prev_val = kind, v
+
+    champ_sum = sum(v for (e, k), v in by_key.items() if k == "champion")
     if abs(champ_sum - 100.0) > CHAMPION_SUM_TOLERANCE:
         failures.append(
             f"champion% sum across all teams = {champ_sum:.2f}, "
@@ -72,7 +78,7 @@ def validate_team_progression(team_rows: List[dict]) -> dict:
     return {
         "passed":   len(failures) == 0,
         "failures": failures,
-        "summary":  (f"team progression OK: {len(SPOT_CHECKS)} spot checks within tolerance, "
+        "summary":  (f"team progression OK: {len(entities)} teams monotone, "
                      f"champion% sum = {champ_sum:.2f}"),
     }
 

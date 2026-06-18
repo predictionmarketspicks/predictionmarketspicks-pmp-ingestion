@@ -16,9 +16,14 @@ Per-iteration output is a dict mapping team → furthest stage code:
 """
 import math
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, FrozenSet, List, Optional, Tuple
 
-from .teams import TEAMS, GROUPS, ALL_TEAMS, HOST_SET
+from .teams import TEAMS, GROUPS, ALL_TEAMS, HOST_SET, NAME_TO_SLUG
+
+# Played group fixtures, keyed by frozenset of the two team slugs → {slug: goals}.
+# Supplied by wc.results.load_played_results(); None means "simulate everything"
+# (pre-tournament behaviour / standalone player-model runs).
+PlayedResults = Dict[FrozenSet[str], Dict[str, int]]
 
 # ── Match model constants (locked — drift = seed validation will fail) ────────
 BASE_GOALS = 1.35   # global per-team xG baseline
@@ -88,13 +93,27 @@ def sim_match(
     return ga, gb
 
 
-def sim_group(group_teams: List[str]) -> Tuple[List[str], Dict[str, dict]]:
-    """Run all 6 round-robin matches; return (ranked, stats)."""
+def sim_group(
+    group_teams: List[str],
+    played: Optional[PlayedResults] = None,
+) -> Tuple[List[str], Dict[str, dict]]:
+    """Run the 6 round-robin matches; return (ranked, stats).
+
+    When `played` carries a completed result for a pairing, the REAL score is
+    banked (points/GD/GF are facts, not re-randomized) and that fixture is not
+    simulated; only the remaining games are. This is what makes the sim condition
+    on the live tournament state instead of re-running from kickoff. FIFA tiebreak
+    (pts > GD > GF > random) is applied over the combined real + simulated table.
+    """
     stats = {t: {"pts": 0, "gf": 0, "ga": 0, "gd": 0} for t in group_teams}
     for i in range(4):
         for j in range(i + 1, 4):
             a, b = group_teams[i], group_teams[j]
-            ga, gb = sim_match(a, b, host_a=(a in HOST_SET), host_b=(b in HOST_SET))
+            res = played.get(frozenset((NAME_TO_SLUG[a], NAME_TO_SLUG[b]))) if played else None
+            if res is not None:
+                ga, gb = res[NAME_TO_SLUG[a]], res[NAME_TO_SLUG[b]]
+            else:
+                ga, gb = sim_match(a, b, host_a=(a in HOST_SET), host_b=(b in HOST_SET))
             stats[a]["gf"] += ga; stats[a]["ga"] += gb; stats[a]["gd"] += (ga - gb)
             stats[b]["gf"] += gb; stats[b]["ga"] += ga; stats[b]["gd"] += (gb - ga)
             if ga > gb:
@@ -110,14 +129,18 @@ def sim_group(group_teams: List[str]) -> Tuple[List[str], Dict[str, dict]]:
     return ranked, stats
 
 
-def run_one_tournament() -> Dict[str, int]:
-    """Returns dict: team → furthest stage (0=group .. 6=champion)."""
+def run_one_tournament(played: Optional[PlayedResults] = None) -> Dict[str, int]:
+    """Returns dict: team → furthest stage (0=group .. 6=champion).
+
+    `played` (from wc.results.load_played_results) banks completed group results;
+    None re-simulates the full group stage (pre-tournament / standalone behaviour).
+    """
     stage = {t: 0 for t in ALL_TEAMS}
     advancers: List[str] = []
     third_pool: List[Tuple[Tuple[int, int, int], str]] = []
 
     for letter, teams in GROUPS.items():
-        ranked, stats = sim_group(teams)
+        ranked, stats = sim_group(teams, played)
         for t in ranked[:2]:
             stage[t] = 1
             advancers.append(t)

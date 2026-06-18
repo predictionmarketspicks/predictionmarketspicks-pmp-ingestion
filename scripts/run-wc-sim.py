@@ -9,14 +9,22 @@ Inputs (env):
   WC_SIM_ITERATIONS                optional override (default 10000)
 
 Outputs (DB):
-  world_cup_simulation             ~648 rows under new sim_run_id v4_<TS> (288 team + 360 match)
+  world_cup_simulation             ~648 rows under new sim_run_id v5_<TS> (288 team + 360 match)
   world_cup_player_simulation      25 rows
   world_cup_simulation_latest      matview refreshed
   world_cup_player_simulation_latest matview refreshed
 
-Validation gate:
-  - Spain/France/England/Brazil/Argentina/Germany champion% within ±0.5pp of seed
+v5 (2026-06-18): the group-stage Monte Carlo now CONDITIONS on completed match
+results loaded from the site's data/wc2026-matches.json (via wc.results). Banked
+points/GD/GF are facts; only remaining fixtures are simulated. This kills the
+stale-sim mispricings documented in
+prediction-marketspicks/handoffs/WC_MISPRICINGS_STALE_SIM_2026-06-18.md. Team
+strength ratings (teams.py) are unchanged — we condition on deterministic state,
+not on re-estimating strength from one game.
+
+Validation gate (v5 — structural, no longer seed-reproduction):
   - All 48 champion% sum to 100 ± 0.5
+  - Per team, advance ≥ reach_r16 ≥ reach_qf ≥ reach_sf ≥ reach_final ≥ champion
   - Match H+D+A sums to 100 ± 1 per match
   - 25 player rows present, no nulls in required columns
   Failure → Discord alert + sys.exit(1)
@@ -25,8 +33,12 @@ CLI:
   python scripts/run-wc-sim.py                            full run, write to DB
   python scripts/run-wc-sim.py --validate-only            validate, no DB writes
   python scripts/run-wc-sim.py --iterations 1000          fast smoke
-  python scripts/run-wc-sim.py --seed 42                  override RNG seed (default 42 for reproducibility)
+  python scripts/run-wc-sim.py --seed 42                  override RNG seed (default 42)
   python scripts/run-wc-sim.py --no-backdrop              skip market backdrop attach
+  python scripts/run-wc-sim.py --no-results              ignore completed results (full re-sim)
+  python scripts/run-wc-sim.py --require-results          fail if 0 results load (tournament safety)
+  python scripts/run-wc-sim.py --matches-source URL|PATH override results source
+  python scripts/run-wc-sim.py --dump-json out.json       write rows to file, skip DB
 """
 from __future__ import annotations
 
@@ -47,6 +59,7 @@ from wc.player_model import project_all_players                          # noqa:
 from wc.teams import NAME_TO_SLUG                                        # noqa: E402
 from wc.validation import validate_all                                   # noqa: E402
 from wc.notify import discord_alert                                      # noqa: E402
+from wc.results import load_played_results, describe as describe_results  # noqa: E402
 
 
 # ── Probability → American odds conversion ────────────────────────────────────
@@ -144,22 +157,55 @@ def main() -> int:
                         help="RNG seed (42 reproduces v2_april_2026_seed exactly)")
     parser.add_argument("--no-backdrop", action="store_true",
                         help="Skip market backdrop fetch (faster local runs)")
+    parser.add_argument("--no-results", action="store_true",
+                        help="Ignore completed results — re-simulate the full group stage")
+    parser.add_argument("--require-results", action="store_true",
+                        default=os.environ.get("WC_SIM_REQUIRE_RESULTS") == "1",
+                        help="Fail if zero completed results load (tournament safety)")
+    parser.add_argument("--matches-source", default=None,
+                        help="Override results source (URL or file path)")
+    parser.add_argument("--dump-json", default=None,
+                        help="Write {team_rows,match_rows,player_rows} to this file; skip DB")
     args = parser.parse_args()
 
-    sim_run_id = f"v4_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    sim_run_id = f"v5_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     ran_at_iso = datetime.now(timezone.utc).isoformat()
     print(f"[wc-sim] starting run {sim_run_id} ({args.iterations} iterations, seed={args.seed})")
 
-    # 1. Monte Carlo team progression
+    # 0. Load completed group-stage results to condition the group MC on.
+    played = {}
+    if not args.no_results:
+        try:
+            played = load_played_results(args.matches_source)
+        except Exception as e:
+            msg = f"WC sim {sim_run_id}: results load FAILED: {e!s}"
+            print(msg, file=sys.stderr)
+            if args.require_results:
+                if not args.validate_only and not args.dump_json:
+                    discord_alert(msg, sim_run_id=sim_run_id, failures=[str(e)])
+                return 1
+            print("[wc-sim] proceeding without results (full re-sim)", file=sys.stderr)
+        print(f"[wc-sim] {describe_results(played)}")
+        if args.require_results and len(played) == 0:
+            msg = (f"WC sim {sim_run_id}: --require-results set but 0 completed "
+                   f"results loaded — refusing to publish a stale full re-sim")
+            print(msg, file=sys.stderr)
+            if not args.validate_only and not args.dump_json:
+                discord_alert(msg, sim_run_id=sim_run_id, failures=["0 results loaded"])
+            return 1
+    else:
+        print("[wc-sim] --no-results: simulating full group stage from priors")
+
+    # 1. Monte Carlo team progression (conditioned on `played`)
     t0 = time.time()
     random.seed(args.seed)
-    stages = [run_one_tournament() for _ in range(args.iterations)]
+    stages = [run_one_tournament(played) for _ in range(args.iterations)]
     agg = aggregate_team_progression(stages)
     print(f"[wc-sim] team MC done in {time.time() - t0:.1f}s")
 
-    # 2. Market backdrop (skipped in --validate-only or --no-backdrop)
+    # 2. Market backdrop (skipped in --validate-only, --no-backdrop, --dump-json)
     backdrop = {}
-    if not args.validate_only and not args.no_backdrop:
+    if not args.validate_only and not args.no_backdrop and not args.dump_json:
         try:
             from wc.markets import fetch_market_backdrop
             backdrop = fetch_market_backdrop()
@@ -185,9 +231,24 @@ def main() -> int:
             discord_alert(msg, sim_run_id=sim_run_id, failures=result["failures"])
         return 1
 
-    # 5. Write (skip in validate-only)
+    # 5. Write (skip in validate-only / dump-json)
     if args.validate_only:
         print("[wc-sim] --validate-only: no DB writes")
+        return 0
+
+    if args.dump_json:
+        import json as _json
+        payload = {
+            "sim_run_id": sim_run_id,
+            "ran_at": ran_at_iso,
+            "played_count": len(played),
+            "team_rows": team_rows,
+            "match_rows": match_rows,
+            "player_rows": player_rows,
+        }
+        with open(args.dump_json, "w", encoding="utf-8") as fh:
+            _json.dump(payload, fh)
+        print(f"[wc-sim] --dump-json: wrote {args.dump_json} (no DB)")
         return 0
 
     from wc.supabase_writer import insert_simulation_rows, insert_player_rows, refresh_matviews

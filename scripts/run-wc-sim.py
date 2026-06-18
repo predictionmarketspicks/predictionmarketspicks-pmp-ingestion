@@ -60,6 +60,7 @@ from wc.teams import NAME_TO_SLUG                                        # noqa:
 from wc.validation import validate_all                                   # noqa: E402
 from wc.notify import discord_alert                                      # noqa: E402
 from wc.results import load_played_results, describe as describe_results  # noqa: E402
+from wc.form import adjusted_ratings, describe_top_movers                 # noqa: E402
 
 
 # ── Probability → American odds conversion ────────────────────────────────────
@@ -108,10 +109,14 @@ def build_team_rows(sim_run_id: str, agg: dict, ran_at_iso: str, backdrop) -> Li
     return rows
 
 
-def build_match_rows(sim_run_id: str, ran_at_iso: str, backdrop) -> List[dict]:
-    """Convert analytical match probabilities into 360 sim rows (72 × 5)."""
+def build_match_rows(sim_run_id: str, ran_at_iso: str, backdrop, ratings=None) -> List[dict]:
+    """Convert analytical match probabilities into 360 sim rows (72 × 5).
+
+    `ratings`: form-adjusted strength (wc.form) so per-match predictions on the
+    fixture pages track results; None = frozen pre-tournament TEAMS.
+    """
     from wc.markets import attach_to_metadata
-    matches = all_group_matches()
+    matches = all_group_matches(ratings)
     rows = []
     for m in matches:
         base_md = {
@@ -159,6 +164,8 @@ def main() -> int:
                         help="Skip market backdrop fetch (faster local runs)")
     parser.add_argument("--no-results", action="store_true",
                         help="Ignore completed results — re-simulate the full group stage")
+    parser.add_argument("--no-form", action="store_true",
+                        help="Skip form-adjusted ratings (use frozen pre-tournament TEAMS)")
     parser.add_argument("--require-results", action="store_true",
                         default=os.environ.get("WC_SIM_REQUIRE_RESULTS") == "1",
                         help="Fail if zero completed results load (tournament safety)")
@@ -196,10 +203,19 @@ def main() -> int:
     else:
         print("[wc-sim] --no-results: simulating full group stage from priors")
 
-    # 1. Monte Carlo team progression (conditioned on `played`)
+    # 0b. Form-adjusted ratings from completed results (applied to UNPLAYED
+    # fixtures in both the grid and the progression sim). Base TEAMS is unchanged.
+    ratings = None
+    if played and not args.no_form:
+        ratings = adjusted_ratings(played)
+        print(f"[wc-sim] form movers: {describe_top_movers(played)}")
+    elif args.no_form:
+        print("[wc-sim] --no-form: using frozen pre-tournament ratings")
+
+    # 1. Monte Carlo team progression (conditioned on `played`, form-adjusted)
     t0 = time.time()
     random.seed(args.seed)
-    stages = [run_one_tournament(played) for _ in range(args.iterations)]
+    stages = [run_one_tournament(played, ratings) for _ in range(args.iterations)]
     agg = aggregate_team_progression(stages)
     print(f"[wc-sim] team MC done in {time.time() - t0:.1f}s")
 
@@ -214,7 +230,7 @@ def main() -> int:
 
     # 3. Build rows
     team_rows = build_team_rows(sim_run_id, agg, ran_at_iso, backdrop)
-    match_rows = build_match_rows(sim_run_id, ran_at_iso, backdrop)
+    match_rows = build_match_rows(sim_run_id, ran_at_iso, backdrop, ratings)
     player_rows = build_player_rows(sim_run_id, ran_at_iso, stages)
     print(f"[wc-sim] built {len(team_rows)} team rows, {len(match_rows)} match rows, "
           f"{len(player_rows)} player rows")

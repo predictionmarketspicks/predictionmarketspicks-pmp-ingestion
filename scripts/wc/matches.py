@@ -15,6 +15,8 @@ seed-tolerance debate.
 Match entity_id format: match:{group}-MD{matchday}-{HOME_TRI}-{AWAY_TRI}
   e.g. match:I-MD1-FRA-SEN
 """
+from __future__ import annotations
+
 import math
 from typing import Dict, List, Tuple
 
@@ -66,6 +68,7 @@ def match_probs(
     rho: float = DC_RHO,
     home_mult: float = 1.0,
     away_mult: float = 1.0,
+    ratings: Dict[str, tuple] | None = None,
 ) -> Dict[str, float]:
     """Analytical Poisson + Dixon-Coles over an SxS score grid.
 
@@ -76,9 +79,13 @@ def match_probs(
     heat) from venues.match_env; default 1.0 (no adjustment). Applied after
     expected_goals so the base rating model is untouched. See venues.py for the
     containment rationale (analytical path only; champion seed unaffected).
+
+    ratings: optional form-adjusted {name: (off, def)} (wc/form.py). Defaults to
+    the frozen pre-tournament TEAMS table.
     """
-    oa, da = TEAMS[team_a]
-    ob, db = TEAMS[team_b]
+    r = ratings or TEAMS
+    oa, da = r[team_a]
+    ob, db = r[team_b]
     la = expected_goals(oa, db, host_a) * home_mult
     lb = expected_goals(ob, da, host_b) * away_mult
 
@@ -209,8 +216,11 @@ def _matchday_pairs(group_teams: List[str]) -> List[Tuple[int, str, str]]:
     ]
 
 
-def all_group_matches() -> List[dict]:
+def all_group_matches(ratings: Dict[str, tuple] | None = None) -> List[dict]:
     """Returns all 72 group-stage matches with analytical probabilities.
+
+    `ratings`: optional form-adjusted ratings (wc/form.adjusted_ratings); when
+    omitted, uses the frozen pre-tournament TEAMS table.
 
     Each item:
       {
@@ -240,6 +250,7 @@ def all_group_matches() -> List[dict]:
                 host_b=(away in HOST_SET),
                 home_mult=env["home_mult"],
                 away_mult=env["away_mult"],
+                ratings=ratings,
             )
             out.append({
                 "entity_id": entity_id,

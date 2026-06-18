@@ -60,9 +60,11 @@ def sim_match(
     host_a: bool = False,
     host_b: bool = False,
     knockout: bool = False,
+    ratings: Optional[dict] = None,
 ) -> Tuple[int, int]:
-    oa, da = TEAMS[team_a]
-    ob, db = TEAMS[team_b]
+    r = ratings or TEAMS
+    oa, da = r[team_a]
+    ob, db = r[team_b]
     lam_a = expected_goals(oa, db, host_a)
     lam_b = expected_goals(ob, da, host_b)
     ga = poisson(lam_a)
@@ -96,6 +98,7 @@ def sim_match(
 def sim_group(
     group_teams: List[str],
     played: Optional[PlayedResults] = None,
+    ratings: Optional[dict] = None,
 ) -> Tuple[List[str], Dict[str, dict]]:
     """Run the 6 round-robin matches; return (ranked, stats).
 
@@ -113,7 +116,8 @@ def sim_group(
             if res is not None:
                 ga, gb = res[NAME_TO_SLUG[a]], res[NAME_TO_SLUG[b]]
             else:
-                ga, gb = sim_match(a, b, host_a=(a in HOST_SET), host_b=(b in HOST_SET))
+                ga, gb = sim_match(a, b, host_a=(a in HOST_SET), host_b=(b in HOST_SET),
+                                   ratings=ratings)
             stats[a]["gf"] += ga; stats[a]["ga"] += gb; stats[a]["gd"] += (ga - gb)
             stats[b]["gf"] += gb; stats[b]["ga"] += ga; stats[b]["gd"] += (gb - ga)
             if ga > gb:
@@ -129,18 +133,23 @@ def sim_group(
     return ranked, stats
 
 
-def run_one_tournament(played: Optional[PlayedResults] = None) -> Dict[str, int]:
+def run_one_tournament(
+    played: Optional[PlayedResults] = None,
+    ratings: Optional[dict] = None,
+) -> Dict[str, int]:
     """Returns dict: team → furthest stage (0=group .. 6=champion).
 
     `played` (from wc.results.load_played_results) banks completed group results;
     None re-simulates the full group stage (pre-tournament / standalone behaviour).
+    `ratings` (from wc.form.adjusted_ratings) is form-adjusted strength applied to
+    all UNPLAYED fixtures (group + knockout); None uses the frozen TEAMS table.
     """
     stage = {t: 0 for t in ALL_TEAMS}
     advancers: List[str] = []
     third_pool: List[Tuple[Tuple[int, int, int], str]] = []
 
     for letter, teams in GROUPS.items():
-        ranked, stats = sim_group(teams, played)
+        ranked, stats = sim_group(teams, played, ratings)
         for t in ranked[:2]:
             stage[t] = 1
             advancers.append(t)
@@ -163,7 +172,7 @@ def run_one_tournament(played: Optional[PlayedResults] = None) -> Dict[str, int]
     def run_round(pairs, next_stage):
         winners = []
         for a, b in pairs:
-            ga, gb = sim_match(a, b, knockout=True)
+            ga, gb = sim_match(a, b, knockout=True, ratings=ratings)
             w = a if ga > gb else b
             winners.append(w)
             stage[w] = next_stage

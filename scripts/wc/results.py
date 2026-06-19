@@ -31,11 +31,18 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
-from typing import Dict, FrozenSet, List, Tuple
+import urllib.error
+from typing import Dict, FrozenSet, List, Set, Tuple
 
 from .teams import NAME_TO_SLUG
 
 DEFAULT_MATCHES_URL = "https://predictionmarketspicks.com/api/wc/matches"
+
+# Valid model slugs (the python namespace). The world_cup_results table stores
+# wc-shared.js slugs, which are reconciled to be identical to these (hard gate
+# in the autofeed handoff). We still validate each table slug against this set
+# so a future drift surfaces as a dropped row + warning rather than a phantom.
+VALID_SLUGS: Set[str] = set(NAME_TO_SLUG.values())
 
 # Site display name → model display name, only where the strings differ.
 # Mirrors scripts/export-wc-match-detail.py NAME_ALIAS.
@@ -104,8 +111,8 @@ def _load_raw(source: str | None) -> dict:
     )
 
 
-def load_played_results(source: str | None = None) -> PlayedResults:
-    """Load completed group-stage results, keyed by frozenset of the two slugs.
+def _load_from_json(source: str | None = None) -> PlayedResults:
+    """Load completed group-stage results from the hand-maintained matches JSON.
 
     Only group-stage fixtures (group A-L, matchday 1-3) with a full-time result
     are returned. Knockout fixtures, if/when present, are ignored — the sim only
@@ -131,6 +138,79 @@ def load_played_results(source: str | None = None) -> PlayedResults:
         key = frozenset((home_slug, away_slug))
         played[key] = {home_slug: int(hs), away_slug: int(as_)}
     return played
+
+
+def _load_from_results_table() -> PlayedResults:
+    """Load FT rows from the world_cup_results Supabase table (autofeed Phase 4).
+
+    This is the fast path that needs no JSON commit + redeploy: the Fly engine
+    persists ESPN finals here within one 30-min scan. Never raises — any failure
+    (no env, network, bad shape) returns {} so the JSON path still satisfies
+    --require-results. Slugs are validated against VALID_SLUGS; an unknown slug
+    drops that row + warns rather than seeding a phantom.
+    """
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_KEY")
+    if not url or not key:
+        print("[wc-sim] results table skipped: SUPABASE_URL/SERVICE_KEY unset")
+        return {}
+
+    endpoint = (
+        f"{url.rstrip('/')}/rest/v1/world_cup_results"
+        "?status=eq.FT&select=match_id,home_slug,away_slug,home_score,away_score"
+    )
+    req = urllib.request.Request(
+        endpoint,
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Accept": "application/json",
+            "User-Agent": "pmp-ingestion-wc-sim/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            rows = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:  # noqa: BLE001 — table is a best-effort overlay
+        print(f"[wc-sim] results table read failed (non-fatal): {e!s}")
+        return {}
+
+    played: PlayedResults = {}
+    skipped = 0
+    for r in rows or []:
+        hs, as_ = r.get("home_score"), r.get("away_score")
+        h_slug, a_slug = r.get("home_slug"), r.get("away_slug")
+        if hs is None or as_ is None or not h_slug or not a_slug:
+            skipped += 1
+            continue
+        if h_slug not in VALID_SLUGS or a_slug not in VALID_SLUGS:
+            print(
+                f"[wc-sim] results table: unknown slug in {r.get('match_id')!r} "
+                f"({h_slug!r} vs {a_slug!r}) — dropped (slug-namespace drift?)"
+            )
+            skipped += 1
+            continue
+        key = frozenset((h_slug, a_slug))
+        played[key] = {h_slug: int(hs), a_slug: int(as_)}
+    print(f"[wc-sim] results table: {len(played)} FT rows loaded ({skipped} skipped)")
+    return played
+
+
+def load_played_results(source: str | None = None) -> PlayedResults:
+    """Completed group-stage results, table-first with JSON authoritative.
+
+    Precedence (autofeed handoff):
+      1. world_cup_results table (fast path; no redeploy needed).
+      2. hand-maintained matches JSON.
+    On key conflict the JSON wins — a human verified + committed it, and the
+    table only ever fills the gap until that commit lands. Keyed by frozenset of
+    the two team slugs, so home/away ordering between the two sources is moot.
+    """
+    table = _load_from_results_table()  # {} on any failure
+    json_played = _load_from_json(source)
+    merged: PlayedResults = dict(table)
+    merged.update(json_played)  # JSON overrides table on conflict
+    return merged
 
 
 def describe(played: PlayedResults) -> str:

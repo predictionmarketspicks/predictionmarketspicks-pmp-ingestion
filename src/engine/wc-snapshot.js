@@ -22,6 +22,7 @@ import { insertWorldCupMarketSnapshots, refreshWcMarketMatviews } from '../deliv
 import { recordTick, registerFeed } from '../observability/health.js';
 import { runWcMispricingsOnce, getWcMispricingsState } from './wc-mispricings.js';
 import { runWcPayloadsOnce, getWcPayloadsState } from './wc-payloads.js';
+import { persistWcFtResults, dispatchSimRerun } from './wc-results-writer.js';
 
 const SNAPSHOT_INTERVAL_MS = Number(process.env.WC_SNAPSHOT_INTERVAL_MS || 30 * 60 * 1000);
 const BOOTSTRAP_DELAY_MS = Number(process.env.WC_BOOTSTRAP_DELAY_MS || 30_000);
@@ -37,6 +38,10 @@ const state = {
   // without re-fetching. Refresh cadence matches the writer (30min).
   espnGames: [],
   espnUpdatedAt: null,
+  // Result autofeed — last time we persisted FT rows + which matches were
+  // newly settled on that scan (surfaced via /health).
+  lastResultWriteAt: null,
+  lastNewlySettled: [],
   perFeed: {
     kalshi: { rows: 0, lastError: null },
     polymarket: { rows: 0, lastError: null },
@@ -76,6 +81,22 @@ export async function runWcSnapshotOnce() {
   state.perFeed.espn.games = espnGames.length;
   state.espnGames = espnGames;
   state.espnUpdatedAt = new Date().toISOString();
+
+  // Result autofeed (handoffs/WC_RESULT_AUTOFEED_2026-06-18.md): persist any
+  // completed ESPN games to world_cup_results, and fire a sim re-run for
+  // newly-settled matches. Non-fatal — a failure here must never block the
+  // market snapshot; the next 30-min scan retries the idempotent upsert.
+  try {
+    const resultWrite = await persistWcFtResults(espnGames);
+    state.lastResultWriteAt = new Date().toISOString();
+    state.lastNewlySettled = resultWrite.newlySettled;
+    if (resultWrite.newlySettled.length) {
+      console.log(`[wc-snapshot] newly-settled FT: ${resultWrite.newlySettled.join(', ')}`);
+      await dispatchSimRerun(resultWrite.newlySettled);
+    }
+  } catch (err) {
+    console.error('[wc-snapshot] result persist failed:', err?.message || err);
+  }
 
   const allRows = [...kalshiRows, ...polyRows];
 
@@ -169,6 +190,8 @@ export function getWcSnapshotState() {
     lastRunAt: state.lastRunAt,
     lastErrorAt: state.lastErrorAt,
     lastError: state.lastError,
+    lastResultWriteAt: state.lastResultWriteAt,
+    lastNewlySettled: state.lastNewlySettled,
     perFeed: state.perFeed,
   };
 }

@@ -2,7 +2,14 @@ name: WC Sim Nightly
 
 on:
   schedule:
-    - cron: '0 6 * * *'   # 02:00 ET — well before any markets meaningfully move
+    - cron: '0 6 * * *'   # 02:00 ET — nightly baseline (off-tournament cadence)
+    # Result autofeed (handoffs/WC_RESULT_AUTOFEED_2026-06-18.md) — collapse
+    # Lag B during the group stage. Phase 2 lands ESPN finals in
+    # world_cup_results within one 30-min scan; this hourly re-run reconditions
+    # the sim within the hour, so the mispricing phantom can't survive long.
+    # ~3 min/run × hourly × group stage ≈ negligible Actions minutes.
+    # REVERT after the group stage (delete this line) back to nightly-only.
+    - cron: '0 * * * *'   # hourly — group-stage window only
   workflow_dispatch:
     inputs:
       validate_only:
@@ -13,6 +20,19 @@ on:
         description: 'Monte Carlo iterations (override default 10000)'
         type: string
         default: '10000'
+  # Event-driven path (handoffs/WC_RESULT_AUTOFEED_2026-06-18.md): the Fly engine
+  # CAN fire this on a newly-settled FT result for near-real-time re-runs. It is
+  # DORMANT by choice — no GH_DISPATCH_TOKEN is set on the engine, so the
+  # dispatch no-ops and the hourly cron above is the active Lag-B collapse. Set
+  # the Fly secret later to upgrade to event-driven with zero code changes.
+  repository_dispatch:
+    types: [wc-result-settled]
+
+# Collapse rapid-fire settlements (multiple matches finishing close together)
+# into a queue instead of stacking parallel sims. Let an in-flight sim finish.
+concurrency:
+  group: wc-sim
+  cancel-in-progress: false
 
 jobs:
   run-sim:

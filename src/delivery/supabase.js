@@ -393,6 +393,49 @@ export async function upsertWidgetPayloads(slug, envelope, variants = ['hero', '
   return { count: rows.length };
 }
 
+// ---------- world_cup_results (Result Autofeed Phase 2) ----------
+//
+// Durable home for completed group-stage scores from the ESPN scan. Closes
+// "Lag A" — a settled match lands in the DB within one 30-min scan instead of
+// waiting on a human JSON commit + redeploy. Score + status only; the
+// hand-maintained JSON stays authoritative for editorial and wins on conflict
+// at read time (scripts/wc/results.py + the site overlay).
+//
+// handoffs/WC_RESULT_AUTOFEED_2026-06-18.md.
+
+// Which of these match_ids are ALREADY FT in the table? Used to debounce the
+// sim-rerun dispatch so only newly-settled matches fire it. On query failure we
+// return an empty Set → the upsert is still idempotent, but the dispatch may
+// fire an extra time (harmless; the workflow is concurrency-collapsed).
+export async function fetchExistingWcFtIds(ids) {
+  if (!ids || ids.length === 0) return new Set();
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('world_cup_results')
+    .select('match_id')
+    .in('match_id', ids)
+    .eq('status', 'FT');
+  if (error) {
+    console.warn('[world_cup_results] existing-FT query failed:', error.message);
+    return new Set();
+  }
+  return new Set((data ?? []).map((r) => r.match_id));
+}
+
+// Idempotent upsert keyed on match_id. settled_at is intentionally omitted from
+// the row so it keeps its original insert default on every later re-upsert
+// (the first-settle timestamp must not drift). updated_at is bumped each write.
+export async function upsertWcResults(rows) {
+  if (!rows || rows.length === 0) return { count: 0 };
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('world_cup_results')
+    .upsert(rows, { onConflict: 'match_id' })
+    .select('match_id');
+  if (error) throw new Error(`world_cup_results upsert: ${error.message}`);
+  return { count: data?.length ?? 0 };
+}
+
 // Write feed_performance rows for backtest scoring. feed_type chosen by caller
 // ('market_movers', 'commodity_edge', 'world_cup'). Errors are logged but not
 // thrown — a missed performance row doesn't block the user-facing Discord

@@ -17,12 +17,28 @@ Match entity_id format: match:{group}-MD{matchday}-{HOME_TRI}-{AWAY_TRI}
 """
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 from typing import Dict, List, Tuple
 
-from .teams import TEAMS, GROUPS, NAME_TO_SLUG, NAME_TO_TRI, HOST_SET
+from .teams import TEAMS, NAME_TO_SLUG, NAME_TO_TRI, HOST_SET
 from .simulator import expected_goals
 from .venues import match_env
+
+# Authoritative fixture list — the real FIFA published schedule, with the correct
+# matchday assignment AND home/away orientation for every group-stage match.
+# Fixtures are read FROM this file, never derived from a positional round-robin
+# pattern: GROUPS lists teams in pot/display order, NOT FIFA's intra-group draw
+# position (seed 1-4), so the generic "MD2 = T1vT3, T2vT4" pattern mispairs every
+# group whose listing differs from the draw order. That bug emitted Group E MD2
+# as GER-ECU / CIV-CUW instead of the real GER-CIV / ECU-CUW (and was wrong across
+# most groups for MD2/MD3). Source of truth: data/wc-2026-schedule.json.
+_SCHEDULE_PATH = Path(__file__).resolve().parents[2] / "data" / "wc-2026-schedule.json"
+
+# slug → display name (reverse of NAME_TO_SLUG) to resolve the schedule's
+# slug-keyed fixtures back to the model's team-name keys.
+SLUG_TO_NAME: Dict[str, str] = {slug: name for name, slug in NAME_TO_SLUG.items()}
 
 # Score grid cap. Goals 0..SCORE_GRID-1 per team. 15x15 captures >99.999% of mass
 # for our LAM_CAP=5; smaller grids leak ~5% on Brazil-Haiti / Spain-Cape Verde
@@ -201,19 +217,35 @@ def match_grid_detail(
     }
 
 
-def _matchday_pairs(group_teams: List[str]) -> List[Tuple[int, str, str]]:
-    """Return [(matchday, home, away), ...] following standard FIFA group order:
-        MD1: T1 vs T2, T3 vs T4
-        MD2: T1 vs T3, T2 vs T4
-        MD3: T1 vs T4, T2 vs T3
-    Matches the seed's MD layout (verified against seed-wc-simulation.sql).
+def _load_schedule_fixtures() -> Dict[str, List[Tuple[int, str, str]]]:
+    """Read the published group-stage schedule → {group: [(matchday, home, away)]}.
+
+    home/away are model team-NAMES (resolved from the schedule's slugs via
+    SLUG_TO_NAME), matching the keys match_probs/TEAMS expect. Fixtures stay in
+    schedule order. Asserts full, well-formed coverage (72 matches, 6 per group,
+    each matchday exactly twice) so a truncated or mis-edited schedule fails loudly
+    here instead of silently dropping or mispairing fixtures downstream.
     """
-    t1, t2, t3, t4 = group_teams
-    return [
-        (1, t1, t2), (1, t3, t4),
-        (2, t1, t3), (2, t2, t4),
-        (3, t1, t4), (3, t2, t3),
-    ]
+    with open(_SCHEDULE_PATH, encoding="utf-8") as fh:
+        rows = json.load(fh)["group_stage"]
+
+    by_group: Dict[str, List[Tuple[int, str, str]]] = {}
+    for r in rows:
+        home = SLUG_TO_NAME[r["home"]]
+        away = SLUG_TO_NAME[r["away"]]
+        by_group.setdefault(r["group"], []).append((int(r["matchday"]), home, away))
+
+    total = sum(len(v) for v in by_group.values())
+    assert total == 72, f"expected 72 group fixtures in schedule, got {total}"
+    for letter, fx in by_group.items():
+        assert len(fx) == 6, f"group {letter}: expected 6 fixtures, got {len(fx)}"
+        mds = sorted(md for md, _, _ in fx)
+        assert mds == [1, 1, 2, 2, 3, 3], f"group {letter}: bad matchday spread {mds}"
+    return by_group
+
+
+# Loaded once at import; the asserts above are the fixture-integrity gate.
+_FIXTURES_BY_GROUP: Dict[str, List[Tuple[int, str, str]]] = _load_schedule_fixtures()
 
 
 def all_group_matches(ratings: Dict[str, tuple] | None = None) -> List[dict]:
@@ -235,8 +267,8 @@ def all_group_matches(ratings: Dict[str, tuple] | None = None) -> List[dict]:
       }
     """
     out = []
-    for letter, teams in GROUPS.items():
-        for md, home, away in _matchday_pairs(teams):
+    for letter, fixtures in _FIXTURES_BY_GROUP.items():
+        for md, home, away in fixtures:
             home_slug = NAME_TO_SLUG[home]
             away_slug = NAME_TO_SLUG[away]
             entity_id = (

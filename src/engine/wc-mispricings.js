@@ -30,6 +30,7 @@ import {
 import { postWcMispricingAlert } from '../delivery/wc-discord.js';
 import { lookupTeamBySlug } from '../feeds/wc-shared.js';
 import { recordTick } from '../observability/health.js';
+import { readFileSync } from 'node:fs';
 
 // Tier thresholds (mirror Weather Edge / commodity edge convention but tuned
 // for tournament markets: long-tail outright probabilities are noisier than
@@ -132,12 +133,13 @@ export function computeMispricing({ sim, marketPick }) {
   };
 }
 
-// Group market rows by (entity_id, kind) so selectDisplayPlatform sees the
-// full per-(entity, kind) cross-platform set.
+// Group market rows by canonical joinKey so selectDisplayPlatform sees the full
+// cross-platform set for one outcome. Rows whose code can't resolve are dropped.
 function groupMarketRows(marketRows) {
   const byKey = new Map();
   for (const row of marketRows) {
-    const key = `${row.entity_id}|${row.kind}`;
+    const key = joinKey(row.entity_id, row.kind);
+    if (!key) continue;
     if (!byKey.has(key)) byKey.set(key, []);
     byKey.get(key).push(row);
   }
@@ -197,19 +199,101 @@ const CODE_TO_SLUG = {
   ARG: 'argentina', AUT: 'austria', ALG: 'algeria', JOR: 'jordan',
   POR: 'portugal', COL: 'colombia', UZB: 'uzbekistan', COD: 'dr-congo',
   ENG: 'england', CRO: 'croatia', GHA: 'ghana', PAN: 'panama',
+  // Kalshi alpha-3 variants — world_cup_market_latest entity_ids use the Kalshi
+  // ticker codes, which diverge from our NAME_TO_TRI for a handful of teams
+  // (Algeria, Iran, Haiti, Morocco, Croatia, Germany, Netherlands, England,
+  // Paraguay, Portugal, Saudi Arabia, South Africa, Switzerland, Uruguay). Both
+  // vocabularies must collapse to the same slug for the match join to fire.
+  DZA: 'algeria', IRI: 'iran', HTI: 'haiti', MAR: 'morocco', HRV: 'croatia',
+  DEU: 'germany', NLD: 'netherlands', GBR: 'england', PRY: 'paraguay',
+  PRT: 'portugal', SAU: 'saudi-arabia', ZAF: 'south-africa', CHE: 'switzerland',
+  URY: 'uruguay',
 };
+
+// ── Match-entity join normalization ───────────────────────────────────────────
+// Sim and market both describe the same fixtures but key them differently: sim
+// rows are `match:{group}-MD{n}-{simCode}-{simCode}` (e.g. match:E-MD2-GER-CIV)
+// while market rows are `match:{kalshiCode}-{kalshiCode}` (e.g. match:GER-CIV) —
+// no group/MD prefix, and Kalshi's code variants. A strict entity_id|kind join
+// therefore never matched and match-level mispricings never fired. We normalize
+// BOTH sides to a canonical, direction-proof key built from the sorted slug pair
+// + the *outcome team* (not the home/away position), so a market ticker that
+// happens to list the teams in the opposite order can never invert the edge sign.
+const KICKOFF_BY_PAIR = (() => {
+  const m = new Map();
+  try {
+    const sched = JSON.parse(
+      readFileSync(new URL('../../data/wc-2026-schedule.json', import.meta.url), 'utf8'),
+    );
+    for (const f of sched.group_stage || []) {
+      const pair = [f.home, f.away].sort().join('|');
+      m.set(pair, Date.parse(f.kickoff_utc));
+    }
+  } catch (err) {
+    console.warn('[wc-mispricings] kickoff schedule load failed:', err?.message || err);
+  }
+  return m;
+})();
+
+// 'match:E-MD2-GER-CIV' | 'match:GER-CIV' → { home: slug, away: slug } or null.
+function matchPairSlugs(entityId) {
+  if (!entityId || !entityId.startsWith('match:')) return null;
+  const body = entityId.slice('match:'.length);
+  const m = body.match(/^(?:[A-L]-MD[1-3]-)?([A-Za-z0-9]{2,3})-([A-Za-z0-9]{2,3})$/);
+  if (!m) return null;
+  const home = CODE_TO_SLUG[m[1].toUpperCase()];
+  const away = CODE_TO_SLUG[m[2].toUpperCase()];
+  if (!home || !away) return null;
+  return { home, away };
+}
+
+// Canonical key shared by sim + market rows. team:/player: keep their exact
+// id (those already agree on both sides); match: rows collapse to the
+// sorted-pair + outcome-team key. Returns null when a match code can't resolve.
+function joinKey(entityId, kind) {
+  if (!entityId) return null;
+  if (!entityId.startsWith('match:')) return `${entityId}|${kind}`;
+  const p = matchPairSlugs(entityId);
+  if (!p) return null;
+  const pair = [p.home, p.away].sort().join('|');
+  let outcome;
+  if (kind === 'match_winner_home') outcome = `win:${p.home}`;
+  else if (kind === 'match_winner_away') outcome = `win:${p.away}`;
+  else if (kind === 'match_winner_draw') outcome = 'draw';
+  else outcome = kind; // symmetric markets (match_o25 / match_btts)
+  return `match|${pair}|${outcome}`;
+}
+
+// Kickoff (epoch ms) for a match entity, or null if unknown (e.g. knockout
+// fixtures not in the group-stage schedule).
+function kickoffMsFor(entityId) {
+  const p = matchPairSlugs(entityId);
+  if (!p) return null;
+  return KICKOFF_BY_PAIR.get([p.home, p.away].sort().join('|')) ?? null;
+}
 
 // Returns ALL mispricing rows (any tier) computed from the latest sim ×
 // market snapshot. The orchestrator separately decides which to alert on.
-export function computeAllMispricings({ simRows, marketRows }) {
+export function computeAllMispricings({ simRows, marketRows, now = Date.now() }) {
   const simByKey = new Map();
-  for (const s of simRows) simByKey.set(`${s.entity_id}|${s.kind}`, s);
+  for (const s of simRows) {
+    const key = joinKey(s.entity_id, s.kind);
+    if (key) simByKey.set(key, s);
+  }
   const grouped = groupMarketRows(marketRows);
 
   const out = [];
   for (const [key, rows] of grouped) {
     const sim = simByKey.get(key);
     if (!sim) continue;
+    // Phantom-edge guard: sim probabilities are pre-game, so a match that has
+    // already kicked off (or finished) must not surface a stale pre-game edge.
+    // Only applies to match entities with a known kickoff; team/player and
+    // unscheduled fixtures are unaffected.
+    if (sim.entity_id.startsWith('match:')) {
+      const ko = kickoffMsFor(sim.entity_id);
+      if (ko !== null && now >= ko) continue;
+    }
     const pick = selectDisplayPlatform(rows);
     if (!pick) continue;
     const row = computeMispricing({ sim, marketPick: pick });
@@ -376,4 +460,7 @@ export const __test__ = {
   prettyEntity,
   wcMispricingAlertKey,
   groupMarketRows,
+  joinKey,
+  matchPairSlugs,
+  kickoffMsFor,
 };

@@ -13,6 +13,9 @@ const {
   tierFor,
   prettyEntity,
   wcMispricingAlertKey,
+  joinKey,
+  matchPairSlugs,
+  kickoffMsFor,
 } = __test__;
 
 describe('tierFor', () => {
@@ -158,6 +161,86 @@ describe('computeAllMispricings', () => {
     expect(out.length).toBe(1);
     expect(out[0].entity_id).toBe('team:france');
     expect(out[0].tier).toBe('STRONG');
+  });
+});
+
+describe('match-entity join normalization', () => {
+  // Real group-stage kickoffs (data/wc-2026-schedule.json):
+  //   E-MD2 GER vs CIV → 2026-06-20T20:00:00Z
+  //   J-MD1 ARG vs ALG → 2026-06-17T01:00:00Z
+  const BEFORE_GERCIV = Date.parse('2026-06-20T10:00:00Z');
+  const AFTER_GERCIV = Date.parse('2026-06-20T21:00:00Z');
+
+  it('matchPairSlugs strips the group/MD prefix and maps both code vocabularies', () => {
+    expect(matchPairSlugs('match:E-MD2-GER-CIV')).toEqual({ home: 'germany', away: 'cote-divoire' });
+    expect(matchPairSlugs('match:GER-CIV')).toEqual({ home: 'germany', away: 'cote-divoire' });
+    // Kalshi code variant (DZA) resolves to the same slug as the sim code (ALG).
+    expect(matchPairSlugs('match:ARG-DZA')).toEqual({ home: 'argentina', away: 'algeria' });
+    expect(matchPairSlugs('team:france')).toBeNull();
+  });
+
+  it('joinKey collapses sim + market match ids to the same outcome-team key', () => {
+    // Sim home-win and a flipped-ticker market away-win both mean "Germany wins".
+    expect(joinKey('match:E-MD2-GER-CIV', 'match_winner_home'))
+      .toBe(joinKey('match:CIV-GER', 'match_winner_away'));
+    // team/player ids keep their exact key.
+    expect(joinKey('team:france', 'champion')).toBe('team:france|champion');
+  });
+
+  it('kickoffMsFor resolves group-stage kickoff from the schedule', () => {
+    expect(kickoffMsFor('match:E-MD2-GER-CIV')).toBe(Date.parse('2026-06-20T20:00:00Z'));
+    expect(kickoffMsFor('match:GER-CIV')).toBe(Date.parse('2026-06-20T20:00:00Z'));
+  });
+
+  it('joins match sim × market across the id-format gap, pre-kickoff', () => {
+    const simRows = [
+      { entity_id: 'match:E-MD2-GER-CIV', kind: 'match_winner_home', sim_run_id: 'r1', sim_pct: 62.8, sim_ran_at: 't' },
+    ];
+    const marketRows = [
+      { entity_id: 'match:GER-CIV', kind: 'match_winner_home', platform: 'kalshi', yes_price_cents: 52, volume_24h: 5000, as_of_age_seconds: 60, ticker_or_id: 'KXWCGAME-26JUN20GERCIV-GER', url: 'x', snapshot_at: 't' },
+    ];
+    const out = computeAllMispricings({ simRows, marketRows, now: BEFORE_GERCIV });
+    expect(out.length).toBe(1);
+    expect(out[0].entity_id).toBe('match:E-MD2-GER-CIV'); // output keeps the sim id
+    expect(out[0].kind).toBe('match_winner_home');
+    expect(out[0].edge_pp).toBeCloseTo(10.8, 5);
+    expect(out[0].tier).toBe('STRONG');
+  });
+
+  it('is direction-proof: a flipped market ticker does not invert the edge sign', () => {
+    const simRows = [
+      { entity_id: 'match:E-MD2-GER-CIV', kind: 'match_winner_home', sim_run_id: 'r1', sim_pct: 62.8, sim_ran_at: 't' },
+    ];
+    // Market lists CIV as home, so "Germany wins" is its away market.
+    const marketRows = [
+      { entity_id: 'match:CIV-GER', kind: 'match_winner_away', platform: 'kalshi', yes_price_cents: 52, volume_24h: 5000, as_of_age_seconds: 60, ticker_or_id: 'KXWCGAME-26JUN20CIVGER-GER', url: 'x', snapshot_at: 't' },
+    ];
+    const out = computeAllMispricings({ simRows, marketRows, now: BEFORE_GERCIV });
+    expect(out.length).toBe(1);
+    expect(out[0].edge_pp).toBeCloseTo(10.8, 5); // 62.8 − 52, NOT inverted
+  });
+
+  it('joins across divergent Kalshi codes (DZA ↔ ALG)', () => {
+    const simRows = [
+      { entity_id: 'match:J-MD1-ARG-ALG', kind: 'match_winner_home', sim_run_id: 'r1', sim_pct: 70.0, sim_ran_at: 't' },
+    ];
+    const marketRows = [
+      { entity_id: 'match:ARG-DZA', kind: 'match_winner_home', platform: 'kalshi', yes_price_cents: 58, volume_24h: 4000, as_of_age_seconds: 60, ticker_or_id: 'KXWCGAME-26JUN17ARGDZA-ARG', url: 'x', snapshot_at: 't' },
+    ];
+    const out = computeAllMispricings({ simRows, marketRows, now: Date.parse('2026-06-16T12:00:00Z') });
+    expect(out.length).toBe(1);
+    expect(out[0].edge_pp).toBeCloseTo(12.0, 5);
+  });
+
+  it('phantom-edge guard: suppresses a match that has already kicked off', () => {
+    const simRows = [
+      { entity_id: 'match:E-MD2-GER-CIV', kind: 'match_winner_home', sim_run_id: 'r1', sim_pct: 62.8, sim_ran_at: 't' },
+    ];
+    const marketRows = [
+      { entity_id: 'match:GER-CIV', kind: 'match_winner_home', platform: 'kalshi', yes_price_cents: 52, volume_24h: 5000, as_of_age_seconds: 60, ticker_or_id: 'KXWCGAME-26JUN20GERCIV-GER', url: 'x', snapshot_at: 't' },
+    ];
+    const out = computeAllMispricings({ simRows, marketRows, now: AFTER_GERCIV });
+    expect(out.length).toBe(0);
   });
 });
 

@@ -1,0 +1,24 @@
+{
+  "season": 2026,
+  "rows": [
+    {
+      "name": "Example Edge Rusher",
+      "position": "ED",
+      "age": 28,
+      "status": "Signed",
+      "team_from": "Cincinnati Bengals",
+      "team_to": "Tennessee Titans",
+      "contract_avg_yr": "$22.5M",
+      "contract_guaranteed": "$48M",
+      "contract_total": "$90M",
+      "contract_proj_avg_yr": "$20M",
+      "war": 1.8,
+      "war_rank": 11,
+      "history": [
+        { "season": 2025, "snaps": 880, "grade": 86.4, "pos_rank": "11/119", "war": 1.8 },
+        { "season": 2024, "snaps": 910, "grade": 83.1, "pos_rank": "18/121", "war": 1.4 },
+        { "season": 2023, "snaps": 760, "grade": 79.0, "pos_rank": "27/118", "war": 0.9 }
+      ]
+    }
+  ]
+}

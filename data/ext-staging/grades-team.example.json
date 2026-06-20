@@ -1,0 +1,25 @@
+{
+  "season": 2025,
+  "rows": [
+    {
+      "team": "Kansas City Chiefs",
+      "week_scope": "REGPO",
+      "pf": 465,
+      "pa": 332,
+      "record": "15-2",
+      "overall": 88.4,
+      "off": 84.1,
+      "pass": 86.0,
+      "pblk": 72.3,
+      "recv": 80.5,
+      "run": 68.9,
+      "rblk": 70.1,
+      "def": 81.2,
+      "rdef": 74.6,
+      "tack": 69.0,
+      "prsh": 83.7,
+      "cov": 79.4,
+      "spec": 65.2
+    }
+  ]
+}

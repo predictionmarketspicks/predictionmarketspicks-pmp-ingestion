@@ -131,20 +131,6 @@ export async function upsertGammaSnapshot({
   return { ok: true, date };
 }
 
-// Phase 2B: insert arb alert rows into arb_alerts. Append-only — each row is a
-// distinct detection event. Cleanup is handled by the cron job that drops rows
-// older than 7 days. Bridge-week safety: rows still write under writer_tag=
-// delayed_test (cheap historical record), but the Pro dashboard reads via
-// Realtime and the <ArbAlerts /> component is feature-flagged off until the
-// engine stabilizes.
-export async function insertArbAlerts(rows) {
-  if (!rows || rows.length === 0) return { count: 0 };
-  const sb = getClient();
-  const { data, error } = await sb.from('arb_alerts').insert(rows).select('id');
-  if (error) throw new Error(`arb_alerts insert: ${error.message}`);
-  return { count: data?.length ?? 0 };
-}
-
 // ---------- posted_alerts (Phase 3) ----------
 //
 // Cross-scanner dedup. Engine + Edge Functions all write the same alert_keys,

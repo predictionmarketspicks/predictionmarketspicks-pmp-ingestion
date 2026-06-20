@@ -22,7 +22,6 @@ import crypto from 'node:crypto';
 import WebSocket from 'ws';
 
 import { setFeedStatus, recordTick } from '../observability/health.js';
-import { getKalshiTickers as getArbKalshiTickers } from '../engine/arb-mappings.js';
 
 const KALSHI_API_BASE = process.env.KALSHI_API_BASE || 'https://api.elections.kalshi.com/trade-api/v2';
 const KALSHI_WS_URL = process.env.KALSHI_WS_URL || 'wss://api.elections.kalshi.com/trade-api/ws/v2';
@@ -168,17 +167,6 @@ async function discoverMarkets() {
       console.warn(`[kalshi] discover ${series} failed`, err?.message || err);
     }
   }
-
-  // Phase 2B: append explicit per-mapping tickers from the arb registry. These
-  // are subscribed as exact strings (no series-level discovery) — the registry
-  // is the authority on which Fed markets we care about.
-  const seen = new Set(all.map((m) => m.ticker));
-  for (const ticker of getArbKalshiTickers()) {
-    if (seen.has(ticker)) continue;
-    all.push({ ticker, eventTicker: toEventTicker(ticker) });
-    seen.add(ticker);
-  }
-  console.log(`[kalshi] arb mappings appended (${getArbKalshiTickers().length} tickers)`);
 
   if (seeded > 0) {
     // Mark the kalshi feed alive immediately on cold-start so /health doesn't

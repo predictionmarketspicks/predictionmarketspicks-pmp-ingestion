@@ -29,13 +29,18 @@ export function int(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// Percentage → fraction. "62%" → 0.62, "0.62" → 0.62 (already a fraction passes
-// through unchanged when ≤ 1). Anything > 1 is treated as a whole percent.
+// Percentage → fraction. "62%" → 0.62, "0.5%" → 0.005, "0.62" → 0.62 (already a
+// fraction passes through unchanged when ≤ 1).
 export function pct(v) {
+  // An explicit "%" string is unambiguously a whole percent → always /100. This
+  // is the reliable path: it correctly handles sub-1% values ("0.5%" → 0.005,
+  // "-1.0%" → -0.01) that the magnitude heuristic below misreads as fractions.
+  const hasPctSign = typeof v === 'string' && v.includes('%');
   const n = num(v);
   if (n == null) return null;
-  // Whole-percent (incl. negative, e.g. "-9.4%") → fraction; values already in
-  // [-1, 1] pass through unchanged.
+  if (hasPctSign) return n / 100;
+  // Bare number (no "%"): can't tell 0.5 (=0.5%) from 0.5 (=50%), so assume a
+  // value already in [-1, 1] is a fraction and anything larger a whole percent.
   return Math.abs(n) > 1 ? n / 100 : n;
 }
 

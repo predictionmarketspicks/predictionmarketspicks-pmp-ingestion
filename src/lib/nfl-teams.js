@@ -18,19 +18,19 @@ export const NFL_TEAM_CODES = [
 // Each code → the aliases an external feed might use. Codes themselves resolve
 // idempotently. Keys are normalized (lowercased, alnum-only) at build time.
 const ALIASES = {
-  ARI: ['arizona', 'cardinals', 'arizona cardinals', 'crd'],
+  ARI: ['arizona', 'cardinals', 'arizona cardinals', 'crd', 'arz'],
   ATL: ['atlanta', 'falcons', 'atlanta falcons'],
-  BAL: ['baltimore', 'ravens', 'baltimore ravens', 'rav'],
+  BAL: ['baltimore', 'ravens', 'baltimore ravens', 'rav', 'blt'],
   BUF: ['buffalo', 'bills', 'buffalo bills'],
   CAR: ['carolina', 'panthers', 'carolina panthers'],
   CHI: ['chicago', 'bears', 'chicago bears'],
   CIN: ['cincinnati', 'bengals', 'cincinnati bengals'],
-  CLE: ['cleveland', 'browns', 'cleveland browns'],
+  CLE: ['cleveland', 'browns', 'cleveland browns', 'clv'],
   DAL: ['dallas', 'cowboys', 'dallas cowboys'],
   DEN: ['denver', 'broncos', 'denver broncos'],
   DET: ['detroit', 'lions', 'detroit lions'],
   GB: ['green bay', 'packers', 'green bay packers', 'gnb'],
-  HOU: ['houston', 'texans', 'houston texans'],
+  HOU: ['houston', 'texans', 'houston texans', 'hst'],
   IND: ['indianapolis', 'colts', 'indianapolis colts', 'clt'],
   JAX: ['jacksonville', 'jaguars', 'jacksonville jaguars', 'jac'],
   KC: ['kansas city', 'chiefs', 'kansas city chiefs', 'kan'],

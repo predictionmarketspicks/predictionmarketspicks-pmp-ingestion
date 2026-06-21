@@ -1,0 +1,34 @@
+{
+  "season": 2025,
+  "rows": [
+    {
+      "team": "Kansas City Chiefs",
+      "week": 0,
+      "tot_dvoa": "24.1%",
+      "tot_dvoa_rank": 2,
+      "non_adj_voa": "21.6%",
+      "wins": 15,
+      "losses": 2,
+      "last_year_rank": 4,
+      "off_dvoa": "12.8%",
+      "off_dvoa_rank": 6,
+      "def_dvoa": "-9.4%",
+      "def_dvoa_rank": 5,
+      "st_dvoa": "1.9%",
+      "st_dvoa_rank": 10,
+      "off_voa": "11.2%",
+      "def_voa": "-8.1%",
+      "st_voa": "1.7%",
+      "est_wins": 12.4,
+      "est_wins_rank": 2,
+      "wei_dvoa": "26.0%",
+      "wei_dvoa_rank": 1,
+      "sched_past": "1.2%",
+      "sched_past_rank": 14,
+      "sched_future": "-2.4%",
+      "sched_future_rank": 22,
+      "variance": "4.8%",
+      "variance_rank": 9
+    }
+  ]
+}

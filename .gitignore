@@ -8,3 +8,8 @@ node_modules
 .idea
 dist
 coverage
+
+# External-benchmark feed captures are INTERNAL-ONLY raw vendor data — never
+# commit them. Only the *.example.json shape templates are tracked.
+data/ext-staging/*.json
+!data/ext-staging/*.example.json

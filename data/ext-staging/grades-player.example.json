@@ -1,0 +1,28 @@
+{
+  "season": 2025,
+  "rows": [
+    {
+      "name": "Example Quarterback",
+      "team": "Kansas City Chiefs",
+      "position": "QB",
+      "week": 0,
+      "jersey": 15,
+      "age": 30,
+      "college": "Texas Tech",
+      "draft_year": 2017,
+      "draft_round": 1,
+      "draft_pick": 10,
+      "height": "6-3",
+      "weight": 225,
+      "forty": 4.80,
+      "rs": "N",
+      "off": 91.2,
+      "pass": 92.0,
+      "run": 78.4,
+      "war": 4.6,
+      "war_rank": 1,
+      "snaps": { "off": 1120, "pass": 690, "run": 95 },
+      "extra": {}
+    }
+  ]
+}

@@ -47,7 +47,11 @@ normalizers, delivery upserts, and runner stay identical.
    Re-running the same season updates in place (idempotent upsert on each table's
    UNIQUE key). Missing staging files are skipped, not fatal.
 
-## Cadence (Phase 1 = manual backfill; cron is Phase 4)
+## Cadence (automated via the `nfl-ext-feeds-capture` skill)
 
-grades + DVOA weekly in-season / monthly off-season · free-agency daily during
-the FA window (Feb–May) else weekly · power-ranks weekly.
+Twice-weekly in-season via two Cowork scheduled tasks — **Run A** (Mon 11 AM ET:
+grades-team, grades-player, power-ranks, dvoa-team) and **Run B** (Wed 11 AM ET:
+the four above + free-agency). Offseason auto-throttles to monthly (first Monday);
+free-agency keeps running through the FA window (Feb–May). Full runbook + safety
+gates: `skills/nfl-ext-feeds-capture/SKILL.md`. Manual backfill still works with
+the same `ingest-ext-feeds.js` commands below.

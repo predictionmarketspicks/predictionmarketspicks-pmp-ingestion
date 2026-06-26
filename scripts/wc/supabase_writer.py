@@ -61,6 +61,28 @@ def insert_player_rows(rows: List[dict]) -> int:
     return len(rows)
 
 
+def insert_match_model_rows(rows: List[dict]) -> int:
+    """Upsert per-match Poisson lambda into world_cup_match_model (PK match_id).
+
+    Powers the Combo Edge Builder's correlation-aware same-game pricing. Upsert
+    (not insert) so re-running the sim refreshes lambda in place rather than
+    accumulating duplicate fixtures.
+
+    Row shape:
+      {match_id, home_slug, away_slug, lambda_home, lambda_away, dc_rho, sim_run_id}
+    `computed_at` is set server-side by `default now()`.
+    """
+    if not rows:
+        return 0
+    sb = get_supabase_client()
+    inserted = 0
+    for i in range(0, len(rows), 500):
+        chunk = rows[i:i + 500]
+        sb.table("world_cup_match_model").upsert(chunk, on_conflict="match_id").execute()
+        inserted += len(chunk)
+    return inserted
+
+
 def refresh_matviews() -> None:
     """Refresh both _latest matviews so downstream readers see the new sim_run_id.
 

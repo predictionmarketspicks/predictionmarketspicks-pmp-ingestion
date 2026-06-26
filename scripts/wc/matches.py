@@ -284,6 +284,16 @@ def all_group_matches(ratings: Dict[str, tuple] | None = None) -> List[dict]:
                 away_mult=env["away_mult"],
                 ratings=ratings,
             )
+            # Persist the per-match Poisson lambda alongside the probs so the
+            # Combo Edge Builder can rebuild the exact correlation-aware scoreline
+            # grid (world_cup_match_model). Identical to match_probs' internal la/lb:
+            # expected_goals + venue env, host bump by team identity (World Cup
+            # matches are neutral-venue; only the three hosts get HOME_ADV).
+            r = ratings or TEAMS
+            oa, da = r[home]
+            ob, db = r[away]
+            la = expected_goals(oa, db, host_a=(home in HOST_SET)) * env["home_mult"]
+            lb = expected_goals(ob, da, host_a=(away in HOST_SET)) * env["away_mult"]
             out.append({
                 "entity_id": entity_id,
                 "group": letter,
@@ -294,6 +304,9 @@ def all_group_matches(ratings: Dict[str, tuple] | None = None) -> List[dict]:
                 "away_slug": away_slug,
                 "venue": env["venue"],
                 "env_notes": env["notes"],
+                "lambda_home": round(la, 4),
+                "lambda_away": round(lb, 4),
+                "dc_rho": DC_RHO,
                 "probs": probs,
             })
     assert len(out) == 72, f"expected 72 group matches, got {len(out)}"

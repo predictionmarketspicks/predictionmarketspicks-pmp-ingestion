@@ -32,6 +32,7 @@ import {
   filterAlreadyPostedKeys,
   recordPostedAlerts,
   recordFeedPerformance,
+  stampPostedPick,
 } from './delivery/supabase.js';
 import { postCommodityAlert, postMoversAlert, postBotLog } from './delivery/discord.js';
 import { revalidateCommodityEdge } from './delivery/revalidate.js';
@@ -160,6 +161,19 @@ function commodityAlertKey(commodity, tier, edge) {
   // Tier in the key so a tier upgrade re-fires; strike + direction so a
   // different strike crossing threshold fires independently.
   return `commodity_edge:${commodity}:${tier}:${edge.direction}:${edge.strike.toFixed(2)}`;
+}
+
+// Real-trade gate (handoff EDGE_PICKS_DISCORD_SOT). A posted pick must be a
+// position a reader could actually take: liquid (≥50 vol/24h OR ≥100 open
+// interest), a real edge (|fused_edge_pp| ≥ 5pp — drops the 4–5pp SPECULATIVE
+// leaks), and a non-degenerate price (3¢–97¢). fused_edge_pp is a fraction.
+function realTradeGate(edge) {
+  if (!edge) return false;
+  const liquid = (edge.kalshi_volume_24h ?? 0) >= 50 || (edge.kalshi_open_int ?? 0) >= 100;
+  const edgeOk = Math.abs(edge.fused_edge_pp ?? 0) >= 0.05;
+  const px = edge.kalshi_yes ?? 0;
+  const priceOk = px >= 0.03 && px <= 0.97;
+  return liquid && edgeOk && priceOk;
 }
 
 function expirationDateFromCloseTime(closeIso) {
@@ -331,6 +345,11 @@ async function runSnapshotOnceInner(state) {
       console.log(
         `[${config.commodity}] discord+revalidate suppressed — rollover ${oilRollover.fromContract}→${oilRollover.toContract} active`,
       );
+    } else if (top && snap.meta.topTier !== 'NO_EDGE' && (tagOk || bypass) && !realTradeGate(top)) {
+      // Sub-real-trade: tier fired but the pick isn't actionable (illiquid,
+      // <5pp, or degenerate price). Skip the post AND the SoT stamp — same
+      // shape as the rollover/cooldown skips.
+      console.log(`[${config.commodity}] would-post suppressed (sub-real-trade) ${snap.meta.topTier}`);
     } else if (top && snap.meta.topTier !== 'NO_EDGE' && (tagOk || bypass)) {
       const key = commodityAlertKey(config.commodity, snap.meta.topTier, top);
       const suppressed = await filterAlreadyPostedKeys([key], { hoursWindow: 6 });
@@ -339,7 +358,7 @@ async function runSnapshotOnceInner(state) {
       } else {
         try {
           const sent = await postCommodityAlert(snap.meta);
-          if (sent) {
+          if (sent.ok) {
             console.log(`[${config.commodity}] discord posted ${snap.meta.topTier}`);
             await recordPostedAlerts([
               {
@@ -350,6 +369,26 @@ async function runSnapshotOnceInner(state) {
                 posted_at: new Date().toISOString(),
               },
             ]);
+
+            // SoT link: stamp the leaderboard-trigger tool_picks row with
+            // posted_at + the Discord ids. snapshot_date is the UTC date of the
+            // snapshot timestamp (meta.generatedAt = now.toISOString()).
+            const snapDate = snap.meta.generatedAt.slice(0, 10);
+            const stamp = await stampPostedPick({
+              commodity: config.commodity,
+              eventTicker: snap.meta.eventTicker,
+              strike: top.strike,
+              snapDate,
+              messageId: sent.messageId,
+              channelId: sent.channelId,
+            });
+            if (stamp.matched === 0) {
+              const warn = `[${config.commodity}] orphan post — no tool_picks row for source_row_id=${stamp.sourceRowId} (posted_at left unset)`;
+              console.warn(warn);
+              postBotLog(`⚠️ ${warn}`).catch(() => {});
+            } else {
+              console.log(`[${config.commodity}] tool_picks stamped posted_at (${stamp.matched} row) ${stamp.sourceRowId}`);
+            }
           }
         } catch (err) {
           console.error(`[${config.commodity}] discord post failed`, err?.message || err);

@@ -111,11 +111,14 @@ export function buildCommodityEmbed(meta, topEdge) {
   };
 }
 
+// Returns { ok, messageId, channelId }. messageId is parsed from the Discord
+// 200 body so callers can stamp the posted-picks SoT link (tool_picks.posted_at
+// + discord_message_id). Throws on non-2xx — unchanged from before.
 async function postToChannel(channelId, payload) {
   const token = process.env.DISCORD_BOT_TOKEN;
   if (!token) {
     console.warn('[discord] DISCORD_BOT_TOKEN not set — skipping post');
-    return false;
+    return { ok: false, messageId: null, channelId };
   }
   const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
     method: 'POST',
@@ -130,16 +133,20 @@ async function postToChannel(channelId, payload) {
     const body = await res.text().catch(() => '');
     throw new Error(`discord ${res.status}: ${body.slice(0, 200)}`);
   }
-  return true;
+  const json = await res.json().catch(() => ({}));
+  return { ok: true, messageId: json?.id ?? null, channelId };
 }
 
 export async function postCommodityAlert(meta) {
   const top = meta.topEdge;
-  if (!top) return false;
+  if (!top) return { ok: false, messageId: null, channelId: null };
   const tier = meta.topTier;
-  if (tier === 'NO_EDGE') return false;
-  const channelId = CHANNEL_ID[tier];
-  if (!channelId) return false;
+  if (tier === 'NO_EDGE') return { ok: false, messageId: null, channelId: null };
+
+  // SoT routing (Benny, 2026-06-25): every posted pick — STRONG/MODERATE/
+  // SPECULATIVE alike — lands in #commodity-edge as the single source-of-truth
+  // feed. The tier still colors the embed; only the destination is collapsed.
+  const channelId = CHANNEL_ID.SPECULATIVE;
 
   const payload = buildCommodityEmbed(meta, top);
   assertBrandSafe(payload);
@@ -190,7 +197,7 @@ export async function postMoversAlert({ gainers, losers }) {
   if (embeds.length === 0) return false;
   const payload = { embeds, allowed_mentions: { parse: [] } };
   assertBrandSafe(payload);
-  return postToChannel(CHANNEL_ID.MOVERS, payload);
+  return (await postToChannel(CHANNEL_ID.MOVERS, payload)).ok;
 }
 
 // Plain-text alert to #bot-logs for engine infra messages (quota guards,
@@ -199,10 +206,10 @@ export async function postMoversAlert({ gainers, losers }) {
 export async function postBotLog(content) {
   const text = sanitize(String(content || ''), 1900);
   if (!text) return false;
-  return postToChannel(CHANNEL_ID.BOT_LOGS, {
+  return (await postToChannel(CHANNEL_ID.BOT_LOGS, {
     content: text,
     allowed_mentions: { parse: [] },
-  });
+  })).ok;
 }
 
 // Embed variant for engines (flow-alerts) that build their own rich payloads.
@@ -218,11 +225,11 @@ export async function postBotLogEmbed(embed, { content = '' } = {}) {
       ? { ...embed.footer, text: sanitize(String(embed.footer.text), 2000) }
       : embed.footer,
   };
-  return postToChannel(CHANNEL_ID.BOT_LOGS, {
+  return (await postToChannel(CHANNEL_ID.BOT_LOGS, {
     content: content ? sanitize(String(content), 1900) : '',
     embeds: [safe],
     allowed_mentions: { parse: [] },
-  });
+  })).ok;
 }
 
 export { KALSHI_REFERRAL_URL, CHANNEL_ID };

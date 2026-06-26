@@ -174,6 +174,40 @@ export async function recordPostedAlerts(rows) {
   return { count: rows.length };
 }
 
+// Posted-picks SoT link. When a commodity edge actually posts to Discord, stamp
+// the matching tool_picks row (written by the leaderboard trigger on
+// commodity_edge_signals) with posted_at + the Discord message/channel id.
+//
+// The match key MUST reproduce the trigger's source_row_id byte-for-byte:
+//   LOWER(commodity) || ':' || event_ticker || ':' || strike::text || ':' || snapshot_date
+// `strike` is numeric(10,2) so strike::text always renders 2 decimals
+// (e.g. 59899.99) — hence Number(strike).toFixed(2), NOT String(strike) which
+// would drop a trailing .00. snapshot_date is generated server-side from
+// snapshot_at's UTC date, so callers pass the same snapshot timestamp's UTC date.
+//
+// Returns { matched } — matched === 0 means the post had no SoT row to link
+// (an integrity hole the caller should surface to #bot-logs).
+export async function stampPostedPick({ commodity, eventTicker, strike, snapDate, messageId, channelId }) {
+  const sourceRowId = `${commodity}:${eventTicker}:${Number(strike).toFixed(2)}:${snapDate}`;
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('tool_picks')
+    .update({
+      posted_at: new Date().toISOString(),
+      discord_message_id: messageId ?? null,
+      discord_channel_id: channelId ?? null,
+    })
+    .eq('source_table', 'commodity_edge_signals')
+    .eq('source_row_id', sourceRowId)
+    .is('posted_at', null)
+    .select('pick_id');
+  if (error) {
+    console.error('[tool_picks] posted_at stamp failed:', error.message);
+    return { matched: 0, sourceRowId, error };
+  }
+  return { matched: (data ?? []).length, sourceRowId, error: null };
+}
+
 // ---------- macro_market_snapshots (Session 2) ----------
 //
 // Append-only time series of Kalshi macro markets. One row per (ticker,

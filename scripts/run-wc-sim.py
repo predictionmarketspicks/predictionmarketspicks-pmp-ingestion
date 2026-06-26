@@ -139,6 +139,35 @@ def build_match_rows(sim_run_id: str, ran_at_iso: str, backdrop, ratings=None) -
     return rows
 
 
+def build_match_model_rows(sim_run_id: str, ratings=None) -> List[dict]:
+    """Per-match scoreline lambda for world_cup_match_model (Combo Edge Builder).
+
+    One row per fixture: (match_id=entity_id, home/away slugs, lambda_home,
+    lambda_away, dc_rho). The builder rebuilds the exact correlation-aware
+    scoreline grid from these so same-game combos price off the joint
+    distribution, not a naive product.
+
+    KNOCKOUT: all_group_matches() covers only the 72 group fixtures (the KO
+    bracket is path-dependent and its fixtures aren't known until the group stage
+    finishes). To publish KO match lambda, extend all_group_matches with the KO
+    pairings once results are final and re-run; until then the site falls back to
+    frozen-ratings lambda for KO matches (lib/wc/team-ratings.ts).
+    """
+    matches = all_group_matches(ratings)
+    rows = []
+    for m in matches:
+        rows.append({
+            "match_id":    m["entity_id"],
+            "home_slug":   m["home_slug"],
+            "away_slug":   m["away_slug"],
+            "lambda_home": m["lambda_home"],
+            "lambda_away": m["lambda_away"],
+            "dc_rho":      m["dc_rho"],
+            "sim_run_id":  sim_run_id,
+        })
+    return rows
+
+
 def build_player_rows(sim_run_id: str, ran_at_iso: str, stages) -> List[dict]:
     """25 Golden Boot rows. exp_g_total + metadata.golden_boot_pct now come from the
     tournament-long scorer MC, reusing the champion sim's `stages` realizations."""
@@ -231,9 +260,10 @@ def main() -> int:
     # 3. Build rows
     team_rows = build_team_rows(sim_run_id, agg, ran_at_iso, backdrop)
     match_rows = build_match_rows(sim_run_id, ran_at_iso, backdrop, ratings)
+    match_model_rows = build_match_model_rows(sim_run_id, ratings)
     player_rows = build_player_rows(sim_run_id, ran_at_iso, stages)
     print(f"[wc-sim] built {len(team_rows)} team rows, {len(match_rows)} match rows, "
-          f"{len(player_rows)} player rows")
+          f"{len(match_model_rows)} match-model rows, {len(player_rows)} player rows")
 
     # 4. Validate
     result = validate_all(team_rows, match_rows, player_rows)
@@ -260,6 +290,7 @@ def main() -> int:
             "played_count": len(played),
             "team_rows": team_rows,
             "match_rows": match_rows,
+            "match_model_rows": match_model_rows,
             "player_rows": player_rows,
         }
         with open(args.dump_json, "w", encoding="utf-8") as fh:
@@ -267,11 +298,18 @@ def main() -> int:
         print(f"[wc-sim] --dump-json: wrote {args.dump_json} (no DB)")
         return 0
 
-    from wc.supabase_writer import insert_simulation_rows, insert_player_rows, refresh_matviews
+    from wc.supabase_writer import (
+        insert_simulation_rows,
+        insert_player_rows,
+        insert_match_model_rows,
+        refresh_matviews,
+    )
     n_team = insert_simulation_rows(team_rows)
     n_match = insert_simulation_rows(match_rows)
+    n_model = insert_match_model_rows(match_model_rows)
     n_player = insert_player_rows(player_rows)
-    print(f"[wc-sim] wrote {n_team} team + {n_match} match + {n_player} player rows")
+    print(f"[wc-sim] wrote {n_team} team + {n_match} match + {n_model} match-model "
+          f"+ {n_player} player rows")
 
     refresh_matviews()
     print(f"[wc-sim] DONE — sim_run_id={sim_run_id}")

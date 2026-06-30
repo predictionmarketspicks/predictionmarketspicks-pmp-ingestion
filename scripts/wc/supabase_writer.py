@@ -61,33 +61,11 @@ def insert_player_rows(rows: List[dict]) -> int:
     return len(rows)
 
 
-def insert_match_model_rows(rows: List[dict]) -> int:
-    """Upsert per-match Poisson lambda into world_cup_match_model (PK match_id).
-
-    Powers the Combo Edge Builder's correlation-aware same-game pricing. Upsert
-    (not insert) so re-running the sim refreshes lambda in place rather than
-    accumulating duplicate fixtures.
-
-    Row shape:
-      {match_id, home_slug, away_slug, lambda_home, lambda_away, dc_rho, sim_run_id}
-    `computed_at` is set server-side by `default now()`.
-    """
-    if not rows:
-        return 0
-    sb = get_supabase_client()
-    inserted = 0
-    for i in range(0, len(rows), 500):
-        chunk = rows[i:i + 500]
-        sb.table("world_cup_match_model").upsert(chunk, on_conflict="match_id").execute()
-        inserted += len(chunk)
-    return inserted
-
-
 def refresh_matviews() -> None:
     """Refresh both _latest matviews so downstream readers see the new sim_run_id.
 
     Calls a Postgres RPC because supabase-py can't issue raw `REFRESH MATERIALIZED VIEW`
-    statements directly. The RPC must exist in the schema:
+    statements directly. The RPC exists in the schema:
 
       create or replace function refresh_world_cup_latest_matviews()
       returns void language plpgsql security definer as $$
@@ -97,16 +75,14 @@ def refresh_matviews() -> None:
       end;
       $$;
 
-    If the RPC doesn't exist (PR 1 didn't ship it), this raises — caller logs a
-    warning rather than failing the whole sim. The matviews will be stale until
-    something else refreshes them, but the underlying tables are correct.
+    Failures PROPAGATE (no swallow): the runner wraps the write+refresh path in a
+    try/except that fires a Discord alert and exits 1. A stale matview is a
+    publish-quality bug during a live tournament, so it must go loud, never
+    silent. A pg_cron safety-net (`refresh-wc-simulation-latest`, every 30 min)
+    also refreshes the sim matview independently as belt-and-suspenders.
     """
     sb = get_supabase_client()
-    try:
-        sb.rpc("refresh_world_cup_latest_matviews").execute()
-    except Exception as e:
-        print(f"[wc-sim] WARNING: matview refresh RPC failed: {e!s}")
-        print("[wc-sim] sim rows are written; matviews may be stale until next refresh")
+    sb.rpc("refresh_world_cup_latest_matviews").execute()
 
 
 def fetch_seed_simulation() -> List[dict]:

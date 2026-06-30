@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wc.matches import match_grid_detail  # noqa: E402
 from wc.teams import TEAMS, NAME_TO_SLUG, HOST_SET  # noqa: E402
 from wc.venues import match_env  # noqa: E402
+from wc.simulator import KO_GOALS_MULT  # noqa: E402  # knockout goals damp (lower-scoring stage)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SITE_DATA = os.path.normpath(
@@ -60,14 +61,18 @@ def main() -> int:
             continue
         home_slug = NAME_TO_SLUG[home]
         away_slug = NAME_TO_SLUG[away]
+        # Knockout fixtures carry an empty group ("") in wc2026-matches.json; they
+        # score lower than the group stage, so damp both λ via the existing env
+        # mult mechanism (mirrors sim_match's KO_GOALS_MULT in simulator.py).
+        ko = KO_GOALS_MULT if m["group"] == "" else 1.0
         env = match_env(m["group"], home_slug, away_slug)
         d = match_grid_detail(
             home,
             away,
             host_a=(home in HOST_SET),
             host_b=(away in HOST_SET),
-            home_mult=env["home_mult"],
-            away_mult=env["away_mult"],
+            home_mult=env["home_mult"] * ko,
+            away_mult=env["away_mult"] * ko,
         )
         detail[m["slug"]] = {
             "home_xg": d["home_xg"],

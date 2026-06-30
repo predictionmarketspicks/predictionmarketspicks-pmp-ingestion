@@ -25,13 +25,23 @@ from .teams import TEAMS, GROUPS, ALL_TEAMS, HOST_SET, NAME_TO_SLUG
 # (pre-tournament behaviour / standalone player-model runs).
 PlayedResults = Dict[FrozenSet[str], Dict[str, int]]
 
-# ── Match model constants (locked — drift = seed validation will fail) ────────
+# ── Match model constants ────────────────────────────────────────────────────
+# NOTE: v5 validation (wc/validation.py) is STRUCTURAL (champion% sums to 100,
+# monotone progression ladder, match H+D+A ~100) — NOT seed reproduction — so
+# these can be recalibrated WITHOUT re-blessing v2_april_2026_seed. (The old
+# "locked — drift fails validation" note was pre-v5 and is no longer true.)
+# 2026-06-30 calibration: the live combo board showed the model running hot on
+# Over 2.5 for heavy favorites (λ 3.7+) and knockout matches (+10pp vs market on
+# overs AND BTTS). Two fixes: tightened LAM_CAP 5.0→3.0 (realism ceiling) and
+# added KO_GOALS_MULT (knockout football is lower-scoring). BASE_GOALS is left
+# alone — an even match → 2.70 total ≈ 51% O2.5, which matches the intl base rate.
 BASE_GOALS = 1.35   # global per-team xG baseline
 HOME_ADV   = 1.15   # multiplicative bump for host-cluster teams
 ELO_SCALE  = 110    # rating-diff → goal-diff conversion
 EXP_SOFTEN = 0.35   # softer Poisson curve, prevents elite-vs-minnow blowouts
 LAM_FLOOR  = 0.1
-LAM_CAP    = 5.0
+LAM_CAP    = 3.0    # realism ceiling on single-team xG (no team realistically exceeds ~3)
+KO_GOALS_MULT = 0.88  # knockout matches score less (cautious, elimination); damp both λ
 
 
 def expected_goals(off_a: int, def_b: int, host_a: bool = False) -> float:
@@ -67,6 +77,10 @@ def sim_match(
     ob, db = r[team_b]
     lam_a = expected_goals(oa, db, host_a)
     lam_b = expected_goals(ob, da, host_b)
+    if knockout:
+        # Knockout football is lower-scoring than the group stage (see KO_GOALS_MULT).
+        lam_a *= KO_GOALS_MULT
+        lam_b *= KO_GOALS_MULT
     ga = poisson(lam_a)
     gb = poisson(lam_b)
     if knockout and ga == gb:

@@ -423,10 +423,12 @@ export async function upsertWidgetPayloads(slug, envelope, variants = ['hero', '
 //
 // handoffs/WC_RESULT_AUTOFEED_2026-06-18.md.
 
-// Which of these match_ids are ALREADY FT in the table? Used to debounce the
-// sim-rerun dispatch so only newly-settled matches fire it. On query failure we
-// return an empty Set → the upsert is still idempotent, but the dispatch may
-// fire an extra time (harmless; the workflow is concurrency-collapsed).
+// Which of these match_ids are ALREADY settled in the table? Used to debounce the
+// sim-rerun dispatch so only newly-settled matches fire it. Any final status
+// counts (FT/AET/PSO) — else a knockout tie decided in ET or on penalties would
+// read as "new" every scan and re-dispatch forever. On query failure we return an
+// empty Set → the upsert is still idempotent, but the dispatch may fire an extra
+// time (harmless; the workflow is concurrency-collapsed).
 export async function fetchExistingWcFtIds(ids) {
   if (!ids || ids.length === 0) return new Set();
   const sb = getClient();
@@ -434,9 +436,9 @@ export async function fetchExistingWcFtIds(ids) {
     .from('world_cup_results')
     .select('match_id')
     .in('match_id', ids)
-    .eq('status', 'FT');
+    .in('status', ['FT', 'AET', 'PSO']);
   if (error) {
-    console.warn('[world_cup_results] existing-FT query failed:', error.message);
+    console.warn('[world_cup_results] existing-settled query failed:', error.message);
     return new Set();
   }
   return new Set((data ?? []).map((r) => r.match_id));

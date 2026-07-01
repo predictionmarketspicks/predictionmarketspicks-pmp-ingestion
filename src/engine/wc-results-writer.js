@@ -15,6 +15,23 @@
 
 import { upsertWcResults, fetchExistingWcFtIds } from '../delivery/supabase.js';
 
+// Resolve a completed game's final status. Group games always end FT (period ≤ 2).
+// Knockout ties can run to extra time (AET) or a shootout (PSO); ESPN signals this
+// via the period counter (3-4 = ET, 5 = penalties), the status-type name, the
+// short detail string, or a populated shootout tally. We match all four defensively
+// because ESPN's exact labels for the 2026 bracket aren't yet observed. On PSO the
+// stored home/away score is the level regulation/ET score (goals) — the advancing
+// side lives in home_winner/away_winner, and the human's editorial JSON fills the
+// shootout detail on commit (JSON stays authoritative over this bare overlay).
+function deriveStatus(g) {
+  const blob = `${g.status_name || ''} ${g.detail || ''}`.toLowerCase();
+  const hasShootout = Number.isFinite(g.home_shootout) || Number.isFinite(g.away_shootout);
+  const period = g.period ?? 0;
+  if (hasShootout || period >= 5 || blob.includes('pen') || blob.includes('shootout')) return 'PSO';
+  if (period >= 3 || blob.includes('aet') || blob.includes('extra')) return 'AET';
+  return 'FT';
+}
+
 const DISPATCH_REPO =
   process.env.GH_DISPATCH_REPO ||
   'predictionmarketspicks/predictionmarketspicks-pmp-ingestion';
@@ -43,7 +60,7 @@ export async function persistWcFtResults(espnGames) {
     away_slug: g.away_slug,
     home_score: g.home_score,
     away_score: g.away_score,
-    status: 'FT',
+    status: deriveStatus(g), // FT | AET | PSO — group is always FT
     source: 'espn',
     espn_event_id: g.espn_event_id || null,
     updated_at: new Date().toISOString(),

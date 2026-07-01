@@ -14,6 +14,16 @@
 
 import { lookupTeamByName, lookupGroupMatchId } from './wc-shared.js';
 
+// Knockout fixtures aren't in the group schedule, so lookupGroupMatchId() returns
+// null for them and the result writer (which requires a match_id) used to drop
+// every bracket score. Mint a stable id from the sorted 3-letter codes: each pair
+// meets at most once in single-elimination, so the unordered pair is unique and
+// home/away orientation between ESPN and our fixtures never splits it in two.
+function knockoutMatchId(codeA, codeB) {
+  const [a, b] = [codeA, codeB].sort();
+  return `match:KO-${a}-${b}`;
+}
+
 const ESPN_BASE =
   process.env.ESPN_WC_BASE ||
   'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard';
@@ -55,18 +65,27 @@ function normalizeEvents(json) {
     if (!home || !away) continue;
 
     const match = lookupGroupMatchId(home.slug, away.slug);
+    const isKnockout = !match;
     out.push({
       espn_event_id: String(ev.id || ''),
-      match_id: match?.id || null,
+      match_id: match?.id || knockoutMatchId(home.code, away.code),
+      is_knockout: isKnockout,
       home_slug: home.slug,
       away_slug: away.slug,
       start_time: ev.date || null,
       state: ev.status?.type?.state || null, // pre / in / post
+      status_name: ev.status?.type?.name || null, // e.g. STATUS_FULL_TIME
       detail: ev.status?.type?.shortDetail || ev.status?.type?.description || null,
       clock: ev.status?.displayClock || null,
       period: ev.status?.period ?? null,
       home_score: numOrNull(homeC.score),
       away_score: numOrNull(awayC.score),
+      // Penalty-shootout tally + winner flag (knockout only; null/false in group).
+      // ESPN carries these on the competitor once a tie is decided on penalties.
+      home_shootout: numOrNull(homeC.shootoutScore),
+      away_shootout: numOrNull(awayC.shootoutScore),
+      home_winner: homeC.winner === true,
+      away_winner: awayC.winner === true,
     });
   }
   return out;

@@ -85,6 +85,47 @@ describe('persistWcFtResults — debounce', () => {
   });
 });
 
+describe('persistWcFtResults — knockout status (FT/AET/PSO)', () => {
+  const ko = (over) => ({
+    state: 'post',
+    match_id: 'match:KO-CAN-MOR',
+    home_slug: 'canada',
+    away_slug: 'morocco',
+    home_score: 1,
+    away_score: 1,
+    espn_event_id: 'e-ko',
+    ...over,
+  });
+
+  it('regulation knockout win writes FT', async () => {
+    const res = await persistWcFtResults([ko({ home_score: 2, away_score: 0, period: 2 })]);
+    expect(res.upserted).toBe(1);
+    expect(upsertWcResults.mock.calls[0][0][0].status).toBe('FT');
+  });
+
+  it('extra-time finish writes AET (period ≥ 3)', async () => {
+    const res = await persistWcFtResults([ko({ period: 4, detail: 'FT-AET' })]);
+    expect(upsertWcResults.mock.calls[0][0][0].status).toBe('AET');
+  });
+
+  it('penalty shootout writes PSO (shootout tally present)', async () => {
+    const res = await persistWcFtResults([
+      ko({ period: 5, home_shootout: 4, away_shootout: 2, detail: 'FT-Pens' }),
+    ]);
+    expect(res.upserted).toBe(1);
+    const row = upsertWcResults.mock.calls[0][0][0];
+    expect(row.status).toBe('PSO');
+    // Stored score is the level regulation/ET score — not the shootout tally.
+    expect(row.home_score).toBe(1);
+    expect(row.away_score).toBe(1);
+  });
+
+  it('"pen" in the detail string alone is enough for PSO', async () => {
+    const res = await persistWcFtResults([ko({ detail: 'Full Time (Penalties)' })]);
+    expect(upsertWcResults.mock.calls[0][0][0].status).toBe('PSO');
+  });
+});
+
 describe('dispatchSimRerun — no token', () => {
   it('no-ops (no fetch) when GH_DISPATCH_TOKEN is unset', async () => {
     const prev = process.env.GH_DISPATCH_TOKEN;

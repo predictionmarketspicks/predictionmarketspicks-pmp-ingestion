@@ -20,12 +20,17 @@ primary_region = "iad"
     hard_limit = 200
     soft_limit = 100
 
+  # Routing health-check keys on /alive (process-up), NOT /health. /health 503s
+  # when a required feed is stale (e.g. the flaky Yahoo oil feed off-hours), and
+  # gating Fly routing on that took the whole HTTP service — including the
+  # /kalshi-proxy the gridiron CI depends on — offline externally. Feed staleness
+  # is still surfaced via /health for monitoring/alerts.
   [[http_service.checks]]
     interval = "30s"
     timeout = "5s"
     grace_period = "30s"
     method = "GET"
-    path = "/health"
+    path = "/alive"
 
 [[vm]]
   size = "shared-cpu-2x"

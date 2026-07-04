@@ -621,6 +621,16 @@ function bootstrapMovers() {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
+  // Liveness probe for Fly's routing health-check — 200 iff the process is up
+  // and serving. Deliberately decoupled from /health (which 503s on stale feeds):
+  // feed-freshness is a monitoring signal, not a reason for Fly to deregister the
+  // machine and take the whole HTTP service (incl. /kalshi-proxy) offline.
+  if (url.pathname === '/alive') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
   if (url.pathname === '/health') {
     const snap = snapshot();
     const liveness = evaluateLiveness();

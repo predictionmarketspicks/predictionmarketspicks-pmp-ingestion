@@ -124,6 +124,34 @@ describe('buildWorldCup2026Envelope', () => {
     expect(env.data.teams).toHaveLength(0);
     expect(env.data.topTeam).toBeNull();
   });
+
+  it('drops eliminated teams (sim champion 0%) even if a frozen market still prices them', () => {
+    // Netherlands knocked out: sim scores it 0%, but Kalshi delisted the outright
+    // leaving a frozen 6% row. Must not float onto the board or into _raw.
+    const elimSim = [
+      { entity_id: 'team:france', kind: 'champion', sim_pct: 30 },
+      { entity_id: 'team:netherlands', kind: 'champion', sim_pct: 0 },
+    ];
+    const marketRows = [
+      { entity_id: 'team:france', kind: 'champion', platform: 'kalshi', yes_price_cents: 35, volume_24h: 1000, as_of_age_seconds: 120, snapshot_at: 'x', url: null },
+      { entity_id: 'team:netherlands', kind: 'champion', platform: 'kalshi', yes_price_cents: 6, volume_24h: 0, as_of_age_seconds: 120, snapshot_at: 'x', url: null },
+    ];
+    const env = buildWorldCup2026Envelope({ simRows: elimSim, marketRows });
+    expect(env.data.teams.map((t) => t.outcome)).toEqual(['France']);
+    expect(env.data._raw.some((r) => r.outcome === 'Netherlands')).toBe(false);
+  });
+
+  it('ignores a stale (>48h) market snapshot and falls back to sim for a still-alive team', () => {
+    const aliveSim = [{ entity_id: 'team:brazil', kind: 'champion', sim_pct: 11.7 }];
+    const marketRows = [
+      // frozen 55h-old row — must be ignored; team falls back to its sim probability
+      { entity_id: 'team:brazil', kind: 'champion', platform: 'kalshi', yes_price_cents: 20, volume_24h: 0, as_of_age_seconds: 55 * 3600, snapshot_at: 'x', url: null },
+    ];
+    const env = buildWorldCup2026Envelope({ simRows: aliveSim, marketRows });
+    const brazil = env.data.teams.find((t) => t.outcome === 'Brazil');
+    expect(brazil.source).toBe('sim');
+    expect(brazil.probability).toBeCloseTo(0.117);
+  });
 });
 
 describe('entityLabel', () => {

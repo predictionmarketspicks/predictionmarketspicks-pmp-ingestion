@@ -35,6 +35,19 @@ const WC_MISPRICINGS_VARIANTS = ['hero', 'sidebar'];
 const WORLD_CUP_2026_TOP_N = 10;
 const WC_MISPRICINGS_TOP_N = 5;
 
+// Eliminated-team guard for the champion board. Kalshi delists a settled
+// champion outright, so an eliminated team's last snapshot freezes at its last
+// traded price (e.g. ~6%) and — ranked by market price — floats onto the board
+// (Netherlands sat 8th at 6% after being knocked out, until hand-patched with
+// 1¢ rows). Two gates kill it permanently, no per-round patching:
+//   1. Alive set — the standings-aware sim scores an eliminated team at exactly
+//      0% champion, updated the moment it reruns post-result. Drop those teams.
+//   2. Freshness — ignore any market snapshot older than 48h so a frozen/delisted
+//      price can't drive the board; the team falls back to its (near-zero) sim.
+// Alive teams during the tournament re-price well inside 48h, so neither gate
+// ever false-drops a live contender.
+const CHAMPION_STALE_SEC = 48 * 3600; // 172800 — market snapshots older than this are frozen/delisted
+
 const state = {
   runs: 0,
   lastRunAt: null,
@@ -103,12 +116,24 @@ export function buildWorldCup2026Envelope({ simRows, marketRows }) {
     const team = lookupTeamBySlug(slug);
     const displayName = team?.name || slug;
 
+    // Alive-set gate: the standings-aware sim scores an eliminated team at
+    // exactly 0% champion. Drop them so a frozen/delisted market price can't
+    // float a knocked-out team onto the board (see CHAMPION_STALE_SEC note).
+    const simPctRaw = Number(sim.sim_pct);
+    if (Number.isFinite(simPctRaw) && simPctRaw <= 0) continue;
+
     // Kalshi-first, Polymarket fallback. DraftKings sportsbook outrights are
     // dropped before they reach the display payload or the _raw array — they
     // are off-brand for a prediction-markets widget and their probabilities
     // were polluting the champion leaderboard (see pickChampionRow note).
+    // Freshness gate: drop snapshots older than 48h so a frozen/delisted price
+    // never drives the row — the team falls back to its sim probability instead.
     const platformRows = (championMarketByTeam.get(slug) || []).filter(
-      (r) => r.platform === 'kalshi' || r.platform === 'polymarket',
+      (r) =>
+        (r.platform === 'kalshi' || r.platform === 'polymarket') &&
+        // Missing age → treat as fresh (keep); only an explicit stale age drops
+        // the row. The alive-set (sim=0) gate above is the primary eliminated guard.
+        Number(r.as_of_age_seconds ?? 0) < CHAMPION_STALE_SEC,
     );
     const pick = pickChampionRow(platformRows);
 
@@ -124,10 +149,9 @@ export function buildWorldCup2026Envelope({ simRows, marketRows }) {
       url = pick.url || null;
       volume24h = pick.volume_24h != null ? Math.round(Number(pick.volume_24h)) : null;
     } else {
-      // No market row — fall back to sim probability so the team still
+      // No fresh market row — fall back to sim probability so the team still
       // appears in the list with a sensible ordering, marked as `sim` source.
-      const simPct = Number(sim.sim_pct);
-      probability = Number.isFinite(simPct) ? Math.max(0.001, Math.min(0.999, simPct / 100)) : null;
+      probability = Number.isFinite(simPctRaw) ? Math.max(0.001, Math.min(0.999, simPctRaw / 100)) : null;
       source = 'sim';
       url = null;
       volume24h = null;

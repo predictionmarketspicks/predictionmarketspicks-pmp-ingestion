@@ -59,7 +59,9 @@ from wc.player_model import project_all_players                          # noqa:
 from wc.teams import NAME_TO_SLUG                                        # noqa: E402
 from wc.validation import validate_all                                   # noqa: E402
 from wc.notify import discord_alert                                      # noqa: E402
-from wc.results import load_played_results, describe as describe_results  # noqa: E402
+from wc.results import (  # noqa: E402
+    load_played_results, load_knockout_bracket, describe as describe_results,
+)
 from wc.form import adjusted_ratings, describe_top_movers                 # noqa: E402
 
 
@@ -212,10 +214,29 @@ def main() -> int:
     elif args.no_form:
         print("[wc-sim] --no-form: using frozen pre-tournament ratings")
 
+    # 0c. Real knockout bracket (post-R32). When the full Round of 16 is known,
+    # seed the bracket from the actual 8 ties instead of re-simulating it from
+    # group standings — otherwise eliminated teams keep re-advancing and carry
+    # phantom champion% (the staleness the recap article/mispricings surface).
+    ko_r16, r32_teams = None, None
+    if not args.no_results:
+        try:
+            r32_teams, r16_ties = load_knockout_bracket(args.matches_source)
+            if len(r16_ties) == 8:
+                ko_r16 = r16_ties
+                print(f"[wc-sim] bracket pinned to real Round of 16 "
+                      f"({len(r32_teams)} R32 teams, 8 ties) — QF+ shuffled")
+            elif r16_ties:
+                print(f"[wc-sim] partial R16 ({len(r16_ties)}/8 ties) — "
+                      f"re-simulating bracket from group standings")
+        except Exception as e:  # noqa: BLE001 — bracket is a best-effort overlay
+            print(f"[wc-sim] knockout bracket load failed (non-fatal): {e!s}")
+
     # 1. Monte Carlo team progression (conditioned on `played`, form-adjusted)
     t0 = time.time()
     random.seed(args.seed)
-    stages = [run_one_tournament(played, ratings) for _ in range(args.iterations)]
+    stages = [run_one_tournament(played, ratings, ko_r16, r32_teams)
+              for _ in range(args.iterations)]
     agg = aggregate_team_progression(stages)
     print(f"[wc-sim] team MC done in {time.time() - t0:.1f}s")
 

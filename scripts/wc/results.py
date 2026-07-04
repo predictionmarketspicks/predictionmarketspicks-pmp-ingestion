@@ -213,5 +213,51 @@ def load_played_results(source: str | None = None) -> PlayedResults:
     return merged
 
 
+def load_knockout_bracket(
+    source: str | None = None,
+) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """Real Round-of-32 field + the 8 Round-of-16 ties, from the matches JSON.
+
+    Returns ``(r32_teams, r16_ties)`` where r32_teams is every team that reached
+    the Round of 32 (both sides of the 16 R32 rows) and r16_ties is the list of
+    (home, away) pairings for the Round of 16. Both use MODEL TEAM NAMES (the
+    keys of teams.TEAMS / ALL_TEAMS), the namespace the simulator's sim_match and
+    stage dict operate in — NOT slugs.
+
+    The simulator uses these to seed the knockout bracket from the actual result
+    once the R32 is complete, instead of re-simulating it from group standings
+    (which lets eliminated teams re-advance — the phantom-progression bug). Rows
+    whose team names don't resolve to a model team (unfilled bracket placeholders
+    like "Winner Match 89") are skipped, so a partially-known bracket simply
+    yields fewer than 8 ties and the caller falls back to the group re-sim.
+    """
+    raw = _load_raw(source)
+    matches = raw.get("matches", [])
+    r32_teams: List[str] = []
+    r16_ties: List[Tuple[str, str]] = []
+    seen: Set[str] = set()
+
+    def to_model_name(site_name: str) -> str | None:
+        model = SITE_NAME_ALIAS.get(site_name, site_name)
+        return model if model in NAME_TO_SLUG else None
+
+    for m in matches:
+        stage = m.get("stage")
+        if stage not in ("R32", "R16"):
+            continue
+        home = to_model_name(m.get("home", ""))
+        away = to_model_name(m.get("away", ""))
+        if home is None or away is None:
+            continue  # unresolved placeholder slot — skip, not fatal
+        if stage == "R32":
+            for s in (home, away):
+                if s not in seen:
+                    seen.add(s)
+                    r32_teams.append(s)
+        else:  # R16
+            r16_ties.append((home, away))
+    return r32_teams, r16_ties
+
+
 def describe(played: PlayedResults) -> str:
     return f"{len(played)} completed group fixtures loaded"

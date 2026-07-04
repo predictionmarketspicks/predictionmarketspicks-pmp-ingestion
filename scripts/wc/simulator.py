@@ -147,9 +147,63 @@ def sim_group(
     return ranked, stats
 
 
+def _run_pinned_knockout(
+    r16_ties: List[Tuple[str, str]],
+    r32_teams: List[str],
+    ratings: Optional[dict] = None,
+) -> Dict[str, int]:
+    """Bracket seeded from the REAL Round-of-16 ties (post-R32 conditioning).
+
+    Once the Round of 32 is complete we know the 16 survivors and the 8 actual
+    R16 pairings. Re-simulating the bracket from group standings (see
+    run_one_tournament) lets already-eliminated teams "advance" again — the
+    phantom-progression bug that left dead teams carrying champion%. Here we set
+    the resolved stages and only simulate forward:
+
+      - every R32 participant → stage 1 (reached Round of 32)
+      - both teams of each R16 tie → stage 2 (reached Round of 16)
+      - the 8 real R16 ties are played with their true pairings
+      - QF-and-beyond keep the engine's documented random-shuffle approximation
+        (bracket PATH is blurred; team STRENGTHS are exact) — we don't hard-code
+        the official QF adjacency, so no risk of a wrong-but-confident tree.
+
+    stage codes match run_one_tournament: 1=R32, 2=R16, 3=QF, 4=SF, 5=Final,
+    6=Champion. Teams that exited in the group stage stay at 0.
+    """
+    stage = {t: 0 for t in ALL_TEAMS}
+    for t in r32_teams:
+        if t in stage:
+            stage[t] = 1
+    qf_teams: List[str] = []
+    for a, b in r16_ties:
+        stage[a] = max(stage[a], 2)
+        stage[b] = max(stage[b], 2)
+        ga, gb = sim_match(a, b, knockout=True, ratings=ratings)
+        w = a if ga > gb else b
+        stage[w] = 3
+        qf_teams.append(w)
+
+    def run_round(teams: List[str], next_stage: int) -> List[str]:
+        winners = []
+        for i in range(0, len(teams), 2):
+            ga, gb = sim_match(teams[i], teams[i + 1], knockout=True, ratings=ratings)
+            w = teams[i] if ga > gb else teams[i + 1]
+            stage[w] = next_stage
+            winners.append(w)
+        return winners
+
+    random.shuffle(qf_teams)                 # bracket-path approximation from QF on
+    sf = run_round(qf_teams, 4)              # QF  → SF  (8 → 4)
+    fin = run_round(sf, 5)                   # SF  → F   (4 → 2)
+    run_round(fin, 6)                        # Final     (2 → 1)
+    return stage
+
+
 def run_one_tournament(
     played: Optional[PlayedResults] = None,
     ratings: Optional[dict] = None,
+    ko_r16: Optional[List[Tuple[str, str]]] = None,
+    r32_teams: Optional[List[str]] = None,
 ) -> Dict[str, int]:
     """Returns dict: team → furthest stage (0=group .. 6=champion).
 
@@ -157,7 +211,12 @@ def run_one_tournament(
     None re-simulates the full group stage (pre-tournament / standalone behaviour).
     `ratings` (from wc.form.adjusted_ratings) is form-adjusted strength applied to
     all UNPLAYED fixtures (group + knockout); None uses the frozen TEAMS table.
+    `ko_r16` (from wc.results.load_knockout_bracket) is the 8 real Round-of-16
+    ties; when a complete set is supplied the bracket is seeded from it instead of
+    re-simulated from group standings — see _run_pinned_knockout.
     """
+    if ko_r16 and len(ko_r16) == 8:
+        return _run_pinned_knockout(ko_r16, r32_teams or [], ratings)
     stage = {t: 0 for t in ALL_TEAMS}
     advancers: List[str] = []
     third_pool: List[Tuple[Tuple[int, int, int], str]] = []

@@ -624,7 +624,7 @@ const server = http.createServer((req, res) => {
   // Liveness probe for Fly's routing health-check — 200 iff the process is up
   // and serving. Deliberately decoupled from /health (which 503s on stale feeds):
   // feed-freshness is a monitoring signal, not a reason for Fly to deregister the
-  // machine and take the whole HTTP service (incl. /kalshi-proxy) offline.
+  // machine and take the whole HTTP service offline. /health stays rich for alerts.
   if (url.pathname === '/alive') {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
@@ -693,54 +693,6 @@ const server = http.createServer((req, res) => {
     Sentry.captureException(err);
     res.writeHead(500, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ status: 'captured', message: err.message }));
-    return;
-  }
-
-  // Secret-gated Kalshi read proxy. The gridiron-edge GitHub Actions runner is
-  // datacenter-IP filtered by Kalshi (every /markets call returns 0 markets);
-  // this Fly app is not (it already fetches Kalshi for every feed). The runner
-  // routes its Kalshi GETs here so the NFL futures/championship/MVP edge math
-  // (single source of truth in the Python engine) can reach live prices without
-  // duplicating that math in JS. Hardened: shared-secret header, GET only, host
-  // hardcoded, path allowlist, read-only public endpoints. No arbitrary-URL proxy.
-  if (url.pathname === '/kalshi-proxy') {
-    const secret = process.env.KALSHI_PROXY_SECRET;
-    if (!secret) {
-      res.writeHead(503, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: 'proxy disabled (no KALSHI_PROXY_SECRET)' }));
-      return;
-    }
-    if (req.method !== 'GET') {
-      res.writeHead(405, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: 'GET only' }));
-      return;
-    }
-    if (req.headers['x-proxy-secret'] !== secret) {
-      res.writeHead(403, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: 'forbidden' }));
-      return;
-    }
-    const ALLOWED_PATHS = new Set(['/markets', '/events']);
-    const path = url.searchParams.get('path') || '';
-    if (!ALLOWED_PATHS.has(path)) {
-      res.writeHead(400, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: `path not allowed: ${path}` }));
-      return;
-    }
-    const target = new URL(`https://api.elections.kalshi.com/trade-api/v2${path}`);
-    for (const [k, v] of url.searchParams) {
-      if (k !== 'path') target.searchParams.append(k, v);
-    }
-    fetch(target, { headers: { accept: 'application/json' } })
-      .then(async (r) => {
-        const body = await r.text();
-        res.writeHead(r.status, { 'content-type': 'application/json' });
-        res.end(body);
-      })
-      .catch((err) => {
-        res.writeHead(502, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: err?.message || String(err) }));
-      });
     return;
   }
 

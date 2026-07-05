@@ -16,9 +16,12 @@ Per-iteration output is a dict mapping team → furthest stage code:
 """
 import math
 import random
-from typing import Dict, FrozenSet, List, Optional, Tuple
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple, TYPE_CHECKING
 
 from .teams import TEAMS, GROUPS, ALL_TEAMS, HOST_SET, NAME_TO_SLUG
+
+if TYPE_CHECKING:  # avoid any import-order coupling in the hot loop
+    from .results import KnockoutBracket
 
 # Played group fixtures, keyed by frozenset of the two team slugs → {slug: goals}.
 # Supplied by wc.results.load_played_results(); None means "simulate everything"
@@ -148,62 +151,93 @@ def sim_group(
 
 
 def _run_pinned_knockout(
-    r16_ties: List[Tuple[str, str]],
-    r32_teams: List[str],
+    bracket: "KnockoutBracket",
     ratings: Optional[dict] = None,
 ) -> Dict[str, int]:
-    """Bracket seeded from the REAL Round-of-16 ties (post-R32 conditioning).
+    """Bracket seeded from the REAL knockout rows (post-R32 conditioning).
 
-    Once the Round of 32 is complete we know the 16 survivors and the 8 actual
-    R16 pairings. Re-simulating the bracket from group standings (see
-    run_one_tournament) lets already-eliminated teams "advance" again — the
-    phantom-progression bug that left dead teams carrying champion%. Here we set
-    the resolved stages and only simulate forward:
+    Every tie the detector has entered — at ANY stage (R16, QF, SF, Final) — is
+    pinned: its two teams get their stage floor and the pairing is played with its
+    true opponents. A team named in a DEEPER round's tie definitively won its
+    shallower ties, so we bank that winner instead of re-rolling it. This closes
+    the phantom-progression bug (eliminated teams re-advancing and carrying
+    champion%) at EVERY round, not just R32→R16 — the round the bracket has
+    reached auto-advances as the detector writes deeper rows, with no code change.
 
-      - every R32 participant → stage 1 (reached Round of 32)
-      - both teams of each R16 tie → stage 2 (reached Round of 16)
-      - the 8 real R16 ties are played with their true pairings
-      - QF-and-beyond keep the engine's documented random-shuffle approximation
-        (bracket PATH is blurred; team STRENGTHS are exact) — we don't hard-code
-        the official QF adjacency, so no risk of a wrong-but-confident tree.
+    Rounds whose pairings aren't entered yet keep the documented random-shuffle
+    approximation from that depth on: team STRENGTHS are exact, bracket PATH is
+    blurred, and we never invent an adjacency we don't actually have.
 
     stage codes match run_one_tournament: 1=R32, 2=R16, 3=QF, 4=SF, 5=Final,
     6=Champion. Teams that exited in the group stage stay at 0.
     """
+    ties_by_stage = bracket.ties_by_stage
     stage = {t: 0 for t in ALL_TEAMS}
-    for t in r32_teams:
-        if t in stage:
-            stage[t] = 1
-    qf_teams: List[str] = []
-    for a, b in r16_ties:
-        stage[a] = max(stage[a], 2)
-        stage[b] = max(stage[b], 2)
-        ga, gb = sim_match(a, b, knockout=True, ratings=ratings)
-        w = a if ga > gb else b
-        stage[w] = 3
-        qf_teams.append(w)
 
-    def run_round(teams: List[str], next_stage: int) -> List[str]:
-        winners = []
-        for i in range(0, len(teams), 2):
-            ga, gb = sim_match(teams[i], teams[i + 1], knockout=True, ratings=ratings)
-            w = teams[i] if ga > gb else teams[i + 1]
-            stage[w] = next_stage
+    # 1. Stage floors from the R32 field + every entered tie.
+    for t in bracket.r32_teams:
+        if t in stage:
+            stage[t] = max(stage[t], 1)
+    for code, ties in ties_by_stage.items():
+        for a, b in ties:
+            stage[a] = max(stage[a], code)
+            stage[b] = max(stage[b], code)
+
+    # 2. Depth-implied winners: the participants of a stage-(S+1) tie are exactly
+    #    the teams that WON their stage-S tie. reached_next[S] = those winners.
+    reached_next: Dict[int, Set[str]] = {}
+    for code, ties in ties_by_stage.items():
+        won_prev = reached_next.setdefault(code - 1, set())
+        for a, b in ties:
+            won_prev.add(a)
+            won_prev.add(b)
+
+    def play_round(entering_pool: List[str], code: int) -> List[str]:
+        """Play stage `code`: honour known pairings + bank depth-decided winners,
+        shuffle the rest. Returns the teams advancing to stage `code + 1`."""
+        pool_set = set(entering_pool)
+        # Known pairings whose BOTH teams actually reached this round (a deeper
+        # row referencing a team this round didn't produce is a data gap — drop
+        # it and let the shuffle handle those teams).
+        known = [
+            (a, b) for a, b in ties_by_stage.get(code, [])
+            if a in pool_set and b in pool_set
+        ]
+        covered = {t for tie in known for t in tie}
+        remainder = [t for t in entering_pool if t not in covered]
+        random.shuffle(remainder)
+        filler = [
+            (remainder[i], remainder[i + 1])
+            for i in range(0, len(remainder) - 1, 2)
+        ]
+        won_set = reached_next.get(code, set())
+        winners: List[str] = []
+        for a, b in known + filler:
+            if a in won_set and b not in won_set:
+                w = a                       # a already won this round (deeper row)
+            elif b in won_set and a not in won_set:
+                w = b
+            else:
+                ga, gb = sim_match(a, b, knockout=True, ratings=ratings)
+                w = a if ga > gb else b
+            stage[w] = max(stage[w], code + 1)
             winners.append(w)
         return winners
 
-    random.shuffle(qf_teams)                 # bracket-path approximation from QF on
-    sf = run_round(qf_teams, 4)              # QF  → SF  (8 → 4)
-    fin = run_round(sf, 5)                   # SF  → F   (4 → 2)
-    run_round(fin, 6)                        # Final     (2 → 1)
+    # R16 participants are exactly the 16 teams in the R16 rows; deeper rounds
+    # take the winners the previous round produced.
+    r16_pool = [t for tie in ties_by_stage.get(2, []) for t in tie]
+    qf = play_round(r16_pool, 2)   # R16 → QF   (pins real R16 ties, banks decided)
+    sf = play_round(qf, 3)         # QF  → SF   (pins any entered QF ties)
+    fin = play_round(sf, 4)        # SF  → Final
+    play_round(fin, 5)             # Final      → champion
     return stage
 
 
 def run_one_tournament(
     played: Optional[PlayedResults] = None,
     ratings: Optional[dict] = None,
-    ko_r16: Optional[List[Tuple[str, str]]] = None,
-    r32_teams: Optional[List[str]] = None,
+    bracket: "Optional[KnockoutBracket]" = None,
 ) -> Dict[str, int]:
     """Returns dict: team → furthest stage (0=group .. 6=champion).
 
@@ -211,12 +245,13 @@ def run_one_tournament(
     None re-simulates the full group stage (pre-tournament / standalone behaviour).
     `ratings` (from wc.form.adjusted_ratings) is form-adjusted strength applied to
     all UNPLAYED fixtures (group + knockout); None uses the frozen TEAMS table.
-    `ko_r16` (from wc.results.load_knockout_bracket) is the 8 real Round-of-16
-    ties; when a complete set is supplied the bracket is seeded from it instead of
-    re-simulated from group standings — see _run_pinned_knockout.
+    `bracket` (from wc.results.load_knockout_bracket) is the real knockout tree;
+    once the full Round of 16 is known the bracket is seeded from it (pinning
+    every entered round) instead of re-simulated from group standings — see
+    _run_pinned_knockout.
     """
-    if ko_r16 and len(ko_r16) == 8:
-        return _run_pinned_knockout(ko_r16, r32_teams or [], ratings)
+    if bracket is not None and bracket.is_pinnable():
+        return _run_pinned_knockout(bracket, ratings)
     stage = {t: 0 for t in ALL_TEAMS}
     advancers: List[str] = []
     third_pool: List[Tuple[Tuple[int, int, int], str]] = []

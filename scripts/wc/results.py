@@ -32,6 +32,7 @@ import json
 import os
 import urllib.request
 import urllib.error
+from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, List, Set, Tuple
 
 from .teams import NAME_TO_SLUG
@@ -213,28 +214,72 @@ def load_played_results(source: str | None = None) -> PlayedResults:
     return merged
 
 
-def load_knockout_bracket(
-    source: str | None = None,
-) -> Tuple[List[str], List[Tuple[str, str]]]:
-    """Real Round-of-32 field + the 8 Round-of-16 ties, from the matches JSON.
+# Site knockout-stage string → internal stage code. Matches the simulator's
+# stage ladder: 1=R32, 2=R16, 3=QF, 4=SF, 5=Final. Both 'F' (WcStage type) and
+# 'Final' (older rows) map to 5.
+_KO_STAGE_CODE: Dict[str, int] = {
+    "R32": 1, "R16": 2, "QF": 3, "SF": 4, "F": 5, "Final": 5,
+}
+# How many ties a stage has when fully known (used to decide the deepest round
+# that can be pinned with certainty).
+_KO_STAGE_FULL: Dict[int, int] = {2: 8, 3: 4, 4: 2, 5: 1}
 
-    Returns ``(r32_teams, r16_ties)`` where r32_teams is every team that reached
-    the Round of 32 (both sides of the 16 R32 rows) and r16_ties is the list of
-    (home, away) pairings for the Round of 16. Both use MODEL TEAM NAMES (the
-    keys of teams.TEAMS / ALL_TEAMS), the namespace the simulator's sim_match and
-    stage dict operate in — NOT slugs.
 
-    The simulator uses these to seed the knockout bracket from the actual result
-    once the R32 is complete, instead of re-simulating it from group standings
-    (which lets eliminated teams re-advance — the phantom-progression bug). Rows
-    whose team names don't resolve to a model team (unfilled bracket placeholders
-    like "Winner Match 89") are skipped, so a partially-known bracket simply
-    yields fewer than 8 ties and the caller falls back to the group re-sim.
+@dataclass
+class KnockoutBracket:
+    """The real bracket as entered in the site's matches JSON, in MODEL NAMES.
+
+    ``ties_by_stage`` maps a stage code (2=R16, 3=QF, 4=SF, 5=Final) to the
+    (home, away) pairings present so far. R32 rows contribute only the
+    ``r32_teams`` floor — the R16 rows already encode who won the R32. Every name
+    is a key of teams.TEAMS / ALL_TEAMS (the namespace sim_match + the stage dict
+    operate in), NOT a slug.
+
+    Partial rounds are first-class: a stage carries however many ties are known,
+    and the simulator pins those while shuffling the remainder. As results roll
+    in and the detector writes deeper rows, the bracket auto-deepens R16 → QF →
+    SF → Final with no code change — that is the whole point of this shape.
+    """
+    r32_teams: List[str] = field(default_factory=list)
+    ties_by_stage: Dict[int, List[Tuple[str, str]]] = field(default_factory=dict)
+
+    @property
+    def r16_ties(self) -> List[Tuple[str, str]]:
+        return self.ties_by_stage.get(2, [])
+
+    def is_pinnable(self) -> bool:
+        """True once the full Round of 16 (8 ties) is known — the minimum to
+        seed the knockout bracket instead of re-simulating it from group
+        standings."""
+        return len(self.r16_ties) == 8
+
+    def deepest_full_stage(self) -> int:
+        """Deepest stage whose complete complement of ties is present (0 if
+        none). Purely for logging — the simulator pins every known tie at every
+        stage regardless."""
+        deepest = 0
+        for code in (2, 3, 4, 5):
+            if len(self.ties_by_stage.get(code, [])) == _KO_STAGE_FULL[code]:
+                deepest = code
+        return deepest
+
+
+_STAGE_NAME = {2: "R16", 3: "QF", 4: "SF", 5: "Final"}
+
+
+def load_knockout_bracket(source: str | None = None) -> KnockoutBracket:
+    """Real knockout bracket (every stage present) from the matches JSON.
+
+    Returns a :class:`KnockoutBracket`. The simulator uses it to seed the bracket
+    from the actual pairings once the R32 is complete, instead of re-simulating
+    it from group standings — which lets eliminated teams re-advance (the
+    phantom-progression bug). Rows whose names don't resolve to a model team
+    (unfilled placeholders like "Winner Match 89") are skipped, so a
+    partially-known deeper round simply carries fewer ties.
     """
     raw = _load_raw(source)
     matches = raw.get("matches", [])
-    r32_teams: List[str] = []
-    r16_ties: List[Tuple[str, str]] = []
+    bracket = KnockoutBracket()
     seen: Set[str] = set()
 
     def to_model_name(site_name: str) -> str | None:
@@ -242,21 +287,21 @@ def load_knockout_bracket(
         return model if model in NAME_TO_SLUG else None
 
     for m in matches:
-        stage = m.get("stage")
-        if stage not in ("R32", "R16"):
+        code = _KO_STAGE_CODE.get(m.get("stage"))
+        if code is None:
             continue
         home = to_model_name(m.get("home", ""))
         away = to_model_name(m.get("away", ""))
         if home is None or away is None:
             continue  # unresolved placeholder slot — skip, not fatal
-        if stage == "R32":
+        if code == 1:  # R32 → floor only (R16 rows encode the R32 winners)
             for s in (home, away):
                 if s not in seen:
                     seen.add(s)
-                    r32_teams.append(s)
-        else:  # R16
-            r16_ties.append((home, away))
-    return r32_teams, r16_ties
+                    bracket.r32_teams.append(s)
+        else:
+            bracket.ties_by_stage.setdefault(code, []).append((home, away))
+    return bracket
 
 
 def describe(played: PlayedResults) -> str:

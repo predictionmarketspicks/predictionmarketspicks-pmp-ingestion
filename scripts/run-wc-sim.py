@@ -214,20 +214,32 @@ def main() -> int:
     elif args.no_form:
         print("[wc-sim] --no-form: using frozen pre-tournament ratings")
 
-    # 0c. Real knockout bracket (post-R32). When the full Round of 16 is known,
-    # seed the bracket from the actual 8 ties instead of re-simulating it from
-    # group standings — otherwise eliminated teams keep re-advancing and carry
-    # phantom champion% (the staleness the recap article/mispricings surface).
-    ko_r16, r32_teams = None, None
+    # 0c. Real knockout bracket (post-R32). When the full Round of 16 is known we
+    # seed the bracket from the actual rows instead of re-simulating it from group
+    # standings — otherwise eliminated teams keep re-advancing and carry phantom
+    # champion% (the staleness the recap article/mispricings surface). Every
+    # deeper round the detector has entered (QF, SF, Final) is pinned too, and
+    # depth-decided winners are banked — so the pin auto-advances round by round
+    # with no code change; only genuinely-unplayed rounds are shuffle-approximated.
+    bracket = None
     if not args.no_results:
         try:
-            r32_teams, r16_ties = load_knockout_bracket(args.matches_source)
-            if len(r16_ties) == 8:
-                ko_r16 = r16_ties
-                print(f"[wc-sim] bracket pinned to real Round of 16 "
-                      f"({len(r32_teams)} R32 teams, 8 ties) — QF+ shuffled")
-            elif r16_ties:
-                print(f"[wc-sim] partial R16 ({len(r16_ties)}/8 ties) — "
+            bracket = load_knockout_bracket(args.matches_source)
+            if bracket.is_pinnable():
+                from wc.results import _STAGE_NAME  # display only
+                deepest = bracket.deepest_full_stage()
+                stage_counts = ", ".join(
+                    f"{_STAGE_NAME[c]}:{len(bracket.ties_by_stage.get(c, []))}"
+                    for c in (2, 3, 4, 5) if bracket.ties_by_stage.get(c)
+                )
+                deepest_label = _STAGE_NAME.get(deepest, "R16")
+                print(f"[wc-sim] bracket pinned to real rows "
+                      f"({len(bracket.r32_teams)} R32 teams; {stage_counts}) — "
+                      f"deepest complete round {deepest_label}, rounds beyond shuffled")
+            else:
+                n = len(bracket.r16_ties)
+                bracket = None  # not enough to seed → fall back to group re-sim
+                print(f"[wc-sim] partial R16 ({n}/8 ties) — "
                       f"re-simulating bracket from group standings")
         except Exception as e:  # noqa: BLE001 — bracket is a best-effort overlay
             print(f"[wc-sim] knockout bracket load failed (non-fatal): {e!s}")
@@ -235,7 +247,7 @@ def main() -> int:
     # 1. Monte Carlo team progression (conditioned on `played`, form-adjusted)
     t0 = time.time()
     random.seed(args.seed)
-    stages = [run_one_tournament(played, ratings, ko_r16, r32_teams)
+    stages = [run_one_tournament(played, ratings, bracket)
               for _ in range(args.iterations)]
     agg = aggregate_team_progression(stages)
     print(f"[wc-sim] team MC done in {time.time() - t0:.1f}s")

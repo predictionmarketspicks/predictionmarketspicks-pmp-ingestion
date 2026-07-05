@@ -78,6 +78,12 @@ def main() -> int:
             "home_xg": d["home_xg"],
             "away_xg": d["away_xg"],
             "total_xg": d["total_xg"],
+            # W/D/L from the same Dixon-Coles grid (site home = team_a), so the
+            # match page's model line stays live-accurate for knockout rows the
+            # group matview never covers — no hand-set hw/d/aw to go stale.
+            "home_win": d["hw"],
+            "draw": d["d"],
+            "away_win": d["aw"],
             "o15": d["o15"],
             "o25": d["o25"],
             "o35": d["o35"],

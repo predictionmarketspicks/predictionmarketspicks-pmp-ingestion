@@ -90,6 +90,42 @@ export async function upsertCommodityEdgeRows(rows) {
   return { count: data?.length ?? 0, tag, throttled };
 }
 
+// Append-only intraday history (silver/gold/oil). Slim projection of the same
+// row objects the primary upsert consumes. onConflict + ignoreDuplicates makes
+// re-fires idempotent; a duplicate (commodity,snapshot_at,event_ticker,strike)
+// is a no-op. Rolled up nightly into commodity_edge_daily, pruned at 7 days.
+// Never called for bitcoin (15s cadence would bloat) — gated by config in index.js.
+export async function insertCommodityEdgeIntraday(rows) {
+  if (!rows || rows.length === 0) return { count: 0 };
+  const slim = rows.map((r) => ({
+    snapshot_at: r.snapshot_at,
+    commodity: r.commodity,
+    event_ticker: r.event_ticker,
+    event_close_at: r.event_close_at,
+    strike: r.strike,
+    spot_price: r.spot_price,
+    kalshi_yes: r.kalshi_yes,
+    kalshi_volume_24h: r.kalshi_volume_24h,
+    options_prob: r.options_prob,
+    prob_physical: r.prob_physical,
+    fused_edge_pp: r.fused_edge_pp,
+    direction: r.direction,
+    confidence: r.confidence,
+    options_iv: r.options_iv,
+    quality_flag: r.quality_flag,
+  }));
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('commodity_edge_intraday')
+    .upsert(slim, {
+      onConflict: 'commodity,snapshot_at,event_ticker,strike',
+      ignoreDuplicates: true,
+    })
+    .select('id');
+  if (error) throw new Error(`commodity_edge_intraday insert: ${error.message}`);
+  return { count: data?.length ?? 0 };
+}
+
 // Daily dealer-gamma snapshot. UNIQUE (commodity, snapshot_date) — intraday
 // ticks during the same UTC day update the row in place; tomorrow gets a new
 // one. Failures are logged, not thrown — gamma is a secondary signal and a

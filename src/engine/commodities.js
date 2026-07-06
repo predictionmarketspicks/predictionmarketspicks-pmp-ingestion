@@ -65,6 +65,11 @@ export const COMMODITIES = {
     // and resumes at 9:30 AM ET. Pairs with requiredOffHours:false on the
     // databento_slv readiness gate (src/index.js).
     pauseSnapshotsOffHours: true,
+    // Intraday history retention (INTRADAY_EDGE_HISTORY_2026-07-05). Append the
+    // banded strike subset to commodity_edge_intraday every tick; nightly rollup
+    // + 7-day prune handle the rest. Band = ±intradayBandPct of spot ∪ live book.
+    intradayHistory: true,
+    intradayBandPct: 0.10,
   },
   gold: {
     commodity: 'gold',
@@ -84,6 +89,9 @@ export const COMMODITIES = {
     // Same as silver — OPRA dark off-hours, GLD book frozen, no new info to
     // surface. See commodities.silver.pauseSnapshotsOffHours.
     pauseSnapshotsOffHours: true,
+    // Intraday history retention — see commodities.silver.intradayHistory.
+    intradayHistory: true,
+    intradayBandPct: 0.10,
   },
   oil: {
     commodity: 'oil',
@@ -127,6 +135,9 @@ export const COMMODITIES = {
     // a frozen IV smile + a moving spot would just upsert misleading rows.
     // Pairs with requiredOffHours:false on the databento_uso readiness gate.
     pauseSnapshotsOffHours: true,
+    // Intraday history retention — see commodities.silver.intradayHistory.
+    intradayHistory: true,
+    intradayBandPct: 0.10,
   },
   bitcoin: {
     commodity: 'bitcoin',

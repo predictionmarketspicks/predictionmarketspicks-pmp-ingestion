@@ -28,6 +28,7 @@ import { startFlowAlerts } from './engine/flow-alerts.js';
 import { EXPIRATION_BURST_WINDOW_MS, BTC_STRIKE_COUNT_WARN } from './engine/thresholds.js';
 import {
   upsertCommodityEdgeRows,
+  insertCommodityEdgeIntraday,
   upsertGammaSnapshot,
   filterAlreadyPostedKeys,
   recordPostedAlerts,
@@ -279,6 +280,26 @@ async function runSnapshotOnceInner(state) {
       ? `top=${top.direction} $${top.strike.toFixed(2)} ${(top.edge_pp * 100).toFixed(1)}pp ${snap.meta.topTier}`
       : 'top=NO_EDGE';
     console.log(`[${config.commodity}] snapshot: ${count} rows tag=${tag} • ${topStr} • spot=$${snap.meta.spotPrice.toFixed(2)}`);
+
+    // Intraday history (silver/gold/oil): append the banded strike subset.
+    // ±intradayBandPct of spot ∪ any strike with a live two-sided book, so
+    // actively-quoted wing strikes still get captured. Isolated in try/catch —
+    // a history write outage must never block the primary upsert or Discord.
+    if (config.intradayHistory === true) {
+      const band = config.intradayBandPct ?? 0.10;
+      const spot = snap.meta.spotPrice;
+      const banded = snap.rows.filter((r) => {
+        const inBand = spot > 0 && Math.abs(r.strike / spot - 1) <= band;
+        const liveBook = r.kalshi_yes_bid != null && r.kalshi_yes_ask != null;
+        return inBand || liveBook;
+      });
+      try {
+        const { count: hist } = await insertCommodityEdgeIntraday(banded);
+        console.log(`[${config.commodity}] intraday history: +${hist} rows (band ±${(band * 100).toFixed(0)}%, ${banded.length}/${snap.rows.length} strikes)`);
+      } catch (err) {
+        console.warn(`[${config.commodity}] intraday history write failed: ${err?.message || err}`);
+      }
+    }
 
     // Dealer-gamma snapshot — UNIQUE (commodity, snapshot_date) makes intraday
     // ticks idempotent (last-write-wins). Failures are logged but never throw,

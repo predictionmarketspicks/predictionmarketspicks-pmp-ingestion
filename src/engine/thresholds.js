@@ -25,6 +25,22 @@ export const MIN_EDGE_PP = 0.05;
 // this (they keep the symmetric path — config.postSpreadGate is unset for them).
 export const MIN_EDGE_PP_NO = 0.1;
 
+// YES-side favorite floor (BITCOIN — TOOL_RECALIBRATION_ROUND2_2026-07-21).
+// Settled record: YES picks at >=70c ran model 89.8% vs realized 75.7% (n=37,
+// 60% of all flow) — the optProb model saturates faster than Kalshi's book
+// keeps tail premium near the hourly close, printing phantom 5-7pp edges on
+// 85-92c contracts. Same disease the 6/16 NO-side fix treated; same medicine:
+// a YES BUY at/above the favorite price line must clear the stricter
+// post-spread floor. Mid-band (20-70c) YES keeps the 5pp floor — that band is
+// the tool's entire realized profit (+$2.20 on 11 picks). Bitcoin-only via
+// config.postSpreadGate + config.yesFavoritePrice; silver/gold/oil never read these.
+export const YES_FAVORITE_PRICE = 0.70;   // yesAsk at/above this = favorite
+export const MIN_EDGE_PP_YES_FAVORITE = 0.10;
+
+// Longshot side, same logic smaller leak (YES <=20c went 2/14): reuse the
+// mispricing scanner's 7/4 band — no YES BUYs under 15c, full stop.
+export const YES_LONGSHOT_PRICE_MIN = 0.15;
+
 // Minimum 24h Kalshi volume to trust last_price as fair (else stale print).
 export const MIN_VOL_FOR_LIVE_PRICE = 50;
 

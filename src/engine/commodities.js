@@ -204,6 +204,13 @@ export const COMMODITIES = {
     postSpreadGate: true,
     minEdgePpNoSide: 0.1, // NO-side post-spread floor (stricter than YES until optProb recalibrates)
     noSideEnabled: true, // kill switch: set false to suppress every BUY NO without a redeploy of the gate math
+    // YES-side favorite floor (TOOL_RECALIBRATION_ROUND2_2026-07-21). YES BUYs at
+    // yesAsk >= yesFavoritePrice must clear minEdgePpYesFavorite (10pp) instead of
+    // the 5pp mid-band floor — the 85-92c model-saturation artifact (model 89.8%
+    // vs realized 75.7%, n=37). YES BUYs under 15c are suppressed outright (longshot).
+    yesFavoritePrice: 0.70,
+    minEdgePpYesFavorite: 0.10,
+    yesFavoriteEnabled: true, // kill switch: set false to revert to the symmetric YES floor without a redeploy
     // OPRA closes at 4pm ET. IBIT chain stops updating overnight even
     // though BTC spot keeps moving on 24/7 venues — running edge math
     // against a frozen IV smile + a moving Pyth spot would surface

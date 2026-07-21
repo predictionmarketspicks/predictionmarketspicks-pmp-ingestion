@@ -23,6 +23,9 @@ import { getShortHorizonStats } from './short-horizon-vol.js';
 import {
   MIN_EDGE_PP,
   MIN_EDGE_PP_NO,
+  YES_FAVORITE_PRICE,
+  MIN_EDGE_PP_YES_FAVORITE,
+  YES_LONGSHOT_PRICE_MIN,
   MIN_VOL_FOR_LIVE_PRICE,
   MAX_BID_ASK_SPREAD,
   MAX_QUOTE_AGE_SEC,
@@ -420,6 +423,23 @@ export function postSpreadSideGate({
     return { pass: true, dirYes: false, netEdge: noNet, yesNet, noNet };
   }
   return { pass: false, dirYes: null, netEdge: null, yesNet, noNet };
+}
+
+// YES favorite/longshot recalibration (TOOL_RECALIBRATION_ROUND2_2026-07-21) — pure.
+// Given the live yesAsk, returns the effective YES post-spread floor and whether
+// the YES side is a suppressed longshot:
+//   - favorites (yesAsk >= favPrice) must clear favFloor (10pp) — the 85-92c
+//     model-saturation artifact (model 89.8% vs realized 75.7%, n=37);
+//   - mid-band keeps midFloor (5pp) — the tool's entire realized profit;
+//   - longshots (yesAsk < longshotMin, i.e. <15c) are flagged for suppression.
+// enabled=false reverts to symmetric: midFloor everywhere, never a longshot.
+// Longshot suppression itself is applied at the call site (only when a YES BUY
+// would otherwise fire); this helper only classifies the price.
+export function resolveYesFloor({ yesAsk, enabled = true, favPrice, favFloor, midFloor, longshotMin }) {
+  if (!enabled) return { minEdgeYes: midFloor, longshot: false };
+  const minEdgeYes = yesAsk != null && yesAsk >= favPrice ? favFloor : midFloor;
+  const longshot = yesAsk != null && yesAsk < longshotMin;
+  return { minEdgeYes, longshot };
 }
 
 // Returns { meta, rows } shaped for the supabase writer. Returns null if any
@@ -898,15 +918,37 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       // NOT a BUY — emit PASS/low so both the bot (reads direction) and tool_picks
       // (trigger records only direction IN ('BUY YES','BUY NO')) skip it.
       if (config.postSpreadGate === true) {
+        // YES-side favorite/longshot recalibration (TOOL_RECALIBRATION_ROUND2_2026-07-21).
+        // A YES BUY at/above the favorite price line must clear the stricter
+        // post-spread floor (the 85-92c model-saturation artifact — model 89.8%
+        // vs realized 75.7% on the favorite band); a YES BUY under 15c is
+        // suppressed outright (longshot band, 2/14 realized). Mid-band (20-70c)
+        // YES keeps the 5pp floor — that band is the tool's entire realized profit.
+        // Bitcoin-only via config; kill switch config.yesFavoriteEnabled reverts
+        // to the symmetric YES floor without redeploying gate math.
+        const yesFavEnabled = config.yesFavoriteEnabled ?? true;
+        const { minEdgeYes, longshot: yesPriceLongshot } = resolveYesFloor({
+          yesAsk: market.yesAsk,
+          enabled: yesFavEnabled,
+          favPrice: config.yesFavoritePrice ?? YES_FAVORITE_PRICE,
+          favFloor: config.minEdgePpYesFavorite ?? MIN_EDGE_PP_YES_FAVORITE,
+          midFloor: MIN_EDGE_PP,
+          longshotMin: YES_LONGSHOT_PRICE_MIN,
+        });
+
         const g = postSpreadSideGate({
           chosenProb,
           yesBid: market.yesBid,
           yesAsk: market.yesAsk,
-          minEdgeYes: MIN_EDGE_PP,
+          minEdgeYes,
           minEdgeNo: config.minEdgePpNoSide ?? MIN_EDGE_PP_NO,
           noSideEnabled: config.noSideEnabled ?? true,
         });
-        if (g.pass) {
+
+        // Longshot suppression: no YES BUYs under 15c, full stop.
+        const yesLongshot = g.pass && g.dirYes && yesPriceLongshot;
+
+        if (g.pass && !yesLongshot) {
           dirYes = g.dirYes;
           mag = g.netEdge; // confidence/tier reflect the post-spread side edge
         } else {
@@ -915,11 +957,15 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
           confidence = 'low';
           const grossPct = Math.abs(chosenEdge * 100).toFixed(1);
           const noFloor = config.minEdgePpNoSide ?? MIN_EDGE_PP_NO;
-          if (chosenEdge > 0) {
+          if (yesLongshot) {
+            rationale =
+              `YES under ${(YES_LONGSHOT_PRICE_MIN * 100).toFixed(0)}¢ — longshot band ` +
+              `suppressed (favorite-longshot recalibration 2026-07-21). Not actionable.`;
+          } else if (chosenEdge > 0) {
             const netPct = g.yesNet != null ? (g.yesNet * 100).toFixed(1) : 'n/a';
             rationale =
               `YES underpriced by ${grossPct}pp gross, but only ${netPct}pp after the ` +
-              `YES ask-side spread — below the ${(MIN_EDGE_PP * 100).toFixed(0)}pp net floor. Not actionable.`;
+              `YES ask-side spread — below the ${(minEdgeYes * 100).toFixed(0)}pp net floor. Not actionable.`;
           } else {
             const netPct = g.noNet != null ? (g.noNet * 100).toFixed(1) : 'n/a';
             const off = (config.noSideEnabled ?? true) ? '' : ' (BUY NO disabled)';
@@ -1286,6 +1332,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 export const __test__ = {
   buildIvSmile,
   postSpreadSideGate,
+  resolveYesFloor,
   kalshiYesImpliedProb,
   classifyKalshiView,
   passesLiquidityGate,

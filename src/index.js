@@ -894,7 +894,10 @@ bootstrapPolymarketSnapshot();
 
 bootstrapGasSnapshot();
 
-bootstrapWcSnapshot();
+// WC sunset 2026-07-24 — tournament over, all WC feeds dead. The snapshot loop
+// already early-returns on empty feeds; disabling the bootstrap stops the idle
+// 30-min tick entirely. Re-enable only if the World Cup pipeline is revived.
+// bootstrapWcSnapshot();
 
 bootstrapPairDiscover();
 

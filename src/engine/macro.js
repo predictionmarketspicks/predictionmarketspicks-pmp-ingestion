@@ -17,6 +17,7 @@ import { insertMacroSnapshots } from '../delivery/supabase.js';
 import { isOptionsMarketOpen } from '../feeds/massive.js';
 import { recordTick, registerFeed } from '../observability/health.js';
 import { deriveKalshiTailCandidates, writeTailCandidatesFromBatch } from './tail-edge.js';
+import { runPositioningOnce } from './positioning.js';
 
 const SNAPSHOT_INTERVAL_MARKET_MS = Number(
   process.env.MACRO_INTERVAL_MARKET_MS || 5 * 60 * 1000,
@@ -54,6 +55,10 @@ export async function runMacroSnapshotOnce() {
     // Tail-side write is fire-and-forget — never blocks the primary snapshot.
     // The function logs+swallows its own errors; we don't await failure-cost.
     await writeTailCandidatesFromBatch(rows, deriveKalshiTailCandidates, 'kalshi-macro');
+    // Positioning compute reads the trailing rollup out of the rows we just
+    // wrote and upserts today's per-ticker signal. Fire-and-forget: swallows
+    // its own errors, never blocks the snapshot loop.
+    await runPositioningOnce();
     return { rowsFetched: rows.length, rowsWritten: count };
   } catch (err) {
     state.lastErrorAt = new Date().toISOString();

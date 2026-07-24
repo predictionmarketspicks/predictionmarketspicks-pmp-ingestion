@@ -472,3 +472,22 @@ export async function recordFeedPerformance(rows) {
   }
   return { count: rows.length };
 }
+
+// ---------- market_positioning_signals (Market Positioning Layer) ----------
+//
+// Positioning signal (OI trend + volume turnover; order-book imbalance is
+// Phase 2) for the Kalshi macro/politics/sports watchlist. All the z-score /
+// state / modifier math lives in the Postgres function so the engine never
+// pulls the 20-session history for ~1600 tickers into JS on every 5min tick —
+// it just fires the RPC, which reads the trailing rollup out of
+// macro_market_snapshots and upserts today's row per ticker. Returns the row
+// count so the caller can be loud on a silent 0-row no-op.
+export async function computeMarketPositioning({ snapshotDate } = {}) {
+  const sb = getClient();
+  const { data, error } = await sb.rpc(
+    'compute_market_positioning',
+    snapshotDate ? { p_date: snapshotDate } : {},
+  );
+  if (error) throw new Error(`compute_market_positioning: ${error.message}`);
+  return { count: typeof data === 'number' ? data : 0 };
+}

@@ -35,6 +35,7 @@ import {
   recordFeedPerformance,
 } from './delivery/supabase.js';
 import { postCommodityAlert, postMoversAlert, postBotLog } from './delivery/discord.js';
+import { publishCommodityEdgeAlert } from './delivery/alert-feed.js';
 import { revalidateCommodityEdge } from './delivery/revalidate.js';
 import { findActiveRollover as findOilRollover } from './engine/wti-rollover.js';
 import { fetchKalshiCandidates } from './feeds/movers.js';
@@ -371,6 +372,9 @@ async function runSnapshotOnceInner(state) {
                 posted_at: new Date().toISOString(),
               },
             ]);
+            // Edge Alerts API (PR 1): dual-write the durable feed. Self-isolating
+            // (never throws) so a feed outage can't affect the Discord post.
+            await publishCommodityEdgeAlert(snap.meta, key);
           }
         } catch (err) {
           console.error(`[${config.commodity}] discord post failed`, err?.message || err);

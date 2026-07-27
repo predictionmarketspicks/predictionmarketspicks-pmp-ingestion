@@ -13,7 +13,8 @@ pushed to `origin/main`; deployed image verified in-machine (`useV2Cutover: true
 `tool_changes` id=9 written (`resets_record: true`); `sync_tool_track_from('bitcoin-edge')`
 → `track_from = 2026-07-27T22:38:00Z`. Bot alignment deployed same window (pmp-btc-bot 36fc44f).
 **Outstanding: the model_version/mu_source verification query below has NOT run** — deploy landed
-Sunday evening, after the session close; first warm bitcoin rows arrive Monday 7/28 10 AM–4 PM ET.
+Monday 7/27 at 6:38 PM ET, ~2.5h after that day's 4 PM close (last v1 bitcoin snapshot 19:59 UTC).
+First warm V2 bitcoin rows arrive **Tuesday 7/28, 10 AM–4 PM ET**.
 
 ---
 

@@ -1,15 +1,23 @@
 name: WC Sim Nightly
 
 on:
+  # TOURNAMENT OVER (2026-07-19). This workflow is DISABLED at the GitHub level
+  # (`gh workflow disable wc-sim-nightly.yml`, 2026-07-27) — re-enable only if
+  # there is a live tournament to simulate.
+  #
+  # History: a group-stage-only hourly cron ('0 * * * *') was added for the result
+  # autofeed and marked "REVERT after the group stage". It was never reverted, so it
+  # kept re-simulating a FINISHED tournament ~13×/day (GitHub throttles the hourly
+  # schedule), writing 648 rows/run into world_cup_simulation until 2026-07-27 —
+  # 125 MB of dead rows. It is deleted below, not just disabled: disabling alone is
+  # undone by anyone clicking "Enable workflow".
+  #
+  # Before re-enabling for a future tournament, re-read
+  # handoffs/STORAGE_CLEANUP_WC_TAIL_2026-07-27.md (PMP repo) — the WC base tables
+  # were truncated and the *_latest matviews are frozen. NEVER refresh those matviews
+  # against empty base tables; it blanks the live pages.
   schedule:
     - cron: '0 6 * * *'   # 02:00 ET — nightly baseline (off-tournament cadence)
-    # Result autofeed (handoffs/WC_RESULT_AUTOFEED_2026-06-18.md) — collapse
-    # Lag B during the group stage. Phase 2 lands ESPN finals in
-    # world_cup_results within one 30-min scan; this hourly re-run reconditions
-    # the sim within the hour, so the mispricing phantom can't survive long.
-    # ~3 min/run × hourly × group stage ≈ negligible Actions minutes.
-    # REVERT after the group stage (delete this line) back to nightly-only.
-    - cron: '0 * * * *'   # hourly — group-stage window only
   workflow_dispatch:
     inputs:
       validate_only:

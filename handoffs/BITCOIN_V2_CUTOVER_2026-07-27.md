@@ -7,7 +7,13 @@ every losing leg a NO. Public picks post-7/21: NO side 1-for-15.
 **Scope:** `src/engine/{commodities,commodity-base,thresholds,short-horizon-vol}.js`,
 `src/delivery/{discord,alert-feed}.js`, tests. Plus one Supabase migration (already
 applied) and a one-line bot alignment (see pmp-btc-bot handoff of same date).
-**Status: code merged + tested (380/380 vitest). NOT deployed — `fly deploy` is the operator step below.**
+**Status: SHIPPED a85f4b1 — deployed to Fly 2026-07-27 22:38 UTC.** 380/380 vitest green at deploy;
+pushed to `origin/main`; deployed image verified in-machine (`useV2Cutover: true`,
+`noSideEnabled: false`, `shortHorizonMuScale: 1.0`, `shortHorizonMuCapAnnual: 50`).
+`tool_changes` id=9 written (`resets_record: true`); `sync_tool_track_from('bitcoin-edge')`
+→ `track_from = 2026-07-27T22:38:00Z`. Bot alignment deployed same window (pmp-btc-bot 36fc44f).
+**Outstanding: the model_version/mu_source verification query below has NOT run** — deploy landed
+Sunday evening, after the session close; first warm bitcoin rows arrive Monday 7/28 10 AM–4 PM ET.
 
 ---
 

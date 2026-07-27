@@ -23,6 +23,8 @@ import { getShortHorizonStats } from './short-horizon-vol.js';
 import {
   MIN_EDGE_PP,
   MIN_EDGE_PP_NO,
+  BTC_MU_SCALE,
+  BTC_MU_CAP_ANNUAL,
   YES_FAVORITE_PRICE,
   MIN_EDGE_PP_YES_FAVORITE,
   YES_LONGSHOT_PRICE_MIN,
@@ -442,6 +444,20 @@ export function resolveYesFloor({ yesAsk, enabled = true, favPrice, favFloor, mi
   return { minEdgeYes, longshot };
 }
 
+// Physical-measure mu for the TWAP path (BITCOIN_V2_CUTOVER_2026-07-27) — pure.
+// shStats.mu_annual arrives pre-clamped to +/-3.0/yr (MU_CAP in
+// short-horizon-vol.js) — a 60d-drift sanity band, ~30x too tight for
+// intra-hour momentum. Consume the RAW buffer drift instead, shrunk by
+// lambda (scale) and clamped to a horizon-appropriate +/-capAnnual. Falls
+// back to the clamped mu when the raw field is absent (old buffer shape) so
+// a partial deploy can't produce an undefined mu; degrades to 0 (= pure
+// vol model) when neither resolved.
+export function resolveTwapMu({ muRaw, muClamped = null, scale = BTC_MU_SCALE, capAnnual = BTC_MU_CAP_ANNUAL }) {
+  const base = Number.isFinite(muRaw) ? muRaw : Number.isFinite(muClamped) ? muClamped : 0;
+  const scaled = base * scale;
+  return Math.max(-capAnnual, Math.min(capAnnual, scaled));
+}
+
 // Returns { meta, rows } shaped for the supabase writer. Returns null if any
 // upstream feed has no data yet (cold-start race) or a fail-open guard fires.
 export async function computeSnapshot(config, event, { now = new Date() } = {}) {
@@ -726,6 +742,8 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 
     let optProb = null;             // v1 risk-neutral
     let probPhysical = null;        // v2 physical-measure
+    let rowMuUsed = muUsed;         // mu actually driving THIS row's physical prob
+    let rowMuSource = muSource;     //   (TWAP warm-buffer path overrides below)
     let volEst = null;
     let sigmaBlendVal = null;
     let sigmaIvVal = null;
@@ -769,7 +787,14 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
         if (shStats != null) {
           sigmaRiskNeutral = alphaShortHorizon * shStats.sigma_annual + (1 - alphaShortHorizon) * iv;
           sigmaPhysical    = alphaShortHorizon * shStats.sigma_annual + (1 - alphaShortHorizon) * sigmaIvBlend;
-          muPhysicalForTwap = shStats.mu_annual;
+          muPhysicalForTwap = resolveTwapMu({
+            muRaw: shStats.mu_annual_raw,
+            muClamped: shStats.mu_annual,
+            scale: config.shortHorizonMuScale ?? BTC_MU_SCALE,
+            capAnnual: config.shortHorizonMuCapAnnual ?? BTC_MU_CAP_ANNUAL,
+          });
+          rowMuUsed = muPhysicalForTwap;
+          rowMuSource = `pyth_short_horizon_${config.shortHorizonLookbackMin ?? 15}m`;
           sigmaSource = `pyth_short_horizon_alpha_${alphaShortHorizon.toFixed(2)}`;
         } else if (eventColdBuffer) {
           // Cold-buffer fallback: use the old σ × shortHorizonVolScale ramp
@@ -1171,14 +1196,16 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       underlying_price: etfPrice,
       fred_divergence_bp: fredDivergenceBp,
       divergence_warning: divergenceWarning,
-      // V2 physical-measure parallel writes (Phase 1). Direction/confidence
-      // still derive from the v1 edge during Phase 1; model_version reflects
-      // which model owns the chosen direction/confidence, NOT which prob
-      // columns are populated.
+      // V2 physical-measure writes. model_version says which model owns the
+      // chosen direction/confidence for THIS row (v2_physical once the
+      // commodity's useV2Cutover is on and the physical inputs resolved;
+      // v1_riskneutral otherwise). mu_used/mu_source record the mu that
+      // actually drove prob_physical — on the warm TWAP path that is the
+      // short-horizon momentum mu, not the 60d drift estimator.
       prob_physical: probPhysical,
       physical_edge_pp: physicalEdge,
-      mu_used: muUsed,
-      mu_source: muSource,
+      mu_used: rowMuUsed,
+      mu_source: rowMuSource,
       mu_confidence: muConfidence,
       sigma_blend: sigmaBlendVal,
       sigma_iv: sigmaIvVal,
@@ -1333,6 +1360,7 @@ export const __test__ = {
   buildIvSmile,
   postSpreadSideGate,
   resolveYesFloor,
+  resolveTwapMu,
   kalshiYesImpliedProb,
   classifyKalshiView,
   passesLiquidityGate,

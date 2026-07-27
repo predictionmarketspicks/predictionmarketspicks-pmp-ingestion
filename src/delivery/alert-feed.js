@@ -102,7 +102,13 @@ function commodityMetaToRow(meta, alertKey) {
   const side = top.direction === 'BUY YES' ? 'YES' : 'NO';
   const yesProb = Number(top.kalshi_yes) || 0;
   const priceCents = clampCents((side === 'YES' ? yesProb : 1 - yesProb) * 100);
-  const optProb = top.options_prob == null ? null : Number(top.options_prob);
+  // Model prob = the one that drove direction/tier: physical under V2
+  // (model_version='v2_physical'), legacy risk-neutral otherwise.
+  const activeProb =
+    top.model_version === 'v2_physical' && top.prob_physical != null
+      ? top.prob_physical
+      : top.options_prob;
+  const optProb = activeProb == null ? null : Number(activeProb);
   const modelProb = optProb == null ? null : side === 'YES' ? optProb : 1 - optProb;
   const activeEdge = top.fused_edge_pp != null ? top.fused_edge_pp : top.edge_pp;
   const edgePp = activeEdge == null ? null : parseFloat((Math.abs(activeEdge) * 100).toFixed(1));

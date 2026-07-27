@@ -80,7 +80,14 @@ export function buildCommodityEmbed(meta, topEdge) {
     },
     {
       name: 'Options model',
-      value: sanitize(`${(topEdge.options_prob * 100).toFixed(0)}%`, 80),
+      // Show the prob that actually drove this alert: physical when the row's
+      // model_version says V2 owns direction/confidence, legacy otherwise.
+      value: sanitize(
+        `${((topEdge.model_version === 'v2_physical' && topEdge.prob_physical != null
+          ? topEdge.prob_physical
+          : topEdge.options_prob) * 100).toFixed(0)}%`,
+        80,
+      ),
       inline: true,
     },
     {

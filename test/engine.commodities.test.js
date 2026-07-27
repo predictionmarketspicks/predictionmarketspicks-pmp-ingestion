@@ -68,15 +68,19 @@ describe('COMMODITIES registry', () => {
     expect(all).toHaveLength(6);
   });
 
-  it('V2 cutover: silver/gold/oil flipped ON, bitcoin EXPLICITLY OFF', () => {
-    // Phase A cutover 2026-05-21. physical-measure prob drives direction/
-    // confidence for the three commodities V2 has been validated against;
-    // bitcoin carve-out preserved because runtime behavior must be unchanged
-    // (KXBTCD is hourly so drift contribution is mathematically ≤0.15pp).
+  it('V2 cutover: all four commodities ON (bitcoin joined 2026-07-27)', () => {
+    // Metals cut over 2026-05-21. Bitcoin joined 2026-07-27 after zero-mu
+    // risk-neutral kept printing fade-the-trend NOs (0-fers 7/7, 7/14,
+    // 7/24, 7/27) — the TWAP path now consumes short-horizon momentum via
+    // resolveTwapMu. NO side disabled the same day (post-7/21 NO picks
+    // 1-for-15 live; replay kept-NO hit <=14% under every mu variant).
     expect(COMMODITIES.silver.useV2Cutover).toBe(true);
     expect(COMMODITIES.gold.useV2Cutover).toBe(true);
     expect(COMMODITIES.oil.useV2Cutover).toBe(true);
-    expect(COMMODITIES.bitcoin.useV2Cutover).toBe(false);
+    expect(COMMODITIES.bitcoin.useV2Cutover).toBe(true);
+    expect(COMMODITIES.bitcoin.shortHorizonMuScale).toBeGreaterThan(0);
+    expect(COMMODITIES.bitcoin.shortHorizonMuCapAnnual).toBeGreaterThanOrEqual(10);
+    expect(COMMODITIES.bitcoin.noSideEnabled).toBe(false);
   });
 
   it('bitcoin pauses snapshots off-hours because IBIT chain is OPRA-only', () => {

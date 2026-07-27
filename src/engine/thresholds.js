@@ -41,6 +41,19 @@ export const MIN_EDGE_PP_YES_FAVORITE = 0.10;
 // mispricing scanner's 7/4 band — no YES BUYs under 15c, full stop.
 export const YES_LONGSHOT_PRICE_MIN = 0.15;
 
+// Physical-measure mu for the BTC TWAP path (BITCOIN_V2_CUTOVER_2026-07-27).
+// short-horizon-vol.js clamps its mu_annual to +/-3.0/yr — right for 60d-drift
+// sanity, useless intra-hour: +/-300%/yr over a 30-min horizon moves log-spot
+// ~1.7bp while real BTC momentum bursts annualize to thousands of %. The TWAP
+// path therefore consumes the RAW short-horizon mu, shrunk by BTC_MU_SCALE
+// (lambda) and clamped to +/-BTC_MU_CAP_ANNUAL (50/yr ~= 0.28% per 30min —
+// lets real bursts through, blocks tick-noise blowups). Replay 6/29-7/27 on
+// 169 settled picks: kept-pick hit 49%->64% (72% YES-only), stable across both
+// halves of the window. Per-commodity override: config.shortHorizonMuScale /
+// config.shortHorizonMuCapAnnual. Evidence: handoffs/BITCOIN_V2_CUTOVER_2026-07-27.md.
+export const BTC_MU_SCALE = 1.0;
+export const BTC_MU_CAP_ANNUAL = 50;
+
 // Minimum 24h Kalshi volume to trust last_price as fair (else stale print).
 export const MIN_VOL_FOR_LIVE_PRICE = 50;
 

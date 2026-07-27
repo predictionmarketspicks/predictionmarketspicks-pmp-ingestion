@@ -100,6 +100,12 @@ function computeFromSamples(samples, { now = Date.now() } = {}) {
   return {
     sigma_annual: sigma,
     mu_annual: mu,
+    // Uncapped drift for consumers with their own horizon-appropriate clamp.
+    // The ±MU_CAP band above is sized for 60d-drift sanity — ~30x too tight
+    // for intra-hour momentum (±3.0/yr over 30min moves log-spot ~1.7bp).
+    // commodity-base.js resolveTwapMu applies scale + per-commodity cap.
+    // BITCOIN_V2_CUTOVER_2026-07-27.
+    mu_annual_raw: muRaw,
     nTicks: samples.length,
     lookbackActualMin: (last.ts - samples[0].ts) / 60_000,
     lastTickAgeS: (now - last.ts) / 1000,

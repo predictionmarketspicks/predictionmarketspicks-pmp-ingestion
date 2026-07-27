@@ -162,14 +162,21 @@ export const COMMODITIES = {
     spotUnit: '$/BTC',
     spotLabel: 'Pyth BTC/USD',
     enabled: true,
-    // V2 cutover EXPLICITLY OFF for bitcoin. KXBTCD events are hourly, so
-    // T is ~tiny — drift contribution mathematically caps at ≤0.15pp,
-    // invisible vs the 7pp MODERATE threshold. Math says V2 is a no-op
-    // here; operational risk-aversion says keep BTC untouched until
-    // silver/gold/oil prove V2 is correct in production. drift/vol
-    // estimators still run (cost ~5ms) and write to the parallel V2
-    // columns for free backtest data, but direction/confidence stay V1.
-    useV2Cutover: false,
+    // V2 cutover ON (2026-07-27). The 05-21 "drift <=0.15pp at hourly T"
+    // rationale was written for the +/-3.0-capped 60d drift — true but moot:
+    // the TWAP path's mu is the SHORT-HORIZON Pyth-buffer momentum (see
+    // resolveTwapMu in commodity-base.js), raw and horizon-capped. Zero-mu
+    // risk-neutral kept printing fade-the-trend BUY NOs on trend days
+    // (0-fers 7/7, 7/14, 7/24, 7/27; post-7/21 NO picks 1-for-15 live).
+    // Replay on 169 settled picks 6/29-7/27: kept-pick hit 49%->64%
+    // (72% YES-only), ROI positive in BOTH halves of the window. Full
+    // methodology + rollback: handoffs/BITCOIN_V2_CUTOVER_2026-07-27.md.
+    useV2Cutover: true,
+    // Momentum shrinkage lambda + annualized cap for the TWAP-path physical
+    // mu. lambda=1.0 & cap=50 won the replay grid (0.5 within noise); both
+    // env-free config so a tune is a one-line diff + redeploy.
+    shortHorizonMuScale: 1.0,
+    shortHorizonMuCapAnnual: 50,
     // FRED skip: no daily BTC spot series on FRED; CF Benchmarks BRTI
     // (Kalshi's settlement source) isn't on FRED either. The Massive-style
     // cross-check that protects oil from a frozen CL=F print doesn't apply
@@ -202,8 +209,13 @@ export const COMMODITIES = {
     // that clear MIN_EDGE_PP gross but fail their side's net floor go PASS/low.
     // Silver/gold/oil leave postSpreadGate unset -> byte-identical symmetric path.
     postSpreadGate: true,
-    minEdgePpNoSide: 0.1, // NO-side post-spread floor (stricter than YES until optProb recalibrates)
-    noSideEnabled: true, // kill switch: set false to suppress every BUY NO without a redeploy of the gate math
+    minEdgePpNoSide: 0.1, // NO-side post-spread floor (moot while noSideEnabled=false)
+    // NO side OFF (2026-07-27): the NO side is where the model error pools.
+    // Live: post-7/21 NO picks went 1-for-15; every bot NO fill 7/24+7/27
+    // lost 100%. Replay: kept-NO hit <=14% under EVERY mu variant including
+    // v2 — there is no lambda that rescues it. Re-enable only with a fresh
+    // calibration study showing NO-side edge is real (see cutover handoff).
+    noSideEnabled: false,
     // YES-side favorite floor (TOOL_RECALIBRATION_ROUND2_2026-07-21). YES BUYs at
     // yesAsk >= yesFavoritePrice must clear minEdgePpYesFavorite (10pp) instead of
     // the 5pp mid-band floor — the 85-92c model-saturation artifact (model 89.8%

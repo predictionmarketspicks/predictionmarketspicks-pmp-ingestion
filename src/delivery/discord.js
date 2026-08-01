@@ -3,9 +3,9 @@
 // Supabase Edge Function scanners use), POSTs to v10 channels/{id}/messages.
 //
 // Channel routing (IDs from docs/discord-reference.md):
-//   STRONG  (≥12pp)    → #oracle-picks   1487857828084584528
-//   MODERATE (7-12pp)  → #premium-alerts 1487857830391451750
-//   SPECULATIVE (4-7pp) → #commodity-edge 1499364066706198542
+//   STRONG  (≥12pp)     → #oracle-picks 1487857828084584528  (conviction only)
+//   MODERATE (7-12pp)   → #edge-feed     1487857830391451750
+//   SPECULATIVE (4-7pp) → #edge-feed     1487857830391451750  (consolidated 2026-08-01)
 //   Movers (gain/loss)  → #market-movers  1487857819482063049
 //
 // Embed link convention (CLAUDE.md, locked May 2 2026): title clicks go to the
@@ -22,8 +22,8 @@ const KALSHI_REFERRAL_URL =
 
 const CHANNEL_ID = {
   STRONG: '1487857828084584528',
-  MODERATE: '1487857830391451750',
-  SPECULATIVE: '1499364066706198542',
+  MODERATE: '1487857830391451750',   // #edge-feed
+  SPECULATIVE: '1487857830391451750', // #edge-feed (was #commodity-edge) — §4.2 SoT: STRONG→#oracle-picks, everything else→#edge-feed
   MOVERS: '1487857819482063049',
   BOT_LOGS: '1487857846111567952',
 };

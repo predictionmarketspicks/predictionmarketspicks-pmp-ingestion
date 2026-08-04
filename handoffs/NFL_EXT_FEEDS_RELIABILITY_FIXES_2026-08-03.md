@@ -1,7 +1,7 @@
 # NFL Ext-Feeds — Reliability Fixes After the Silent 6-Week PFF Outage
 
 **Status**: §3 + §4 + §5 SHIPPED `e81a950` (2026-08-03, not deployed — none of this runs on Fly). §1 + §2 still need Benny. §6/§7 are SKILL.md doc rules, already patched.
-**One follow-up owed** — SKILL.md §5's loop still passes `--season=$SEASON` on lines 114/123/184; that now hard-blocks `power-ranks`/`free-agency`, which carry their own season. Drop the flag: every staging file has a `season` field, so the bare command is correct. Not done here because SKILL.md was already uncommitted from the session that wrote this doc (one-writer).
+**SKILL.md reconciled `defb915`** — the `--season` loops are fixed, plus six further claims the code had invalidated (the "`--season` overrides the file" rule, now inverted; the `ingested_at` INSERT-only warning, now the opposite advice; the exit-code semantics; and §10's "the tables are currently empty", which was false and invited redoing the seed). Every command in the runbook was verified by execution.
 **Date**: 2026-08-03
 **Repo**: `pmp-ingestion` (INTERNAL-ONLY — `ext_*` tables never face a user)
 **Trigger**: Run A (Mon 2026-08-03) found PFF logged out; 3 of 4 feeds uncapturable. Login was fixed mid-session and the run completed.
@@ -148,11 +148,10 @@ The 2025 season is complete. `grades-team` / `grades-player` / `dvoa-team` for 2
 
 ## Remaining order
 
-1. **§1 token** (Benny, 2 min) — unblocks every alert in the repo, including §2. Still the highest-value item: the code gates below make a broken capture *visible in the run output*, but with `DISCORD_BOT_TOKEN` empty nothing reaches `#bot-logs`, so an unattended run still fails quietly. Exit 1 is now at least machine-detectable.
+1. **§1 token** (Benny, 2 min) — unblocks every alert in the repo, including §2. Still the highest-value item: the code gates make a broken capture *visible in the run output*, but with `DISCORD_BOT_TOKEN` empty nothing reaches `#bot-logs`, so an unattended run still fails quietly. Exit 1 is now at least machine-detectable.
 2. **§2 login probe** — needs §1 first.
-3. **SKILL.md `--season` cleanup** — see the follow-up in the status header.
 
-~~§3 / §4 / §5~~ — shipped `e81a950`.
+~~§3 / §4 / §5~~ — shipped `e81a950`. ~~SKILL.md reconciliation~~ — shipped `defb915`.
 
 ## Files changed
 
@@ -162,9 +161,10 @@ The 2025 season is complete. `grades-team` / `grades-player` / `dvoa-team` for 2
 - `src/feeds/{grades-team,grades-player,power-ranks,free-agency,dvoa-team}.js` — `resolveSeason` + `ingested_at`.
 - `test/feeds.ext.test.js` — +21 assertions (both gates, season matrix, the six-week-fossil and same-morning-capture shapes). Suite: **398 passing / 27 files**.
 
-**Deliberately NOT committed** (pre-existing uncommitted work from the session that wrote this doc — one-writer):
-- `skills/nfl-ext-feeds-capture/SKILL.md` — the §2.1/§2.3/§3/§5/§7 doc corrections.
-- `data/ext-staging/grades-team.json`, `dvoa-team.json` — fresh 2025 captures (gitignored anyway).
+**Committed `defb915` (2026-08-03):**
+- `skills/nfl-ext-feeds-capture/SKILL.md` — this session's reconciliation against the shipped gates, carrying the prior session's §2.1/§3/§5/§7 corrections that were interleaved in the same dirty file.
+
+**Not committed** — `data/ext-staging/grades-team.json`, `dvoa-team.json` (fresh 2025 captures; gitignored by design, raw vendor data never enters git).
 
 ## Deployment
 

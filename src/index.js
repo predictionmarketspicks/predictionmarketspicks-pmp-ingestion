@@ -58,6 +58,11 @@ import {
   getPolymarketSnapshotState,
 } from './engine/polymarket-snapshot.js';
 import {
+  bootstrapPolymarketUsSnapshot,
+  stopPolymarketUsSnapshot,
+  getPolymarketUsSnapshotState,
+} from './engine/polymarket-us-snapshot.js';
+import {
   bootstrapGasSnapshot,
   stopGasSnapshot,
   runGasSnapshotOnce,
@@ -701,6 +706,7 @@ const server = http.createServer((req, res) => {
     };
     snap.engine.macro = getMacroState();
     snap.engine.polymarket_snapshot = getPolymarketSnapshotState();
+    snap.engine.polymarket_us_snapshot = getPolymarketUsSnapshotState();
     snap.engine.gas_snapshot = getGasSnapshotState();
     snap.engine.wc_snapshot = getWcSnapshotState();
     snap.engine.wc_espn = getWcEspnGames();
@@ -896,6 +902,9 @@ bootstrapMacro();
 
 bootstrapPolymarketSnapshot();
 
+// Polymarket US (venue='us'). No-ops unless POLY_US_ENABLED=1.
+bootstrapPolymarketUsSnapshot();
+
 bootstrapGasSnapshot();
 
 // WC sunset 2026-07-24 — tournament over, all WC feeds dead. The snapshot loop
@@ -917,6 +926,7 @@ async function shutdown(signal) {
   if (moversState.scanTimer) clearTimeout(moversState.scanTimer);
   stopMacro();
   stopPolymarketSnapshot();
+  stopPolymarketUsSnapshot();
   stopGasSnapshot();
   stopWcSnapshot();
   stopPairDiscover();

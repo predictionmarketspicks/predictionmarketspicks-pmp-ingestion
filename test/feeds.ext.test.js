@@ -2,8 +2,12 @@
 // Covers team resolution, string-number coercion, jsonb passthrough, intra-batch
 // dedup, and the season-required guard. Pure normalizers — no Supabase needed.
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { resolveTeamCode } from '../src/lib/nfl-teams.js';
+import { resolveSeason, stagingAgeHours, isCapturedToday } from '../src/feeds/ext-shared.js';
 import { num, int, pct, dollars, bool, playerSlug } from '../src/lib/ext-parse.js';
 import { normalizeTeamGrades } from '../src/feeds/grades-team.js';
 import { normalizePlayerGrades } from '../src/feeds/grades-player.js';
@@ -158,5 +162,122 @@ describe('normalizeTeamDvoa', () => {
     expect(rows[0].tot_dvoa).toBeCloseTo(0.241);
     expect(rows[0].def_dvoa).toBeCloseTo(-0.094);
     expect(rows[0].variance).toBeCloseTo(0.048);
+  });
+});
+
+// --- Reliability fixes, 2026-08-03 (handoffs/NFL_EXT_FEEDS_RELIABILITY_FIXES) ---
+
+describe('ingested_at is written by every normalizer (§5)', () => {
+  // The column's now() default fires on INSERT only, so an upsert that omits it
+  // leaves the first-ever capture timestamp in place and the table reads stale
+  // forever. Every feed must put it in the payload.
+  const cases = [
+    ['grades-team', () => normalizeTeamGrades([{ team: 'Chiefs', overall: '88.4' }], { season: 2025 })],
+    ['grades-player', () => normalizePlayerGrades([{ name: 'Test QB', team: 'Chiefs', position: 'QB' }], { season: 2025 })],
+    ['power-ranks', () => normalizePowerRanks([{ team: 'Chiefs', qb_rating: '90' }], { season: 2026 })],
+    ['free-agency', () => normalizeFreeAgents([{ name: 'Test ED', position: 'ED' }], { season: 2026 })],
+    ['dvoa-team', () => normalizeTeamDvoa([{ team: 'Chiefs', tot_dvoa: '24.1%' }], { season: 2025 })],
+  ];
+  it.each(cases)('%s stamps a fresh ISO timestamp', (_name, run) => {
+    const before = Date.now();
+    const { rows } = run();
+    expect(rows[0].ingested_at).toEqual(expect.any(String));
+    const stamped = Date.parse(rows[0].ingested_at);
+    expect(Number.isNaN(stamped)).toBe(false);
+    expect(stamped).toBeGreaterThanOrEqual(before - 1000);
+    expect(stamped).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+});
+
+describe('resolveSeason (§4)', () => {
+  it('prefers the staging file over --season when they agree', () => {
+    expect(resolveSeason('dvoa-team', 2025, 2025)).toBe(2025);
+  });
+  it('hard-errors when --season disagrees with the file', () => {
+    // The 8/3 trap: --season=2025 applied across all feeds would have written
+    // the 2026 power-ranks preseason projection into season 2025.
+    expect(() => resolveSeason('power-ranks', 2025, 2026)).toThrow(/season mismatch/i);
+    try {
+      resolveSeason('power-ranks', 2025, 2026);
+    } catch (err) {
+      expect(err.code).toBe('SEASON_MISMATCH');
+    }
+  });
+  it('falls back to --season when the file carries none', () => {
+    expect(resolveSeason('dvoa-team', 2025, undefined)).toBe(2025);
+  });
+  it('uses the file season when no flag is passed', () => {
+    expect(resolveSeason('free-agency', undefined, 2026)).toBe(2026);
+  });
+  it('throws when neither source supplies a season', () => {
+    expect(() => resolveSeason('dvoa-team', undefined, undefined)).toThrow(/season is required/i);
+  });
+  it('treats a string file season as equal to a numeric flag', () => {
+    expect(resolveSeason('dvoa-team', 2025, '2025')).toBe(2025);
+  });
+});
+
+describe('stagingAgeHours (§3)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ext-staging-'));
+
+  function write(name, ageHours) {
+    const file = path.join(tmp, `${name}.json`);
+    fs.writeFileSync(file, JSON.stringify({ season: 2025, rows: [] }));
+    if (ageHours) {
+      const t = new Date(Date.now() - ageHours * 3_600_000);
+      fs.utimesSync(file, t, t);
+    }
+    return file;
+  }
+
+  it('returns null for a file that does not exist', () => {
+    expect(stagingAgeHours('nope', path.join(tmp, 'nope.json'))).toBeNull();
+  });
+  it('reads ~0 for a file just written', () => {
+    // Can be a hair NEGATIVE — the filesystem's mtime occasionally lands a
+    // fraction of a millisecond ahead of Date.now(). Harmless: the runner gates
+    // on `age > limit`, so only a genuinely old file is ever blocked.
+    const age = stagingAgeHours('fresh', write('fresh'));
+    expect(Math.abs(age)).toBeLessThan(0.1);
+  });
+  it('measures a six-week-old fossil — the actual outage shape', () => {
+    const age = stagingAgeHours('fossil', write('fossil', 42 * 24));
+    expect(age).toBeCloseTo(1008, 0);
+  });
+});
+
+describe('isCapturedToday — the DAY boundary, not a rolling window (§3)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ext-day-'));
+
+  function writeAt(name, mtime) {
+    const file = path.join(tmp, `${name}.json`);
+    fs.writeFileSync(file, '[]');
+    if (mtime) fs.utimesSync(file, mtime, mtime);
+    return file;
+  }
+
+  it('returns null when the file does not exist', () => {
+    expect(isCapturedToday('nope', path.join(tmp, 'nope.json'))).toBeNull();
+  });
+
+  it('counts a file written early THIS MORNING as fresh — the false positive a rolling window caused', () => {
+    // The 8/3 regression in miniature: dvoa-team.json was captured at 02:09 and a
+    // 60-minute (and a 6-hour) window both called it stale by evening. It was
+    // that run's own file. Anything written since local midnight is fresh.
+    const now = new Date(2026, 7, 3, 20, 45); // Aug 3, 20:45 local
+    const morning = new Date(2026, 7, 3, 2, 9);
+    expect(isCapturedToday('morning', writeAt('morning', morning), now)).toBe(true);
+  });
+
+  it('counts yesterday late-night as stale even though it is only hours old', () => {
+    const now = new Date(2026, 7, 3, 0, 30); // 00:30, just after midnight
+    const lastNight = new Date(2026, 7, 2, 23, 50); // 40 minutes earlier
+    expect(isCapturedToday('lastnight', writeAt('lastnight', lastNight), now)).toBe(false);
+  });
+
+  it('flags the six-week fossil', () => {
+    const now = new Date(2026, 7, 3, 11, 0);
+    const june21 = new Date(2026, 5, 21, 19, 11);
+    expect(isCapturedToday('fossil', writeAt('fossil', june21), now)).toBe(false);
   });
 });

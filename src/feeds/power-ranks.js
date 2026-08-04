@@ -4,7 +4,7 @@
 
 import { resolveTeamCode } from '../lib/nfl-teams.js';
 import { num, int, pct } from '../lib/ext-parse.js';
-import { loadStagingRows } from './ext-shared.js';
+import { loadStagingRows, resolveSeason } from './ext-shared.js';
 
 const FEED = 'power-ranks';
 
@@ -25,6 +25,8 @@ function normalizeRow(raw, { season, source }) {
     win_conference_pct: pct(raw.win_conference_pct),
     win_super_bowl_pct: pct(raw.win_super_bowl_pct),
     source: source || 'manual',
+    // now() default fires on INSERT only — see dvoa-team.js / reliability doc §5.
+    ingested_at: new Date().toISOString(),
   };
 }
 
@@ -41,7 +43,6 @@ export function normalizePowerRanks(rawRows, { season, source } = {}) {
 
 export function fetchOnce({ stagingPath, season, source } = {}) {
   const staged = loadStagingRows(FEED, stagingPath);
-  const yr = season ?? staged.season;
-  if (!yr) throw new Error(`[${FEED}] season is required (pass --season or set "season" in the staging file)`);
+  const yr = resolveSeason(FEED, season, staged.season);
   return normalizePowerRanks(staged.rows, { season: yr, source });
 }

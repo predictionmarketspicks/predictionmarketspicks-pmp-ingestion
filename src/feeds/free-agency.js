@@ -6,7 +6,7 @@
 
 import { resolveTeamCode } from '../lib/nfl-teams.js';
 import { num, int, dollars, str, playerSlug } from '../lib/ext-parse.js';
-import { loadStagingRows } from './ext-shared.js';
+import { loadStagingRows, resolveSeason } from './ext-shared.js';
 
 const FEED = 'free-agency';
 
@@ -33,6 +33,8 @@ function normalizeRow(raw, { season, source }) {
     war_rank: int(raw.war_rank),
     history: Array.isArray(raw.history) ? raw.history : [],
     source: source || 'manual',
+    // now() default fires on INSERT only — see dvoa-team.js / reliability doc §5.
+    ingested_at: new Date().toISOString(),
   };
 }
 
@@ -56,7 +58,6 @@ export function normalizeFreeAgents(rawRows, { season, source } = {}) {
 
 export function fetchOnce({ stagingPath, season, source } = {}) {
   const staged = loadStagingRows(FEED, stagingPath);
-  const yr = season ?? staged.season;
-  if (!yr) throw new Error(`[${FEED}] season is required (pass --season or set "season" in the staging file)`);
+  const yr = resolveSeason(FEED, season, staged.season);
   return normalizeFreeAgents(staged.rows, { season: yr, source });
 }

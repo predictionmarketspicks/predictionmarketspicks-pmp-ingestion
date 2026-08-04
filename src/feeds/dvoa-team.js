@@ -6,7 +6,7 @@
 
 import { resolveTeamCode } from '../lib/nfl-teams.js';
 import { num, int, pct } from '../lib/ext-parse.js';
-import { loadStagingRows } from './ext-shared.js';
+import { loadStagingRows, resolveSeason } from './ext-shared.js';
 
 const FEED = 'dvoa-team';
 
@@ -43,6 +43,10 @@ function normalizeRow(raw, { season, source }) {
     variance: pct(raw.variance),
     variance_rank: int(raw.variance_rank),
     source: source || 'manual',
+    // Written explicitly: the column's now() default only fires on INSERT, so an
+    // upsert that omits it leaves the ORIGINAL capture's timestamp in place and
+    // the table reads stale forever (reliability doc §5).
+    ingested_at: new Date().toISOString(),
   };
 }
 
@@ -59,7 +63,6 @@ export function normalizeTeamDvoa(rawRows, { season, source } = {}) {
 
 export function fetchOnce({ stagingPath, season, source } = {}) {
   const staged = loadStagingRows(FEED, stagingPath);
-  const yr = season ?? staged.season;
-  if (!yr) throw new Error(`[${FEED}] season is required (pass --season or set "season" in the staging file)`);
+  const yr = resolveSeason(FEED, season, staged.season);
   return normalizeTeamDvoa(staged.rows, { season: yr, source });
 }

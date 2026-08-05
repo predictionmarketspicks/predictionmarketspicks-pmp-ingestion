@@ -491,3 +491,63 @@ export async function computeMarketPositioning({ snapshotDate } = {}) {
   if (error) throw new Error(`compute_market_positioning: ${error.message}`);
   return { count: typeof data === 'number' ? data : 0 };
 }
+
+// ---------- fifteen_min_settles / _shadow_ticks (Gold/Silver 15-Min Phase 2) ----------
+//
+// The observation upsert is a Postgres function because the "first flag wins,
+// max is a GREATEST, open snapshot is immutable" logic has to be correct across
+// engine restarts — expressing that through supabase-js upsert semantics would
+// silently rewrite history when the engine redeploys mid-window.
+//
+// Spec: prediction-marketspicks/handoffs/GOLD_SILVER_15M_EDGE_2026-08-05.md §6.
+export async function recordFifteenMinObservation(o) {
+  const sb = getClient();
+  const { error } = await sb.rpc('record_fifteen_min_observation', {
+    p_commodity: o.commodity,
+    p_series: o.series,
+    p_event_ticker: o.eventTicker,
+    p_market_ticker: o.marketTicker,
+    p_window_open: o.windowOpen,
+    p_window_close: o.windowClose,
+    p_strike: o.strike,
+    p_mid_cents: o.midCents,
+    p_fair: o.fair,
+    p_sigma: o.sigma,
+    p_divergence_pp: o.divergencePp,
+    p_band_pp: o.bandPp,
+    p_tau_s: o.tauS,
+    p_volume_fp: o.volumeFp,
+    p_oi_fp: o.oiFp,
+  });
+  if (error) throw new Error(`record_fifteen_min_observation: ${error.message}`);
+}
+
+/** Returns true when this call is the one that graded the window. */
+export async function finalizeFifteenMinSettle(s) {
+  const sb = getClient();
+  const { data, error } = await sb.rpc('finalize_fifteen_min_settle', {
+    p_commodity: s.commodity,
+    p_event_ticker: s.eventTicker,
+    p_settle_px: s.settlePx,
+    p_result: s.result,
+    p_volume_fp: s.volumeFp,
+    p_oi_fp: s.oiFp,
+  });
+  if (error) throw new Error(`finalize_fifteen_min_settle: ${error.message}`);
+  return data === true;
+}
+
+/** Event tickers for windows we have observed but not yet graded. */
+export async function fetchUngradedFifteenMinWindows(commodity, { limit = 40 } = {}) {
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('fifteen_min_settles')
+    .select('event_ticker, market_ticker, window_close_at')
+    .eq('commodity', commodity)
+    .is('result', null)
+    .lt('window_close_at', new Date().toISOString())
+    .order('window_close_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`fetch ungraded 15m windows: ${error.message}`);
+  return data ?? [];
+}

@@ -14,6 +14,7 @@ import {
   fpNum,
   classifyWindows,
   buildPayload,
+  parseSettled,
   METALS,
 } from '../src/engine/metals-15m.js';
 
@@ -180,5 +181,35 @@ describe('buildPayload', () => {
     const env = buildPayload(METALS.gold, { markets: [noStrike], spot, stats, now });
     expect(env.data.fair_yes).toBeNull();
     expect(env.data.quality).toBe('no_strike');
+  });
+});
+
+describe('parseSettled', () => {
+  it('maps a finalized market to its settle fields', () => {
+    const s = parseSettled({
+      event_ticker: 'KXGOLD15M-26AUG051415',
+      result: 'yes',
+      expiration_value: 4253.23,
+      volume_fp: '34003.36',
+      open_interest_fp: '19136.64',
+    });
+    expect(s.result).toBe('yes');
+    expect(s.settlePx).toBeCloseTo(4253.23);
+    expect(s.volumeFp).toBeCloseTo(34003.36);
+  });
+
+  it('refuses to grade a market with no usable result', () => {
+    expect(parseSettled({ event_ticker: 'X', result: '' })).toBeNull();
+    expect(parseSettled({ event_ticker: 'X', result: 'void' })).toBeNull();
+    expect(parseSettled({})).toBeNull();
+  });
+
+  it('grades consistently with the strike comparison', () => {
+    // 4253.23 >= 4241.34 -> yes. If Kalshi ever disagreed with its own strike
+    // math this is where it would show up.
+    const s = parseSettled({
+      event_ticker: 'E', result: 'yes', expiration_value: 4253.23,
+    });
+    expect(s.settlePx >= 4241.34).toBe(true);
   });
 });

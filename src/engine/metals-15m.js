@@ -29,7 +29,12 @@
 import { getPrice } from '../feeds/pyth.js';
 import { getShortHorizonStats } from './short-horizon-vol.js';
 import { normCdf } from './options.js';
-import { upsertWidgetPayloads } from '../delivery/supabase.js';
+import {
+  upsertWidgetPayloads,
+  recordFifteenMinObservation,
+  finalizeFifteenMinSettle,
+  fetchUngradedFifteenMinWindows,
+} from '../delivery/supabase.js';
 import { registerFeed, markFeedRequired, setFeedStatus, recordTick } from '../observability/health.js';
 
 const KALSHI_API_BASE =
@@ -73,10 +78,14 @@ export const METALS = {
 const state = {
   ticks: 0,
   writes: 0,
+  observations: 0,
+  graded: 0,
   lastRunAt: null,
   lastErrorAt: null,
   lastError: null,
+  lastSweepAt: null,
   timer: null,
+  sweepTimer: null,
   perMetal: {},
 };
 
@@ -333,6 +342,39 @@ export async function runMetals15mOnce({ now = Date.now() } = {}) {
 
       await upsertWidgetPayloads(cfg.slug, envelope, ['hero']);
       written += 1;
+
+      // Phase 2: accumulate the shadow record. Only once fair value is real —
+      // a `warming` tick has no model number to grade, and writing one would
+      // put a null-fair row in the graded table.
+      const d = envelope.data;
+      if (!d.market_closed && d.quality === 'ok' && d.fair_yes != null && d.book?.mid != null) {
+        try {
+          await recordFifteenMinObservation({
+            commodity: cfg.commodity,
+            series: cfg.series,
+            eventTicker: d.window.event_ticker,
+            marketTicker: d.window.ticker,
+            windowOpen: d.window.open,
+            windowClose: d.window.close,
+            strike: d.strike,
+            midCents: d.book.mid,
+            fair: d.fair_yes,
+            sigma: d.sigma_15m,
+            divergencePp: d.divergence_pp,
+            bandPp: d.fee_band_pp,
+            tauS: d.window.seconds_remaining,
+            volumeFp: d.book.volume_fp,
+            oiFp: d.book.oi_fp,
+          });
+          state.observations += 1;
+        } catch (err) {
+          // Shadow logging must never take the payload writer down with it —
+          // the tool page is the product, the shadow record is research.
+          console.warn(
+            `[metals-15m] ${cfg.commodity} observation failed: ${(err?.message || err).toString().slice(0, 200)}`,
+          );
+        }
+      }
       state.perMetal[cfg.commodity] = {
         quality: envelope.data.quality,
         marketClosed: envelope.data.market_closed,
@@ -370,6 +412,25 @@ function schedule(delayMs) {
   }, delayMs);
 }
 
+// Settle sweep runs on its own slower timer: a window is finalized within
+// ~5 minutes of close (settlement_timer_seconds is 1, but Kalshi's status
+// transition is not instant), and the sweep is idempotent, so 5 minutes is
+// ample and keeps the extra Kalshi calls to ~576/day across both series.
+const SWEEP_INTERVAL_MS = Number(process.env.METALS_15M_SWEEP_MS || 5 * 60_000);
+
+function scheduleSweep() {
+  if (stopRequested) return;
+  state.sweepTimer = setTimeout(async () => {
+    try {
+      await sweepSettles();
+      state.lastSweepAt = new Date().toISOString();
+    } catch {
+      /* already logged */
+    }
+    scheduleSweep();
+  }, SWEEP_INTERVAL_MS);
+}
+
 export function bootstrapMetals15m() {
   if (!ENABLED) return;
   // 40s — after the macro (15s), Gamma (20s) and Polymarket US (35s)
@@ -378,6 +439,16 @@ export function bootstrapMetals15m() {
     runMetals15mOnce().catch(() => {});
     schedule(ACTIVE_INTERVAL_MS);
   }, 40_000);
+  // 90s — after the first payload tick, so the first sweep has something to
+  // grade against on a warm restart.
+  setTimeout(() => {
+    sweepSettles()
+      .then(() => {
+        state.lastSweepAt = new Date().toISOString();
+      })
+      .catch(() => {});
+    scheduleSweep();
+  }, 90_000);
 }
 
 export function stopMetals15m() {
@@ -386,6 +457,10 @@ export function stopMetals15m() {
     clearTimeout(state.timer);
     state.timer = null;
   }
+  if (state.sweepTimer) {
+    clearTimeout(state.sweepTimer);
+    state.sweepTimer = null;
+  }
 }
 
 export function getMetals15mState() {
@@ -393,11 +468,102 @@ export function getMetals15mState() {
     enabled: ENABLED,
     ticks: state.ticks,
     writes: state.writes,
+    observations: state.observations,
+    graded: state.graded,
     lastRunAt: state.lastRunAt,
+    lastSweepAt: state.lastSweepAt,
     lastErrorAt: state.lastErrorAt,
     lastError: state.lastError,
     perMetal: state.perMetal,
   };
+}
+
+// ── Phase 2: settle capture ──────────────────────────────────────────────────
+//
+// A window we observed becomes a GRADED row once Kalshi finalizes it. Kalshi
+// publishes `expiration_value` — the settlement price it actually resolved on —
+// so we grade against that rather than reconstructing settlement from our own
+// spot feed. Reconstructing it would only ever measure Kalshi's resolver, which
+// is a different (and far less useful) question than "is our signal any good".
+//
+// The sweep is idempotent: finalize_fifteen_min_settle only writes where
+// result IS NULL, so re-scanning a lookback window costs nothing.
+
+/** Map a finalized Kalshi market to its settle fields. */
+export function parseSettled(market) {
+  const result = String(market?.result || '').toLowerCase();
+  if (result !== 'yes' && result !== 'no') return null;
+  return {
+    eventTicker: market.event_ticker,
+    settlePx: numOrNull(market.expiration_value),
+    result,
+    volumeFp: fpNum(market, 'volume'),
+    oiFp: fpNum(market, 'open_interest'),
+  };
+}
+
+export async function sweepSettles({ now = Date.now(), timeoutMs = 20_000 } = {}) {
+  let graded = 0;
+  for (const cfg of Object.values(METALS)) {
+    try {
+      const pending = await fetchUngradedFifteenMinWindows(cfg.commodity);
+      if (pending.length === 0) continue;
+
+      // One paged call per series covering the pending span, rather than one
+      // request per window.
+      const oldest = pending.reduce(
+        (min, p) => Math.min(min, Date.parse(p.window_close_at)),
+        now,
+      );
+      const url =
+        `${KALSHI_API_BASE}/markets?series_ticker=${encodeURIComponent(cfg.series)}` +
+        `&status=settled&min_close_ts=${Math.floor(oldest / 1000) - 60}` +
+        `&max_close_ts=${Math.floor(now / 1000)}&limit=200`;
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      let markets = [];
+      try {
+        const res = await fetch(url, {
+          signal: ctrl.signal,
+          headers: { 'User-Agent': 'pmp-ingestion/1.0' },
+        });
+        if (!res.ok) throw new Error(`kalshi settled ${cfg.series} HTTP ${res.status}`);
+        const json = await res.json();
+        markets = Array.isArray(json?.markets) ? json.markets : [];
+      } finally {
+        clearTimeout(t);
+      }
+
+      const byEvent = new Map();
+      for (const m of markets) {
+        const parsed = parseSettled(m);
+        if (parsed) byEvent.set(parsed.eventTicker, parsed);
+      }
+
+      for (const p of pending) {
+        const s = byEvent.get(p.event_ticker);
+        if (!s) continue;
+        const didGrade = await finalizeFifteenMinSettle({
+          commodity: cfg.commodity,
+          eventTicker: s.eventTicker,
+          settlePx: s.settlePx,
+          result: s.result,
+          volumeFp: s.volumeFp,
+          oiFp: s.oiFp,
+        });
+        if (didGrade) graded += 1;
+      }
+    } catch (err) {
+      state.lastErrorAt = new Date().toISOString();
+      state.lastError = (err?.message || String(err)).slice(0, 240);
+      console.warn(`[metals-15m] ${cfg.commodity} settle sweep failed: ${state.lastError}`);
+    }
+  }
+  if (graded > 0) {
+    state.graded += graded;
+    console.log(`[metals-15m] graded ${graded} window(s)`);
+  }
+  return { graded };
 }
 
 export const __test__ = { FEE_COEFFICIENT, SECONDS_PER_YEAR, numOrNull };

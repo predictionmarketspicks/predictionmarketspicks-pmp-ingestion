@@ -15,6 +15,7 @@
 // sanitize control chars; price_cents clamped 1..99; text length-capped.
 
 import { getClient } from './supabase.js';
+import { applyCalibrationTierCeiling } from './tier-ceiling.js';
 
 // Only these four commodity feeds are valid edge_alerts.feed values.
 const COMMODITY_FEEDS = new Set(['bitcoin', 'silver', 'gold', 'oil']);
@@ -96,7 +97,8 @@ function commodityMetaToRow(meta, alertKey) {
   if (!top || !meta.eventTicker || !alertKey) return null;
   const feed = meta.commodity;
   if (!COMMODITY_FEEDS.has(feed)) return null;
-  const tier = meta.topTier;
+  // V2.1 stopgap: uncalibrated bitcoin cannot publish STRONG (§2.4).
+  const tier = applyCalibrationTierCeiling(feed, meta.topTier, top);
   if (tier !== 'STRONG' && tier !== 'MODERATE' && tier !== 'SPECULATIVE') return null;
 
   const side = top.direction === 'BUY YES' ? 'YES' : 'NO';

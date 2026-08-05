@@ -9,6 +9,7 @@ import {
   listEnabledCommodities,
   listAllCommodities,
 } from '../src/engine/commodities.js';
+import { BTC_MU_SCALE, BTC_MU_CAP_ANNUAL } from '../src/engine/thresholds.js';
 
 describe('COMMODITIES registry', () => {
   it('has silver, gold, oil, bitcoin, spx, copper', () => {
@@ -78,9 +79,32 @@ describe('COMMODITIES registry', () => {
     expect(COMMODITIES.gold.useV2Cutover).toBe(true);
     expect(COMMODITIES.oil.useV2Cutover).toBe(true);
     expect(COMMODITIES.bitcoin.useV2Cutover).toBe(true);
-    expect(COMMODITIES.bitcoin.shortHorizonMuScale).toBeGreaterThan(0);
-    expect(COMMODITIES.bitcoin.shortHorizonMuCapAnnual).toBeGreaterThanOrEqual(10);
     expect(COMMODITIES.bitcoin.noSideEnabled).toBe(false);
+  });
+
+  it('V2.1: bitcoin momentum mu is SHRUNK (0.4/12), not the era-C 1.0/50', () => {
+    // Pinned exactly, not as a range. The previous assertions here were
+    // `>0` and `>=10`, which a revert to the era-C values (1.0/50) would have
+    // passed silently — and those values are what produced a ~30pp phantom
+    // edge live (claimed 0.794 vs market 0.498, realized hit 48.1% over 81
+    // settled picks, 7/28-8/4). Momentum is a tilt now, not the thesis.
+    // Plan: handoffs/BITCOIN_EDGE_V21_CALIBRATED_RELAUNCH_2026-08-05.md §2.
+    expect(COMMODITIES.bitcoin.shortHorizonMuScale).toBe(0.4);
+    expect(COMMODITIES.bitcoin.shortHorizonMuCapAnnual).toBe(12);
+    // Config must match the module defaults so an override can never drift
+    // silently away from the documented rationale.
+    expect(BTC_MU_SCALE).toBe(0.4);
+    expect(BTC_MU_CAP_ANNUAL).toBe(12);
+  });
+
+  it('V2.1 mu shrink: metals are byte-identical (no shortHorizon override)', () => {
+    // The metals V2 model is a DIFFERENT model (realized_60d drift, daily
+    // horizon). Its success never validated the bitcoin config and the
+    // bitcoin fix must not touch it.
+    for (const c of ['silver', 'gold', 'oil']) {
+      expect(COMMODITIES[c].shortHorizonMuScale).toBeUndefined();
+      expect(COMMODITIES[c].shortHorizonMuCapAnnual).toBeUndefined();
+    }
   });
 
   it('bitcoin pauses snapshots off-hours because IBIT chain is OPRA-only', () => {

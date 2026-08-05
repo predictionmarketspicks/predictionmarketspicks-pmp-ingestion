@@ -46,13 +46,24 @@ export const YES_LONGSHOT_PRICE_MIN = 0.15;
 // sanity, useless intra-hour: +/-300%/yr over a 30-min horizon moves log-spot
 // ~1.7bp while real BTC momentum bursts annualize to thousands of %. The TWAP
 // path therefore consumes the RAW short-horizon mu, shrunk by BTC_MU_SCALE
-// (lambda) and clamped to +/-BTC_MU_CAP_ANNUAL (50/yr ~= 0.28% per 30min —
-// lets real bursts through, blocks tick-noise blowups). Replay 6/29-7/27 on
-// 169 settled picks: kept-pick hit 49%->64% (72% YES-only), stable across both
-// halves of the window. Per-commodity override: config.shortHorizonMuScale /
-// config.shortHorizonMuCapAnnual. Evidence: handoffs/BITCOIN_V2_CUTOVER_2026-07-27.md.
-export const BTC_MU_SCALE = 1.0;
-export const BTC_MU_CAP_ANNUAL = 50;
+// (lambda) and clamped to +/-BTC_MU_CAP_ANNUAL.
+//
+// V2.1 RECALIBRATION (2026-08-05): 1.0/50 -> 0.4/12. The 7/27 values won a
+// replay grid that was measuring the wrong thing — it re-scored v1-TIMED picks
+// on 1-min candles instead of generating v2's own entries, so it never saw the
+// policy shift, and 1-min candles are far smoother than the 15s live ticks the
+// engine actually samples. Live era C (7/28-8/4, 81 settled picks) is the real
+// verdict: avg claimed prob 0.794 vs avg market price 0.498 — a ~30pp phantom
+// edge — realized hit 48.1%, Brier 0.33, ROI +0.8%. The book was right in every
+// price band; the momentum term was not. lambda=0.5 was already documented as
+// replay-equivalent-within-noise in BITCOIN_V2_CUTOVER_2026-07-27.md's rollback
+// table, so 0.4 costs nothing the replay could measure. 0.4/12 additionally caps
+// a full-tilt burst at ~0.07% expected move per 30min: momentum becomes a small
+// tilt on top of the structural relative-value edge, not the thesis itself.
+// Per-commodity override: config.shortHorizonMuScale / config.shortHorizonMuCapAnnual.
+// Evidence + full plan: handoffs/BITCOIN_EDGE_V21_CALIBRATED_RELAUNCH_2026-08-05.md.
+export const BTC_MU_SCALE = 0.4;
+export const BTC_MU_CAP_ANNUAL = 12;
 
 // Minimum 24h Kalshi volume to trust last_price as fair (else stale print).
 export const MIN_VOL_FOR_LIVE_PRICE = 50;

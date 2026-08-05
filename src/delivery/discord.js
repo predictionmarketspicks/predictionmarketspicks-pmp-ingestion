@@ -16,6 +16,7 @@
 
 import { sanitize } from '../lib/sanitize.js';
 import { assertBrandSafe } from '../lib/lint-strings.js';
+import { applyCalibrationTierCeiling } from './tier-ceiling.js';
 
 const KALSHI_REFERRAL_URL =
   'https://kalshi.com/sign-up/?referral=b07a96ab-4b91-4bdc-8285-5ae1927b7000';
@@ -55,7 +56,10 @@ function probToAmericanOdds(prob) {
 }
 
 export function buildCommodityEmbed(meta, topEdge) {
-  const tier = meta.topTier;
+  // V2.1 stopgap: uncalibrated bitcoin cannot render as STRONG (§2.4).
+  // Applied here AND in postCommodityAlert so the embed's tier label can
+  // never disagree with the channel it routes to.
+  const tier = applyCalibrationTierCeiling(meta.commodity, meta.topTier, topEdge);
   const direction = topEdge.direction;
   const edgePct = (topEdge.edge_pp * 100).toFixed(1);
   const sign = topEdge.edge_pp > 0 ? '+' : '−';
@@ -143,7 +147,9 @@ async function postToChannel(channelId, payload) {
 export async function postCommodityAlert(meta) {
   const top = meta.topEdge;
   if (!top) return false;
-  const tier = meta.topTier;
+  // Ceiling before channel routing — a ceilinged alert belongs in #edge-feed,
+  // not #oracle-picks (§2.4).
+  const tier = applyCalibrationTierCeiling(meta.commodity, meta.topTier, top);
   if (tier === 'NO_EDGE') return false;
   const channelId = CHANNEL_ID[tier];
   if (!channelId) return false;

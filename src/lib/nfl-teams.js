@@ -1,7 +1,7 @@
 // Canonical NFL team resolver for the external-benchmark feeds (grades / DVOA /
 // power ranks / free agency). Maps the many ways an external source spells a
 // team — full name, city, nickname, common abbreviations — onto the
-// gridiron_edge team code (KC, LA=Rams, LAC=Chargers, SF=49ers, WAS=Commanders)
+// canonical team code (KC, LAR=Rams, LAC=Chargers, SF=49ers, WAS=Commanders)
 // so every ext_* row joins directly against nfl_team_ratings / nfl_* tables in
 // the Phase 2 fusion. Translate to Kalshi codes only at the Kalshi boundary.
 //
@@ -11,7 +11,7 @@
 export const NFL_TEAM_CODES = [
   'ARI', 'ATL', 'BAL', 'BUF', 'CAR', 'CHI', 'CIN', 'CLE',
   'DAL', 'DEN', 'DET', 'GB', 'HOU', 'IND', 'JAX', 'KC',
-  'LA', 'LAC', 'LV', 'MIA', 'MIN', 'NE', 'NO', 'NYG',
+  'LAR', 'LAC', 'LV', 'MIA', 'MIN', 'NE', 'NO', 'NYG',
   'NYJ', 'PHI', 'PIT', 'SEA', 'SF', 'TB', 'TEN', 'WAS',
 ];
 
@@ -34,7 +34,7 @@ const ALIASES = {
   IND: ['indianapolis', 'colts', 'indianapolis colts', 'clt'],
   JAX: ['jacksonville', 'jaguars', 'jacksonville jaguars', 'jac'],
   KC: ['kansas city', 'chiefs', 'kansas city chiefs', 'kan'],
-  LA: ['los angeles rams', 'la rams', 'rams', 'lar', 'st louis rams'],
+  LAR: ['los angeles rams', 'la rams', 'rams', 'la', 'lar', 'st louis rams', 'stl'],
   LAC: ['los angeles chargers', 'la chargers', 'chargers', 'san diego chargers', 'sd'],
   LV: ['las vegas', 'raiders', 'las vegas raiders', 'oakland raiders', 'oak', 'lvr'],
   MIA: ['miami', 'dolphins', 'miami dolphins'],

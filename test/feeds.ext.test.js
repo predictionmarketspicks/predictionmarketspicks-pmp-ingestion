@@ -23,9 +23,14 @@ describe('resolveTeamCode', () => {
     expect(resolveTeamCode('niners')).toBe('SF');
     expect(resolveTeamCode('Washington Commanders')).toBe('WAS');
     expect(resolveTeamCode('Washington Football Team')).toBe('WAS');
-    expect(resolveTeamCode('LA Rams')).toBe('LA');
+    expect(resolveTeamCode('LA Rams')).toBe('LAR');
     expect(resolveTeamCode('Los Angeles Chargers')).toBe('LAC');
     expect(resolveTeamCode('KC')).toBe('KC'); // idempotent
+    // LAR is canonical since 2026-08-05; legacy `LA` must still resolve to the
+    // Rams (never to a bare code), and LAR must resolve to itself.
+    expect(resolveTeamCode('LA')).toBe('LAR');
+    expect(resolveTeamCode('LAR')).toBe('LAR');
+    expect(resolveTeamCode('STL')).toBe('LAR');
   });
   it('returns null for unresolved input', () => {
     expect(resolveTeamCode('London Jaguars Practice Squad')).toBeNull();

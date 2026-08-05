@@ -65,6 +65,11 @@ import {
   getPolymarketUsSnapshotState,
 } from './engine/polymarket-us-snapshot.js';
 import {
+  bootstrapMetals15m,
+  stopMetals15m,
+  getMetals15mState,
+} from './engine/metals-15m.js';
+import {
   bootstrapGasSnapshot,
   stopGasSnapshot,
   runGasSnapshotOnce,
@@ -749,6 +754,7 @@ const server = http.createServer((req, res) => {
     snap.engine.macro = getMacroState();
     snap.engine.polymarket_snapshot = getPolymarketSnapshotState();
     snap.engine.polymarket_us_snapshot = getPolymarketUsSnapshotState();
+    snap.engine.metals_15m = getMetals15mState();
     snap.engine.gas_snapshot = getGasSnapshotState();
     snap.engine.wc_snapshot = getWcSnapshotState();
     snap.engine.wc_espn = getWcEspnGames();
@@ -947,6 +953,12 @@ bootstrapPolymarketSnapshot();
 // Polymarket US (venue='us'). No-ops unless POLY_US_ENABLED=1.
 bootstrapPolymarketUsSnapshot();
 
+// Gold/Silver 15-minute windows (KXGOLD15M / KXSILVER15M). Writes one
+// widget_payloads row per tool while a window is live; backs off to a 5-min
+// re-check when Kalshi lists nothing (weekends are dark). METALS_15M_ENABLED=0
+// to switch off without a redeploy.
+bootstrapMetals15m();
+
 bootstrapGasSnapshot();
 
 // WC sunset 2026-07-24 — tournament over, all WC feeds dead. The snapshot loop
@@ -969,6 +981,7 @@ async function shutdown(signal) {
   stopMacro();
   stopPolymarketSnapshot();
   stopPolymarketUsSnapshot();
+  stopMetals15m();
   stopGasSnapshot();
   stopWcSnapshot();
   stopPairDiscover();

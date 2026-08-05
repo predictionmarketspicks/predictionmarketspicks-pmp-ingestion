@@ -1,0 +1,50 @@
+name: Bitcoin Calibration Weekly Refit
+
+# Refits the bitcoin edge calibration map against our own settled record and
+# writes a NEW SHADOW row every Monday. It never activates anything — promotion
+# is a separate, gated step (scripts/promote-btc-calibration.js) that requires
+# out-of-sample Brier to beat both the raw model and the market.
+#
+# The engine picks up maps active-first, so a fresh shadow row can never
+# displace a promoted active map.
+#
+# Plan: handoffs/BITCOIN_EDGE_V21_CALIBRATED_RELAUNCH_2026-08-05.md §4.4
+
+on:
+  schedule:
+    # Mondays 12:00 UTC — after the weekend's picks have settled.
+    - cron: '0 12 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Fit and print without writing a row'
+        type: boolean
+        default: false
+
+jobs:
+  refit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Fit calibration map
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: node scripts/fit-btc-calibration.js ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+
+      - name: Evaluate promotion gate (report only — never auto-promotes)
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: node scripts/promote-btc-calibration.js

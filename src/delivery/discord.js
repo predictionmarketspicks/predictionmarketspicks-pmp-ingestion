@@ -59,7 +59,7 @@ export function buildCommodityEmbed(meta, topEdge) {
   // V2.1 stopgap: uncalibrated bitcoin cannot render as STRONG (§2.4).
   // Applied here AND in postCommodityAlert so the embed's tier label can
   // never disagree with the channel it routes to.
-  const tier = applyCalibrationTierCeiling(meta.commodity, meta.topTier, topEdge);
+  const tier = applyCalibrationTierCeiling(meta.commodity, meta.topTier, meta);
   const direction = topEdge.direction;
   const edgePct = (topEdge.edge_pp * 100).toFixed(1);
   const sign = topEdge.edge_pp > 0 ? '+' : '−';
@@ -149,7 +149,7 @@ export async function postCommodityAlert(meta) {
   if (!top) return false;
   // Ceiling before channel routing — a ceilinged alert belongs in #edge-feed,
   // not #oracle-picks (§2.4).
-  const tier = applyCalibrationTierCeiling(meta.commodity, meta.topTier, top);
+  const tier = applyCalibrationTierCeiling(meta.commodity, meta.topTier, meta);
   if (tier === 'NO_EDGE') return false;
   const channelId = CHANNEL_ID[tier];
   if (!channelId) return false;

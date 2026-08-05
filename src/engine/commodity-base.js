@@ -20,6 +20,7 @@ import { computeDealerGamma } from './gamma.js';
 import { estimateDrift } from './drift.js';
 import { warmVolCache, estimateVol } from './vol.js';
 import { getShortHorizonStats } from './short-horizon-vol.js';
+import { getCalibrationMap, applyCalibration, isCalibrationActive } from './calibration.js';
 import {
   MIN_EDGE_PP,
   MIN_EDGE_PP_NO,
@@ -869,9 +870,25 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     // to V1 for that row. Always keep edge_pp column = V1 for backtest A/B.
     const v2Eligible = config.useV2Cutover === true;
     const v2Available = v2Eligible && physicalEdge != null && probPhysical != null;
-    const chosenEdge = v2Available ? physicalEdge : edge;
-    const chosenProb = v2Available ? probPhysical : optProb;
     const activeModelVersion = v2Available ? 'v2_physical' : 'v1_riskneutral';
+
+    // V2.1 calibration layer (§4.2). The governing map is stored on every v2
+    // row — shadow AND active — so it can be scored before it is trusted.
+    // v2Available already guarantees kalshiProb is non-null and > 0 (it is a
+    // precondition of physicalEdge), so the calibrated edge below is safe.
+    const calMap = getCalibrationMap(config.commodity);
+    const calibratedProb = v2Available ? applyCalibration(calMap, probPhysical) : null;
+    const calibrationMapId = calibratedProb != null ? calMap.id : null;
+    // ACTIVE means calibration owns the decision: direction, edge, tier, alert
+    // and the bot's sizing all read one basis. Shadow stores and observes only.
+    const calGoverns = calibratedProb != null && calMap.active === true;
+
+    const chosenEdge = calGoverns
+      ? calibratedProb - kalshiProb
+      : v2Available
+        ? physicalEdge
+        : edge;
+    const chosenProb = calGoverns ? calibratedProb : v2Available ? probPhysical : optProb;
 
     // Quote age — Kalshi WS frames carry a `ts` (ms epoch) on the merged
     // market object via mergeLiveQuote / kalshi.js applyTickerMsg. Falls
@@ -1204,6 +1221,10 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       // short-horizon momentum mu, not the 60d drift estimator.
       prob_physical: probPhysical,
       physical_edge_pp: physicalEdge,
+      // Derived model output, same OPRA license class as prob_physical /
+      // options_prob — publishable. Non-null on warm v2 rows once a map exists.
+      calibrated_prob: calibratedProb,
+      calibration_map_id: calibrationMapId,
       mu_used: rowMuUsed,
       mu_source: rowMuSource,
       mu_confidence: muConfidence,
@@ -1336,6 +1357,12 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       topTier: finalTopTier,
       topTierInt: confidenceTierInt(finalTopTier),
       spotLabel: config.spotLabel,
+      // Does calibration OWN the decision for this commodity right now? The
+      // alert tier ceiling keys on this, not on the presence of a
+      // calibrated_prob — shadow rows carry one while decisions still run on
+      // the raw model, and lifting the ceiling then would resume STRONG alerts
+      // on uncalibrated edges (§4.5 read literally would do exactly that).
+      calibrationActive: isCalibrationActive(config.commodity),
       gamma,
       fredDivergenceBp,
       fredObservationDate,

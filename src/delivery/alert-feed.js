@@ -98,7 +98,7 @@ function commodityMetaToRow(meta, alertKey) {
   const feed = meta.commodity;
   if (!COMMODITY_FEEDS.has(feed)) return null;
   // V2.1 stopgap: uncalibrated bitcoin cannot publish STRONG (§2.4).
-  const tier = applyCalibrationTierCeiling(feed, meta.topTier, top);
+  const tier = applyCalibrationTierCeiling(feed, meta.topTier, meta);
   if (tier !== 'STRONG' && tier !== 'MODERATE' && tier !== 'SPECULATIVE') return null;
 
   const side = top.direction === 'BUY YES' ? 'YES' : 'NO';

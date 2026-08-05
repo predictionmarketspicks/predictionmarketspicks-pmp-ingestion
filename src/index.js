@@ -25,6 +25,7 @@ import { startYahooOil, stopYahooOil } from './feeds/yahoo-oil.js';
 import { computeSnapshot, discoverEvent } from './engine/commodity-base.js';
 import { listAllCommodities, listEnabledCommodities } from './engine/commodities.js';
 import { startFlowAlerts } from './engine/flow-alerts.js';
+import { refreshCalibrationMaps, calibrationStatus } from './engine/calibration.js';
 import { EXPIRATION_BURST_WINDOW_MS, BTC_STRIKE_COUNT_WARN } from './engine/thresholds.js';
 import {
   upsertCommodityEdgeRows,
@@ -496,7 +497,30 @@ async function bootstrapEngine(state) {
   state.eventRefreshTimer = setInterval(() => refreshEvent(state), 30 * 60 * 1000);
 }
 
+// Calibration maps: load once at boot, refresh hourly (§4.2). Fails open —
+// refreshCalibrationMaps keeps the previous maps on a read error, and no map
+// at all simply means the engine decides on prob_physical as it does today.
+const CALIBRATION_REFRESH_MS = 60 * 60 * 1000;
+let calibrationTimer = null;
+
+async function bootstrapCalibration() {
+  await refreshCalibrationMaps().catch((err) => {
+    console.error('[calibration] initial load failed', err);
+    Sentry.captureException(err);
+  });
+  calibrationTimer = setInterval(() => {
+    refreshCalibrationMaps().catch((err) => {
+      console.error('[calibration] refresh failed', err);
+      Sentry.captureException(err);
+    });
+  }, CALIBRATION_REFRESH_MS);
+}
+
 async function bootstrapAll() {
+  // Before any snapshot runs, so the first rows of the session already carry
+  // calibrated_prob rather than a null that looks like "calibration is off".
+  await bootstrapCalibration();
+
   // Pyth: dedupe symbols across enabled commodities, skip those without a
   // verified feed ID and the Yahoo-sourced ones (oil) since Pyth isn't used
   // for them. The poller logs a warning for unverified IDs and the engine
@@ -674,6 +698,10 @@ const server = http.createServer((req, res) => {
     };
     snap.engine = {
       env: ENGINE_ENV,
+      // Which calibration maps are loaded and whether any GOVERNS decisions.
+      // Deployment probe: this value differs between the pre-PR-C build (absent)
+      // and this one, so it can actually fail.
+      calibration: calibrationStatus(),
       commodities: {},
     };
     for (const [name, state] of engines) {
@@ -934,6 +962,7 @@ async function shutdown(signal) {
   stopAllPyth();
   stopAllOptionsFeeds();
   stopYahooOil();
+  if (calibrationTimer) clearInterval(calibrationTimer);
   server.close(() => {
     console.log('[shutdown] http closed');
     process.exit(0);

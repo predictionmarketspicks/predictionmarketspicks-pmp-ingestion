@@ -21,6 +21,7 @@ import { estimateDrift } from './drift.js';
 import { warmVolCache, estimateVol } from './vol.js';
 import { getShortHorizonStats } from './short-horizon-vol.js';
 import { getCalibrationMap, applyCalibration, isCalibrationActive } from './calibration.js';
+import { applyEngineRules } from './engine-rules.js';
 import {
   MIN_EDGE_PP,
   MIN_EDGE_PP_NO,
@@ -1181,6 +1182,32 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     if (HARD_SUPPRESS_FLAGS.has(qualityFlag) && (direction !== 'PASS' || confidence === 'watch')) {
       direction = 'PASS';
       confidence = 'skip';
+    }
+
+    // Loop-engine rule consumption (LOOP_ENGINE_RULES §PR6). Applied LAST, so a
+    // rule can only ever narrow what the engine was already going to publish —
+    // it can suppress or demote, never create or upgrade. No-op unless the kill
+    // switch is on AND an active rule matches every key of its condition.
+    // Every application is tagged in the rationale with the rule ids.
+    const ruleVerdict = applyEngineRules({
+      commodity: config.commodity,
+      dow: now.getUTCDay(),
+      hourUtc: now.getUTCHours(),
+      impliedProb: kalshiProb,
+    });
+    if (ruleVerdict.matched.length > 0) {
+      if (ruleVerdict.suppress) {
+        direction = 'PASS';
+        confidence = 'skip';
+        fusedTierStr = 'NO_EDGE';
+        tierInt = confidenceTierInt(fusedTierStr);
+      } else if (ruleVerdict.downgrade) {
+        fusedTierStr = downgradeFusedTier(fusedTierStr);
+        tierInt = confidenceTierInt(fusedTierStr);
+        confidence = downgradeLegacyConfidence(confidence);
+        if (fusedTierStr === 'NO_EDGE') direction = 'PASS';
+      }
+      rationale = `${rationale ?? ''} ${ruleVerdict.note}`.trim();
     }
 
     rows.push({

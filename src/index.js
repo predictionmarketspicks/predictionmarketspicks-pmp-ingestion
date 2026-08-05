@@ -26,6 +26,7 @@ import { computeSnapshot, discoverEvent } from './engine/commodity-base.js';
 import { listAllCommodities, listEnabledCommodities } from './engine/commodities.js';
 import { startFlowAlerts } from './engine/flow-alerts.js';
 import { refreshCalibrationMaps, calibrationStatus } from './engine/calibration.js';
+import { refreshEngineRules, engineRulesStatus } from './engine/engine-rules.js';
 import { EXPIRATION_BURST_WINDOW_MS, BTC_STRIKE_COUNT_WARN } from './engine/thresholds.js';
 import {
   upsertCommodityEdgeRows,
@@ -504,13 +505,25 @@ const CALIBRATION_REFRESH_MS = 60 * 60 * 1000;
 let calibrationTimer = null;
 
 async function bootstrapCalibration() {
-  await refreshCalibrationMaps().catch((err) => {
-    console.error('[calibration] initial load failed', err);
-    Sentry.captureException(err);
-  });
+  await Promise.all([
+    refreshCalibrationMaps().catch((err) => {
+      console.error('[calibration] initial load failed', err);
+      Sentry.captureException(err);
+    }),
+    // Loop-engine rules share the cadence. Kill switch is re-read every pass,
+    // so flipping consumption_enabled takes effect within the hour with no deploy.
+    refreshEngineRules().catch((err) => {
+      console.error('[engine-rules] initial load failed', err);
+      Sentry.captureException(err);
+    }),
+  ]);
   calibrationTimer = setInterval(() => {
     refreshCalibrationMaps().catch((err) => {
       console.error('[calibration] refresh failed', err);
+      Sentry.captureException(err);
+    });
+    refreshEngineRules().catch((err) => {
+      console.error('[engine-rules] refresh failed', err);
       Sentry.captureException(err);
     });
   }, CALIBRATION_REFRESH_MS);
@@ -702,6 +715,7 @@ const server = http.createServer((req, res) => {
       // Deployment probe: this value differs between the pre-PR-C build (absent)
       // and this one, so it can actually fail.
       calibration: calibrationStatus(),
+      engineRules: engineRulesStatus(),
       commodities: {},
     };
     for (const [name, state] of engines) {

@@ -1,4 +1,4 @@
-// Gold / Silver 15-minute edge engine — KXGOLD15M + KXSILVER15M.
+// 15-minute commodity edge engine — KXGOLD15M + KXSILVER15M + KXWTI15M.
 //
 // Writes ONE widget_payloads row per tool (gold-edge-15m / silver-edge-15m) on
 // a short timer while a window is open. The site reads those rows; the browser
@@ -14,9 +14,19 @@
 // not forecasting. Do not add a drift term without a promotion gate.
 //
 // Settlement is Pyth's 1-minute candle close vs the candle close at window
-// open — the SAME publisher whose XAU/XAG feeds feeds/pyth.js already polls at
-// 10s. Metals are the only 15-min series where our spot feed is
-// settlement-exact (BTC/ETH 15m settle on CF Benchmarks).
+// open. Kalshi names index symbols that Pyth does NOT publish
+// (Metal.Index.GOLD/USD etc.), so rather than assume our public feeds match, we
+// measured them against Kalshi's own published settlement prints
+// (`expiration_value` on settled markets) over 200 windows each:
+//
+//   KXGOLD15M   Metal.XAU/USD          99.5% verdict agreement
+//   KXSILVER15M Metal.XAG/USD          99.0%
+//   KXWTI15M    front-month WTI future 99.5%
+//
+// "Verdict agreement" = would this feed have called the same up/down result.
+// That is the metric that decides a contract; price error is scale-dependent.
+// Re-run with `scripts/validate-15m-settlement-feed.ts` in the site repo.
+// Crypto 15m series settle on CF Benchmarks and are NOT covered by this engine.
 //
 // Why widget_payloads and not commodity_edge_signals: that table is
 // strike-ladder-shaped AND carries the tool_picks mint trigger. Writing 96
@@ -26,7 +36,7 @@
 //
 // Spec: prediction-marketspicks/handoffs/GOLD_SILVER_15M_EDGE_2026-08-05.md
 
-import { getPrice } from '../feeds/pyth.js';
+import { getPrice, WTI_FRONT_MONTH_SYMBOL } from '../feeds/pyth.js';
 import { getShortHorizonStats } from './short-horizon-vol.js';
 import { normCdf } from './options.js';
 import {
@@ -73,7 +83,28 @@ export const METALS = {
     pythSymbol: 'XAG/USD',
     label: 'Silver',
   },
+  // WTI asks for the LOGICAL symbol, never a contract id — Pyth serves oil as
+  // per-expiry futures and the front month rolls (WTIU6 -> WTIV6 on 2026-08-20).
+  // feeds/pyth.js resolves it by expiry at call time.
+  //
+  // Kalshi names `Commodities.Index.PYTHOIL/USD` for this series; that feed is
+  // dead on both public Pyth channels (last publish 2026-03-30, $103 vs a ~$75
+  // market). Measured against Kalshi's own published settlement prints over 200
+  // windows, the front-month future reproduces the settled verdict 99.5% of the
+  // time; `Commodities.USOILSPOT` — the obvious-looking CFD — manages 49.7%,
+  // i.e. a coin flip. Do not "simplify" this to USOILSPOT.
+  wti: {
+    commodity: 'wti',
+    series: 'KXWTI15M',
+    slug: 'wti-edge-15m',
+    pythSymbol: WTI_FRONT_MONTH_SYMBOL,
+    label: 'WTI',
+  },
 };
+
+/** Symbols the 15-minute engines need polled. index.js unions these into the
+ *  Pyth subscription list — they are NOT derivable from enabledCommodities. */
+export const METALS_15M_SYMBOLS = Object.values(METALS).map((m) => m.pythSymbol);
 
 const state = {
   ticks: 0,

@@ -10,7 +10,7 @@ import {
   evaluateLiveness,
 } from './observability/health.js';
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
-import { startPyth, stopAllPyth, FEED_IDS as PYTH_FEED_IDS } from './feeds/pyth.js';
+import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts } from './feeds/pyth.js';
 // isOptionsMarketOpen still lives in massive.js (pure utility, no provider
 // coupling). Lifecycle goes through the options-provider abstraction so the
 // chain source can swap via OPTIONS_PROVIDER env without engine changes.
@@ -67,8 +67,7 @@ import {
 import {
   bootstrapMetals15m,
   stopMetals15m,
-  getMetals15mState,
-} from './engine/metals-15m.js';
+  getMetals15mState, METALS_15M_SYMBOLS } from './engine/metals-15m.js';
 import {
   bootstrapGasSnapshot,
   stopGasSnapshot,
@@ -543,12 +542,20 @@ async function bootstrapAll() {
   // verified feed ID and the Yahoo-sourced ones (oil) since Pyth isn't used
   // for them. The poller logs a warning for unverified IDs and the engine
   // fails open.
+  // Pick up any WTI contract listed since deploy, so a roll needs no release.
+  await refreshWtiContracts();
   const pythSymbols = Array.from(
     new Set(
-      enabledCommodities
-        .filter((c) => !c.useYahooSpot)
-        .map((c) => c.pythSymbol)
-        .filter((s) => PYTH_FEED_IDS[s]),
+      [
+        // Weekly commodity engines. Yahoo-sourced ones (oil) never used Pyth.
+        ...enabledCommodities.filter((c) => !c.useYahooSpot).map((c) => c.pythSymbol),
+        // 15-minute engines subscribe INDEPENDENTLY. Deriving this list from
+        // enabledCommodities alone silently starved 15m WTI: the weekly oil
+        // engine is Yahoo-sourced and therefore filtered out above, so
+        // getPrice() would have returned null forever and the engine would have
+        // failed open to an empty payload on an indexed page.
+        ...METALS_15M_SYMBOLS,
+      ].filter((s) => hasPythFeed(s)),
     ),
   );
   startPyth(pythSymbols);

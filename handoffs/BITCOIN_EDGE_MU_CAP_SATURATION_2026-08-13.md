@@ -1,6 +1,8 @@
 # Bitcoin Edge — the drift cap IS the model: mu pinned at ±12/yr displaces the whole CDF
 
-**Status**: Spec — diagnosis complete and evidenced, no code written
+**Status**: §4.1 SHIPPED + DEPLOYED `49113ed` (2026-08-13) — centre fixed as predicted.
+§4.2 is now the BINDING error and is WORSE than this doc estimated. §4.3/§4.4 not started.
+§5 loose thread RESOLVED — not a bug. See §7 for the measured post-change result.
 **Date**: 2026-08-13
 **Files implicated**: `src/engine/thresholds.js` (`BTC_MU_SCALE`, `BTC_MU_CAP_ANNUAL`), `src/engine/commodity-base.js` (`resolveTwapMu`, ~L800), `src/engine/short-horizon-vol.js`
 **Related**: `BITCOIN_V2_CUTOVER_2026-07-27.md` (introduced the physical-measure mu path)
@@ -162,3 +164,61 @@ print(f'shift ${mm-km:,.0f} = {(mm-km)/(km*ks):.2f} sigma   width ratio {ms/ks:.
 
 Healthy output: shift within ±0.10σ, width ratio 0.95–1.05. Treat this as the acceptance
 test for §4.1 and §4.2 — run it on three separate snapshots before declaring a fix.
+
+---
+
+## 7. Measured result after §4.1 (added 2026-08-13, same day)
+
+`BTC_MU_SCALE` 0.4 → 0 in `thresholds.js` AND `commodities.js` (both carried the
+value; changing only one would have left the config override winning silently).
+Commit `49113ed`, Fly worker v145. Verified in the DB, not just in the diff:
+`mu_used = 0.000000` across all 128 rows of the 18:57:10Z snapshot at
+`mu_source = pyth_short_horizon_15m`.
+
+> ⚠️ For ~5 min after a worker restart the Pyth buffer is cold, `shStats` is null,
+> and `rowMuUsed` keeps its `muUsed` seed (`commodity-base.js:755`) — the 18:55Z
+> snapshot read `-0.597` at `mu_source=realized_60d` and looked like a failed
+> deploy. It is not. Always check `mu_source` before judging `mu_used`.
+
+### §6 acceptance test, first post-change snapshot (KXBTCD-26AUG1316, 8 strikes)
+
+| | median | σ to close |
+|---|---|---|
+| Market | 63,410 = spot **+$24** | 0.314% |
+| Model | 63,385 = spot **+$0** | 0.516% |
+
+**shift −0.12σ (was −0.49σ) · width ratio 1.642 (was 1.20)**
+
+**The centre prediction was correct and is confirmed.** The model median now sits
+*exactly* on spot (63,385 vs spot 63,385.92). The residual −0.12σ is no longer the
+model sitting low — it is the *market* carrying a small premium over spot. The mu
+term was ~70% of the old error and removing it removed ~75% of the displacement,
+as §3 predicted.
+
+**The second prediction was wrong.** §4.1 predicted edges would "stop being
+one-directional across the ladder". They have not: this snapshot is still **75%
+one-directional (6 of 8 negative)**. The cause is now unambiguous — §4.2's width
+error, and it is materially bigger than the 1.20× this doc estimated. At **1.64×**
+the model is putting far too much mass in the tails, which underprices deep-ITM
+strikes and overprices OTM ones in exactly the lopsided pattern still on the board.
+
+**So the tool is NOT fixed and the acceptance test does NOT pass.** §4.1 was
+necessary, is verified, and should stay. §4.2 is now the whole remaining problem
+and is the next piece of work — suspect the σ blend and the IBIT→BTC vol
+translation, per §4.2.
+
+**Owed:** the acceptance test is defined over THREE snapshots and only ONE has been
+run. Re-run `§6` on two more windows before treating either number as settled — a
+single mid-life fit on 8 strikes is suggestive, not conclusive.
+
+## 8. §5 loose thread — resolved, NOT a bug
+
+The §5 query found `resid_vs_v1` identically 0.0000 and `calibrated_prob` differing.
+That is correct by construction, not a v1/v2 mislabel: **`edge_pp` is the frozen V1
+column**, labelled as such in the writer — `commodity-base.js:1245`,
+`edge_pp: edge ?? null, // V1 frozen for backtest A/B`. The edge that actually
+drives decisions is `fused_edge_pp` on the next line. Re-run against that column and
+it reconciles against `prob_physical` to ±0.005, as it should under `v2_physical`.
+
+Baseline was trustworthy; §4.1 was safe to start. **Query `fused_edge_pp`, never
+`edge_pp`, when asking what the engine decided.**

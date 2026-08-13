@@ -421,12 +421,20 @@ export function postSpreadSideGate({
   const yesNet = chosenProb != null && yesAsk != null ? chosenProb - yesAsk : null;
   const noNet = chosenProb != null && yesBid != null ? yesBid - chosenProb : null;
   if (yesNet != null && yesNet >= minEdgeYes) {
-    return { pass: true, dirYes: true, netEdge: yesNet, yesNet, noNet };
+    return { pass: true, dirYes: true, netEdge: yesNet, yesNet, noNet, reason: null };
   }
-  if (noNet != null && noNet >= minEdgeNo && noSideEnabled) {
-    return { pass: true, dirYes: false, netEdge: noNet, yesNet, noNet };
+  // Evaluate the NO floor BEFORE consulting the kill switch, so `reason` can tell
+  // the caller WHICH of the two stopped this row. ANDing them (the pre-2026-08-13
+  // form) collapsed both into pass=false, and the rationale builder guessed
+  // "below the floor" — printing that on rows clearing it by 6.9pp. A suppressed
+  // side and a failed floor are different facts and must not share one message.
+  if (noNet != null && noNet >= minEdgeNo) {
+    if (noSideEnabled) {
+      return { pass: true, dirYes: false, netEdge: noNet, yesNet, noNet, reason: null };
+    }
+    return { pass: false, dirYes: null, netEdge: null, yesNet, noNet, reason: 'no_side_disabled' };
   }
-  return { pass: false, dirYes: null, netEdge: null, yesNet, noNet };
+  return { pass: false, dirYes: null, netEdge: null, yesNet, noNet, reason: 'below_floor' };
 }
 
 // YES favorite/longshot recalibration (TOOL_RECALIBRATION_ROUND2_2026-07-21) — pure.
@@ -1009,12 +1017,19 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
             rationale =
               `YES underpriced by ${grossPct}pp gross, but only ${netPct}pp after the ` +
               `YES ask-side spread — below the ${(minEdgeYes * 100).toFixed(0)}pp net floor. Not actionable.`;
+          } else if (g.reason === 'no_side_disabled') {
+            // The row cleared the net NO floor; the kill switch stopped it, not the
+            // floor. Say that, and do NOT lead with the gross edge — publishing
+            // "NO underpriced by 17pp" as the headline on a side we decline to
+            // trade reads as a tradeable number to anyone skimming the card.
+            rationale =
+              `NO side suppressed — the model's NO edge has not held up in live tracking, ` +
+              `so we don't publish it as a signal pending recalibration. Not actionable.`;
           } else {
             const netPct = g.noNet != null ? (g.noNet * 100).toFixed(1) : 'n/a';
-            const off = (config.noSideEnabled ?? true) ? '' : ' (BUY NO disabled)';
             rationale =
               `NO underpriced by ${grossPct}pp gross, but only ${netPct}pp after the ` +
-              `NO ask-side spread${off} — below the ${(noFloor * 100).toFixed(0)}pp net NO floor. Not actionable.`;
+              `NO ask-side spread — below the ${(noFloor * 100).toFixed(0)}pp net NO floor. Not actionable.`;
           }
         }
       }

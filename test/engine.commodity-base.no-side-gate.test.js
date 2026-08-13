@@ -122,10 +122,22 @@ describe('postSpreadSideGate — kill switch + missing book', () => {
   it('noSideEnabled=false suppresses an otherwise-valid BUY NO', () => {
     const g = gate({ chosenProb: 0.25, yesBid: 0.4, yesAsk: 0.42, noSideEnabled: false });
     expect(g.pass).toBe(false);
+    // The switch stopped it, NOT the floor (noNet = 0.40 - 0.25 = 15pp, clears 10pp).
+    // The rationale builder reads this to avoid printing "below the 10pp net NO floor"
+    // on a row that beat the floor by 5pp. Regression guard for the 2026-08-13 fix.
+    expect(g.reason).toBe('no_side_disabled');
+    expect(g.noNet).toBeCloseTo(0.15, 10);
     // ...but the same dislocation on the YES side is unaffected by the NO switch.
     const yes = gate({ chosenProb: 0.6, yesBid: 0.48, yesAsk: 0.5, noSideEnabled: false });
     expect(yes.pass).toBe(true);
     expect(yes.dirYes).toBe(true);
+  });
+
+  it('a genuinely sub-floor NO reports below_floor, not the kill switch', () => {
+    // noNet = 0.30 - 0.25 = 5pp, under the 10pp NO floor. Same pass=false, different why.
+    const g = gate({ chosenProb: 0.25, yesBid: 0.3, yesAsk: 0.32, noSideEnabled: false });
+    expect(g.pass).toBe(false);
+    expect(g.reason).toBe('below_floor');
   });
 
   it('one-sided / missing book never emits a BUY (no ghost-quote leans)', () => {

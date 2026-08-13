@@ -48,21 +48,43 @@ export const YES_LONGSHOT_PRICE_MIN = 0.15;
 // path therefore consumes the RAW short-horizon mu, shrunk by BTC_MU_SCALE
 // (lambda) and clamped to +/-BTC_MU_CAP_ANNUAL.
 //
-// V2.1 RECALIBRATION (2026-08-05): 1.0/50 -> 0.4/12. The 7/27 values won a
-// replay grid that was measuring the wrong thing — it re-scored v1-TIMED picks
-// on 1-min candles instead of generating v2's own entries, so it never saw the
-// policy shift, and 1-min candles are far smoother than the 15s live ticks the
-// engine actually samples. Live era C (7/28-8/4, 81 settled picks) is the real
-// verdict: avg claimed prob 0.794 vs avg market price 0.498 — a ~30pp phantom
-// edge — realized hit 48.1%, Brier 0.33, ROI +0.8%. The book was right in every
-// price band; the momentum term was not. lambda=0.5 was already documented as
-// replay-equivalent-within-noise in BITCOIN_V2_CUTOVER_2026-07-27.md's rollback
-// table, so 0.4 costs nothing the replay could measure. 0.4/12 additionally caps
-// a full-tilt burst at ~0.07% expected move per 30min: momentum becomes a small
-// tilt on top of the structural relative-value edge, not the thesis itself.
+// V2.2 (2026-08-13): lambda 0.4 -> 0. The momentum term is OFF; the TWAP path is
+// now a pure vol model. This is the third and final step of a trajectory that only
+// ever moved one way (1.0/50 on 7/27 -> 0.4/12 on 8/05 -> 0/12 today), and each
+// step was taken for the same reason: the drift term never carried information,
+// only displacement.
+//
+// What 8/05 missed is a UNIT error, not an arithmetic one. Its own note argued
+// 0.4/12 "caps a full-tilt burst at ~0.07% expected move per 30min" and called
+// that a small tilt. The arithmetic is right (12/yr x 30min = 6.85e-4) but 0.07%
+// is only small in PRICE units. BTC sigma-to-close over that horizon is ~0.27%,
+// so the cap was displacing the entire model CDF by ~0.26 sigma — and sigma is
+// the unit that sets probabilities, which is all this engine emits.
+//
+// Measured on the live board (BITCOIN_EDGE_MU_CAP_SATURATION_2026-08-13.md):
+// fitting a lognormal to all 12 strikes of KXBTCD-26AUG1313 put the market median
+// on spot (+$6) and the model median $104 BELOW it = -0.49 sigma, of which
+// mu -12 x T contributed -$74.6 (~70%). The cap was not a guardrail: it BOUND on
+// 57% of persisted rows on a median day and 99% on 8/13, and its sign flipped
+// day to day (avg mu +5.72 on 8/11, -4.05 on 8/13). A clamp that fires on the
+// majority of observations is the estimator, and this one was a two-valued square
+// wave driven by a 15-minute momentum read — a horizon at which BTC log returns
+// carry no exploitable autocorrelation, so its sampling error dwarfs any real
+// drift. Its net negative tilt is a sufficient explanation for the NO side going
+// 1-for-15 live without any story about smile bias.
+//
+// A directional edge at EVERY strike at once is one location error observed N
+// times, not N mispricings — both curves integrate to a single distribution each.
+// That is the signature this change targets.
+//
+// BTC_MU_CAP_ANNUAL is now inert (0 x anything is 0) and kept only so a future
+// re-enable has a horizon-appropriate bound to reach for. Do not raise the scale
+// off 0 without re-running the acceptance test in the handoff's section 6:
+// median shift within +/-0.10 sigma and width ratio 0.95-1.05, on three snapshots.
+// Residual known error this does NOT fix: model sigma ran 1.20x the market's, so
+// fake tail edges are still possible. That is the next item.
 // Per-commodity override: config.shortHorizonMuScale / config.shortHorizonMuCapAnnual.
-// Evidence + full plan: handoffs/BITCOIN_EDGE_V21_CALIBRATED_RELAUNCH_2026-08-05.md.
-export const BTC_MU_SCALE = 0.4;
+export const BTC_MU_SCALE = 0;
 export const BTC_MU_CAP_ANNUAL = 12;
 
 // Minimum 24h Kalshi volume to trust last_price as fair (else stale print).

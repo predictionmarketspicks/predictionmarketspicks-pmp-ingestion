@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { __test__ } from '../src/engine/commodity-base.js';
 import { __test__ as shTest } from '../src/engine/short-horizon-vol.js';
+import { COMMODITIES } from '../src/engine/commodities.js';
 
 const { resolveTwapMu } = __test__;
 
@@ -30,6 +31,27 @@ describe('resolveTwapMu', () => {
 
   it('degrades to 0 (pure vol model) when neither mu resolved', () => {
     expect(resolveTwapMu({ muRaw: null, muClamped: null, scale: 1, capAnnual: 50 })).toBe(0);
+  });
+
+  it('V2.2: under the SHIPPED bitcoin config, mu is 0 for any momentum input', () => {
+    // Behavioural guard, not a constant check. engine.commodities.test.js pins
+    // the number; this pins what the number DOES, so a refactor that reroutes
+    // the scale (or reintroduces a floor on it) still fails here. A blowup in
+    // either direction, and the old cap value, must all resolve to exactly 0 —
+    // no residual displacement of the model CDF.
+    const cfg = {
+      scale: COMMODITIES.bitcoin.shortHorizonMuScale,
+      capAnnual: COMMODITIES.bitcoin.shortHorizonMuCapAnnual,
+    };
+    // Compared with `===`, not toBe/Object.is: a negative muRaw yields -0, which
+    // is arithmetically identical downstream (exp(-0 * T) === 1) but fails an
+    // Object.is check against +0. The claim under test is "no drift", not "which
+    // zero", so don't make the suite sensitive to the sign bit.
+    for (const muRaw of [400, -400, 12, -12, 0.001, -0.001]) {
+      expect(resolveTwapMu({ muRaw, muClamped: 3, ...cfg }) === 0).toBe(true);
+    }
+    // and the fallback path (old buffer shape, raw absent) is also 0
+    expect(resolveTwapMu({ muRaw: undefined, muClamped: 2.5, ...cfg }) === 0).toBe(true);
   });
 });
 

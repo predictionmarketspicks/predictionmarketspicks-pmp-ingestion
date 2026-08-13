@@ -172,13 +172,15 @@ export const COMMODITIES = {
     // (72% YES-only), ROI positive in BOTH halves of the window. Full
     // methodology + rollback: handoffs/BITCOIN_V2_CUTOVER_2026-07-27.md.
     useV2Cutover: true,
-    // Momentum shrinkage lambda + annualized cap for the TWAP-path physical
-    // mu. V2.1 (2026-08-05): 1.0/50 -> 0.4/12 after live era C printed a ~30pp
-    // phantom edge (claimed 0.794 vs market 0.498, realized 48.1%). The replay
-    // that picked 1.0/50 re-scored v1-timed picks on 1-min candles; the engine
-    // runs on 15s live ticks. Rationale in full: thresholds.js BTC_MU_SCALE.
+    // Momentum shrinkage lambda + annualized cap for the TWAP-path physical mu.
+    // V2.2 (2026-08-13): 0.4 -> 0. Momentum is OFF — the drift term only ever
+    // displaced the CDF, never informed it. The +/-12 cap BOUND on 57% of rows
+    // on a median day (99% on 8/13) with a sign that flipped daily, moving the
+    // whole model distribution ~0.26 sigma; measured against the live board it
+    // was ~70% of a -0.49 sigma median error. Rationale in full: thresholds.js
+    // BTC_MU_SCALE. Cap kept but inert (0 x anything is 0).
     // Env-free config so a tune stays a one-line diff + redeploy.
-    shortHorizonMuScale: 0.4,
+    shortHorizonMuScale: 0,
     shortHorizonMuCapAnnual: 12,
     // FRED skip: no daily BTC spot series on FRED; CF Benchmarks BRTI
     // (Kalshi's settlement source) isn't on FRED either. The Massive-style

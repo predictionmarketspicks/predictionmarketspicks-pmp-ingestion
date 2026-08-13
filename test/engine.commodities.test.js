@@ -89,11 +89,16 @@ describe('COMMODITIES registry', () => {
     // edge live (claimed 0.794 vs market 0.498, realized hit 48.1% over 81
     // settled picks, 7/28-8/4). Momentum is a tilt now, not the thesis.
     // Plan: handoffs/BITCOIN_EDGE_V21_CALIBRATED_RELAUNCH_2026-08-05.md §2.
-    expect(COMMODITIES.bitcoin.shortHorizonMuScale).toBe(0.4);
+    // V2.2 (2026-08-13): the momentum term is OFF. Pinned to exactly 0 — a
+    // range assertion would pass a silent revert to 0.4 or 1.0, and those are
+    // the values that displaced the whole model CDF by ~0.26 sigma with a sign
+    // that flipped day to day. Raising this off 0 requires re-running the
+    // acceptance test in BITCOIN_EDGE_MU_CAP_SATURATION_2026-08-13.md §6.
+    expect(COMMODITIES.bitcoin.shortHorizonMuScale).toBe(0);
     expect(COMMODITIES.bitcoin.shortHorizonMuCapAnnual).toBe(12);
     // Config must match the module defaults so an override can never drift
     // silently away from the documented rationale.
-    expect(BTC_MU_SCALE).toBe(0.4);
+    expect(BTC_MU_SCALE).toBe(0);
     expect(BTC_MU_CAP_ANNUAL).toBe(12);
   });
 

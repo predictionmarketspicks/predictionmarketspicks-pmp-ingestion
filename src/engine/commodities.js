@@ -81,8 +81,14 @@ export const COMMODITIES = {
     enabled: true,
     // V2 cutover — see commodities.silver.useV2Cutover note.
     useV2Cutover: true,
-    // FRED Phase 5: London Bullion Market PM fix, daily.
-    fredSeriesId: 'GOLDPMGBD228NLBM',
+    // FRED skip (2026-08-19): GOLDPMGBD228NLBM (LBMA gold PM fix) returns HTTP
+    // 400 from the FRED API — surfaced as `fred_goldpmgbd228nlbm: FRED 400` on
+    // /health. FRED withdrew the LBMA precious-metal series over licensing, so
+    // this is gone, not flaky. Left as-is it fails EVERY tick and the divergence
+    // cross-check below never runs, which means gold silently lost its stale-spot
+    // guard while still looking configured. Null opts out honestly, exactly as
+    // silver already does. Revisit if a daily gold series surfaces on FRED.
+    fredSeriesId: null,
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,

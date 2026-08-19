@@ -657,6 +657,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   let fredDivergenceBp = null;
   let divergenceWarning = false;
   let fredObservationDate = null;
+  // Why the tier got demoted — FRED divergence or spot staleness. Kept separate
+  // from the boolean so the caveat text can name the real cause.
+  let spotWarningReason = null;
   if (config.fredSeriesId) {
     const fred = await getFredDailyClose(config.fredSeriesId);
     if (fred && fred.age_hours < FRED_MAX_AGE_HOURS && fred.price > 0) {
@@ -664,6 +667,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       fredObservationDate = fred.observation_date;
       if (Math.abs(fredDivergenceBp) > FRED_DIVERGENCE_BP_THRESHOLD) {
         divergenceWarning = true;
+        spotWarningReason =
+          `spot diverges from FRED ${config.fredSeriesId} by ` +
+          `${Math.abs(fredDivergenceBp).toFixed(0)}bp`;
         console.warn(
           `[${config.commodity}] FRED divergence ${fredDivergenceBp.toFixed(0)}bp ` +
           `(spot ${spotPrice.toFixed(2)} vs FRED ${config.fredSeriesId} ` +
@@ -671,6 +677,35 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
         );
       }
     }
+  }
+
+  // Spot staleness gate (2026-08-19). Replaces what the FRED cross-check was
+  // meant to do for gold and never did: GOLDPMGBD228NLBM was deleted from FRED
+  // on 2022-01-31 (ICE Benchmark Administration licensing) but was wired up in
+  // 2026-05, so every gold snapshot since called a dead series, took a 400, and
+  // skipped the check while the config claimed a guard existed.
+  //
+  // Checking the feed's OWN publish timestamp is a better instrument than
+  // cross-checking its price against a second vendor's daily close: divergence
+  // is an indirect proxy for staleness, needs a second dependency, and can be
+  // withdrawn from under us (which is exactly what happened). Pyth publishes
+  // publish_time on every tick and pyth.js already carries it through as
+  // publishTimeMs.
+  //
+  // Opt-in per commodity via config.maxSpotAgeMs — null means no gate, matching
+  // how fredSeriesId opts out. Oil deliberately has none: its spot is Yahoo CL=F
+  // on a ~15-minute delay, so a Pyth-scale threshold would flag it permanently,
+  // and its FRED series (DCOILWTICO) still resolves.
+  const maxSpotAgeMs = config.maxSpotAgeMs ?? null;
+  const spotAgeMs = spot.publishTimeMs ? Date.now() - spot.publishTimeMs : null;
+  if (maxSpotAgeMs && spotAgeMs !== null && spotAgeMs > maxSpotAgeMs) {
+    divergenceWarning = true;
+    spotWarningReason =
+      `${spot.source ?? 'spot'} last published ${(spotAgeMs / 1000).toFixed(0)}s ago ` +
+      `(max ${(maxSpotAgeMs / 1000).toFixed(0)}s)`;
+    console.warn(
+      `[${config.commodity}] STALE SPOT — ${spotWarningReason} — demoting tier`,
+    );
   }
 
   // --- Atomic Kalshi leg (2026-06-10 stale-Kalshi-leg fix) ---
@@ -1184,8 +1219,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       tierInt = confidenceTierInt(fusedTierStr);
       confidence = downgradeLegacyConfidence(confidence);
       if (fusedTierStr === 'NO_EDGE') direction = 'PASS';
-      const bp = Math.abs(fredDivergenceBp ?? 0).toFixed(0);
-      const caveat = ` (caveat: spot diverges from FRED ${config.fredSeriesId} by ${bp}bp — realtime feed may be stale; tier demoted)`;
+      const caveat = ` (caveat: ${spotWarningReason ?? 'realtime spot feed suspect'} — tier demoted)`;
       rationale = (rationale ?? '') + caveat;
     }
 

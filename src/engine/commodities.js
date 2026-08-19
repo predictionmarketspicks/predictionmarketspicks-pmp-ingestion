@@ -56,6 +56,9 @@ export const COMMODITIES = {
     // is monthly only). Revisit if a daily series surfaces. See handoffs/
     // BATCH_FRED_P5_AND_TRACKER_P2_2026-05-10.md.
     fredSeriesId: null,
+    // Spot is Pyth (sub-second publishes); 5 min without a tick means the feed
+    // is dead, not quiet. Demotes tier — see commodity-base.js staleness gate.
+    maxSpotAgeMs: 5 * 60 * 1000,
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
@@ -89,6 +92,9 @@ export const COMMODITIES = {
     // guard while still looking configured. Null opts out honestly, exactly as
     // silver already does. Revisit if a daily gold series surfaces on FRED.
     fredSeriesId: null,
+    // Spot is Pyth (sub-second publishes); 5 min without a tick means the feed
+    // is dead, not quiet. Demotes tier — see commodity-base.js staleness gate.
+    maxSpotAgeMs: 5 * 60 * 1000,
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,
@@ -193,6 +199,11 @@ export const COMMODITIES = {
     // cross-check that protects oil from a frozen CL=F print doesn't apply
     // when Pyth itself is the canonical real-time feed.
     fredSeriesId: null,
+    // Spot is Pyth (sub-second publishes); 5 min without a tick means the feed
+    // is dead, not quiet. Demotes tier — see commodity-base.js staleness gate.
+    // This is the direct instrument the FRED cross-check above could never be
+    // for BTC, since no daily BTC series exists on FRED to compare against.
+    maxSpotAgeMs: 5 * 60 * 1000,
     // 15s atomic full-pass cadence (2026-06-10 BITCOIN_EDGE_STRIKE_BAND handoff).
     // Both market and burst windows run at 15s so the whole market window is
     // 15s — burst (60min pre-close) must not be slower than the market cadence.
@@ -358,6 +369,9 @@ export const COMMODITIES = {
     enabled: false, // flip true once a copper spot feed is wired
     // FRED skip: same constraint as silver — no daily FRED copper series.
     fredSeriesId: null,
+    // Spot is Pyth (sub-second publishes); 5 min without a tick means the feed
+    // is dead, not quiet. Demotes tier — see commodity-base.js staleness gate.
+    maxSpotAgeMs: 5 * 60 * 1000,
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: SNAPSHOT_INTERVAL_EXPIRATION_MS,

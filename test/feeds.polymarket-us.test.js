@@ -20,17 +20,52 @@ const YES_FIRST = {
   closed: false,
   outcomes: '["Yes","No"]',
   outcomePrices: '["0.075","0.928"]',
+  marketSides: [
+    { long: true, price: '0.075', description: 'Yes' },
+    { long: false, price: '0.928', description: 'No' },
+  ],
   bestBidQuote: { value: '0.0720', currency: 'USD' },
   bestAskQuote: { value: '0.0750', currency: 'USD' },
   startDate: '2026-03-07T02:30:00Z',
   endDate: '2026-11-03T13:00:00Z',
 };
 
+// ⚠️ CAPTURED, NOT AUTHORED. This is `ewc-usgub-ia-2026-11-03-dem` as the gateway
+// actually served it on 2026-08-21, and the shape is the whole point: `outcomes`
+// lists No first, and `outcomePrices` is NOT reordered to match — index 0 still
+// holds the YES price, which is what the book brackets and what marketSides'
+// long leg confirms.
+//
+// The fixture this replaced had the same shape and the opposite expectation:
+// hand-written from the belief that No-first meant the book described NO, it
+// asserted the complement was correct. It passed for seventeen days while every
+// ["No","Yes"] row in production was stored inverted. A fixture invented from a
+// belief can only ever confirm it — capture the payload.
 const NO_FIRST = {
   ...YES_FIRST,
   id: '25902',
+  slug: 'ewc-usgub-ia-2026-11-03-dem',
   outcomes: '["No","Yes"]',
-  outcomePrices: '["0.129","0.872"]',
+  outcomePrices: '["0.7800","0.23"]',
+  marketSides: [
+    { long: true, price: '0.7800', description: 'Yes' },
+    { long: false, price: '0.23', description: 'No' },
+  ],
+  bestBidQuote: { value: '0.7700', currency: 'USD' },
+  bestAskQuote: { value: '0.7800', currency: 'USD' },
+};
+
+// A market whose book genuinely describes the other side. Its own long-side
+// price is the evidence, so it flips — and it is the ONLY thing that makes it flip.
+const GENUINELY_INVERTED = {
+  ...YES_FIRST,
+  id: '25903',
+  outcomes: '["Yes","No"]',
+  outcomePrices: '["0.872","0.129"]',
+  marketSides: [
+    { long: true, price: '0.872', description: 'Yes' },
+    { long: false, price: '0.129', description: 'No' },
+  ],
   bestBidQuote: { value: '0.1280', currency: 'USD' },
   bestAskQuote: { value: '0.1290', currency: 'USD' },
 };
@@ -56,12 +91,26 @@ describe('normalizeUsMarket — YES normalisation', () => {
     expect(row.last_trade_price).toBeCloseTo(0.075, 6); // outcomePrices[yesIdx=0]
   });
 
-  it('COMPLEMENTS AND SWAPS the book when outcome 0 is No', () => {
+  it('does NOT complement merely because outcomes lists No first', () => {
     const row = normalizeUsMarket(NO_FIRST);
-    // Raw book describes NO at 0.1280/0.1290, so YES is 1-0.1290 .. 1-0.1280.
+    // The book is already the YES book. Complementing here is what stored the
+    // Iowa Democrat market at 0.22/0.23 against a real 0.77/0.78.
+    expect(row.best_bid).toBeCloseTo(0.77, 6);
+    expect(row.best_ask).toBeCloseTo(0.78, 6);
+    expect(row.last_trade_price).toBeCloseTo(0.78, 6);
+  });
+
+  it('regression: the old ordering rule would have inverted that row', () => {
+    const row = normalizeUsMarket(NO_FIRST);
+    expect(row.best_ask).not.toBeCloseTo(1 - 0.77, 6);
+    expect(row.best_bid).not.toBeCloseTo(1 - 0.78, 6);
+  });
+
+  it('COMPLEMENTS AND SWAPS when the market’s own long-side price says the book is the other side', () => {
+    const row = normalizeUsMarket(GENUINELY_INVERTED);
     expect(row.best_bid).toBeCloseTo(1 - 0.129, 6); // 0.871
     expect(row.best_ask).toBeCloseTo(1 - 0.128, 6); // 0.872
-    expect(row.last_trade_price).toBeCloseTo(0.872, 6); // outcomePrices[yesIdx=1]
+    expect(row.last_trade_price).toBeCloseTo(0.872, 6);
   });
 
   it('never produces a crossed book in either ordering', () => {
@@ -108,15 +157,17 @@ describe('normalizeUsMarket — honesty + shape', () => {
     expect(row.best_ask).toBeCloseTo(0.075, 6);
   });
 
-  it('complements a one-sided book correctly when No-first', () => {
+  it('leaves a one-sided book alone — there is nothing to check it against', () => {
+    // The side check needs both quotes to test containment, so a half-book is
+    // passed through as YES rather than guessed at. Skipping beats inventing.
     const row = normalizeUsMarket({ ...NO_FIRST, bestBidQuote: null });
-    // Only an ask on NO exists → only a bid on YES can be derived.
-    expect(row.best_bid).toBeCloseTo(1 - 0.129, 6);
-    expect(row.best_ask).toBeNull();
+    expect(row.best_bid).toBeNull();
+    expect(row.best_ask).toBeCloseTo(0.78, 6);
   });
 
   it('skips rather than guesses on non-binary or unparseable outcomes', () => {
     expect(normalizeUsMarket({ ...YES_FIRST, outcomes: '["A","B","C"]' })).toBeNull();
+    expect(normalizeUsMarket({ ...YES_FIRST, marketSides: [] })).not.toBeNull();
     expect(normalizeUsMarket({ ...YES_FIRST, outcomes: '["Chargers","Titans"]' })).toBeNull();
     expect(normalizeUsMarket({ ...YES_FIRST, outcomes: 'garbage' })).toBeNull();
     expect(normalizeUsMarket({ ...YES_FIRST, slug: null })).toBeNull();

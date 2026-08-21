@@ -25,13 +25,27 @@
 // 3. `outcomes` and `outcomePrices` are JSON-encoded STRINGS, not arrays.
 //    Iterate without JSON.parse and you get characters.
 //
-// 4. THE BOOK IS QUOTED ON OUTCOME INDEX 0, AND INDEX 0 IS NOT ALWAYS "Yes".
-//    In a 200-market sample: 113 were ["Yes","No"], 87 were ["No","Yes"].
-//    bestBidQuote/bestAskQuote were verified to bracket outcomePrices[0] on all
-//    196 two-sided markets, never [1]. Write those straight into
-//    best_bid/best_ask and the arb engine compares a YES price against a NO
-//    price on ~43% of rows — each one a ~100-point phantom gap that clears any
-//    ARB threshold. normalizeUsMarket() flips to YES; see the tests.
+// 4. THE BOOK IS QUOTED ON OUTCOME INDEX 0 — AND SO IS `outcomePrices`, EVEN
+//    WHEN `outcomes` READS ["No","Yes"]. ⚠️ CORRECTED 2026-08-21. The original
+//    note here drew the wrong conclusion from a right observation: yes, the book
+//    brackets outcomePrices[0] on essentially every two-sided market — but that
+//    is because index 0 holds the YES price REGARDLESS of what `outcomes` says.
+//    The array is not reordered. So `outcomes[0] !== 'Yes'` is not evidence the
+//    book describes NO, and complementing on it INVERTS a correct quote.
+//
+//    Measured across the allowlisted rows this feed actually writes: 729 of
+//    2,789 two-sided binaries list ["No","Yes"], and on 729 of 729 the live book
+//    brackets outcomePrices[0]. Zero counterexamples. Every one of those rows was
+//    stored inverted — `paccc-usho-midterms-2026-11-03-dem` sat at 0.159/0.160
+//    against a real book of 0.840/0.841.
+//
+//    The crossed-book guard in the snapshot engine cannot catch this: the
+//    complement of a valid book is another valid, uncrossed book. Only comparison
+//    against another source gives it away.
+//
+//    The reliable signal is `marketSides` — exactly one side carries `long: true`
+//    and it is the affirmative one, on all 22,346 open markets checked. Decide
+//    the side from that market's own data, never from field ordering.
 //
 const POLY_US_BASE = process.env.POLYMARKET_US_BASE || 'https://gateway.polymarket.us';
 const POLY_US_TIMEOUT_MS = Number(process.env.POLY_US_FETCH_TIMEOUT_MS || 30_000);
@@ -103,22 +117,44 @@ export function normalizeUsMarket(m) {
   const outcomes = parseJsonArray(m.outcomes);
   if (!outcomes || outcomes.length !== 2) return null; // binary only
 
-  const yesIdx = outcomes.findIndex((o) => String(o).toLowerCase() === 'yes');
-  if (yesIdx === -1) return null; // not a Yes/No market — do not guess
+  // Still required as a shape check — a market whose sides are named after two
+  // teams is not a Yes/No binary and we do not guess at it. But the INDEX is no
+  // longer used to decide the side; see note 4 in the header.
+  if (!outcomes.some((o) => String(o).toLowerCase() === 'yes')) return null;
 
   const rawBid = quoteToNum(m.bestBidQuote);
   const rawAsk = quoteToNum(m.bestAskQuote);
 
-  // The book is on outcome index 0. When index 0 IS Yes it maps straight
-  // through; otherwise it describes NO and must be complemented — and the sides
-  // SWAP, because the complement of the best ask is the best bid. Getting the
-  // swap backwards yields a crossed book (bid > ask), which is at least loud.
-  const bookIsYes = yesIdx === 0;
-  const best_bid = bookIsYes ? rawBid : rawAsk == null ? null : 1 - rawAsk;
-  const best_ask = bookIsYes ? rawAsk : rawBid == null ? null : 1 - rawBid;
+  // The YES price according to the market's own structure: exactly one
+  // `marketSides` entry carries `long: true` and it is the affirmative one.
+  const longSide = Array.isArray(m.marketSides)
+    ? m.marketSides.find((s) => s && s.long === true)
+    : null;
+  const yesRef = longSide ? toNumOrNull(longSide.price) : null;
 
+  // Default: the book IS the YES book. Complement only when this market's own
+  // long-side price says otherwise — evidence per market, not a field-ordering
+  // rule. The sides SWAP when complementing, because the complement of the best
+  // ask is the best bid; getting that backwards yields a crossed book, which the
+  // snapshot engine refuses to write.
+  let best_bid = rawBid;
+  let best_ask = rawAsk;
+  if (yesRef != null && rawBid != null && rawAsk != null) {
+    // A cent of slack: the reference is a mid-ish print against an integer-cent
+    // book, so an exact containment test would flip good quotes.
+    const inside = (v) => v >= rawBid - 0.01 && v <= rawAsk + 0.01;
+    if (!inside(yesRef) && inside(1 - yesRef)) {
+      best_bid = 1 - rawAsk;
+      best_ask = 1 - rawBid;
+    }
+  }
+
+  // Same correction for the last trade. `outcomePrices` is not reordered either,
+  // so indexing it by the position of 'Yes' in `outcomes` picks the NO price on
+  // a ["No","Yes"] market.
   const prices = parseJsonArray(m.outcomePrices);
-  const yesPrice = prices && prices.length === 2 ? toNumOrNull(prices[yesIdx]) : null;
+  let yesPrice = yesRef;
+  if (yesPrice == null && prices && prices.length === 2) yesPrice = toNumOrNull(prices[0]);
 
   return {
     // Namespaced so a small integer id can never collide with an international

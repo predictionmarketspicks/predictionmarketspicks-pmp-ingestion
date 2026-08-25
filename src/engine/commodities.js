@@ -237,6 +237,16 @@ export const COMMODITIES = {
     // lost 100%. Replay: kept-NO hit <=14% under EVERY mu variant including
     // v2 — there is no lambda that rescues it. Re-enable only with a fresh
     // calibration study showing NO-side edge is real (see cutover handoff).
+    //
+    // ⚠️ pmp-btc-bot NO LONGER DEPENDS ON THIS (2026-08-25). Setting this false on
+    // 2026-07-27 silently disabled a trading structure in a different service: the
+    // bot read its tradeable side from `direction`, so it could not build a NO leg,
+    // so its pairing engine formed ZERO pairs for 11 days after shipping. The bot
+    // now derives both sides locally from the book (pmp-btc-bot src/strategy.js
+    // deriveSide()) and treats every NO leg as hedge-only. Do NOT flip this to true
+    // believing it is how execution gets its NO side — it is not, and flipping it
+    // would republish outright BUY NO on /tools/bitcoin-edge, where the NO record
+    // is still unproven and exactly what this flag was set false to stop.
     noSideEnabled: false,
     // YES-side favorite floor (TOOL_RECALIBRATION_ROUND2_2026-07-21). YES BUYs at
     // yesAsk >= yesFavoritePrice must clear minEdgePpYesFavorite (10pp) instead of

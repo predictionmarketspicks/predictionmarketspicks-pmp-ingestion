@@ -1,11 +1,15 @@
-// Pyth Hermes poller — same XAG/USD feed Kalshi settles its silver weeklies on.
-// Public, no auth. We poll because Pyth doesn't offer WebSocket on the free tier.
+// Pyth price poller — the same XAG/USD feed Kalshi settles its silver weeklies
+// on, and XAU/USD for gold. Reads PYTHNET DIRECTLY (see ./pythnet.js); the
+// Hermes HTTP API this used to call went behind a $500/month key on 2026-08-26.
+// Only the catalogue call below still uses Hermes, because /v2/price_feeds
+// remains open and it fails safe (a failed refresh keeps the committed table).
 //
 // 10s cadence is plenty: Pyth itself updates the on-chain price every ~400ms,
 // and Kalshi settles on a snapshot at 5pm ET Friday. Our edge math doesn't
 // need sub-second spot.
 
 import { setFeedStatus, recordTick } from '../observability/health.js';
+import { fetchPythnetPrice } from './pythnet.js';
 import { recordTick as recordPriceTick } from '../engine/short-horizon-vol.js';
 
 // Pyth feed symbols → commodity tags consumed by the short-horizon vol
@@ -161,25 +165,31 @@ async function fetchOnce(symbol) {
     // sees getPrice(symbol) === null and fails open.
     throw new Error(`pyth feed for ${symbol} not configured (see docs/COMMODITY_FEEDS.md)`);
   }
-  const url = `${HERMES_BASE}/v2/updates/price/latest?ids%5B%5D=0x${feedId.replace(/^0x/, '')}&parsed=true`;
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'pmp-ingestion/0.1', Accept: 'application/json' },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`pyth ${res.status} ${symbol}`);
-  const data = await res.json();
-  const parsed = Array.isArray(data?.parsed) ? data.parsed : [];
-  if (parsed.length === 0) throw new Error(`pyth no parsed price for ${symbol}`);
-  const p = parsed[0].price;
-  const expo = Number(p.expo);
-  const price = Number(p.price) * 10 ** expo;
-  const confidence = Number(p.conf) * 10 ** expo;
+  // ── Transport swapped to Pythnet, 2026-08-27 ──────────────────────────────
+  // Was `${HERMES_BASE}/v2/updates/price/latest`. Pyth's Core upgrade put that
+  // endpoint behind a $500/month API key on 2026-08-26 16:00 UTC and every feed
+  // here 401'd sixteen minutes later. Hermes is a hosted convenience layer over
+  // Pythnet; reading the price account directly gets the identical number for
+  // free, from the chain Hermes itself reads.
+  //
+  // This is deliberately a TRANSPORT change and nothing else. The return shape,
+  // the exported functions and SOURCE_TAGS are unchanged, so `getPrice()`
+  // callers, the health feed keys (`pyth_xag_usd`, …) and the `spot_source`
+  // written to commodity_edge_signals all keep working — and `pyth_xag_usd`
+  // stays TRUE, because it is still Pyth. Kalshi settles KXSILVERW/KXGOLDW on
+  // these exact feeds, so any non-Pyth substitute would have been wrong here.
+  const px = await fetchPythnetPrice(symbol, feedId);
   return {
     symbol,
-    price,
-    confidence,
-    publishTimeMs: Number(p.publish_time) * 1000,
+    price: px.price,
+    confidence: px.confidence,
+    publishTimeMs: px.publishTimeMs,
     feedId,
+    // `trading:false` is a market break (metals close 17:00-18:00 ET, and all
+    // weekend), not a fault — the price carried is the last traded one and its
+    // real on-chain timestamp rides with it, so commodity-base.js's
+    // config.maxSpotAgeMs gate decides usability per snapshot as it always has.
+    trading: px.trading,
     source: SOURCE_TAGS[symbol],
   };
 }

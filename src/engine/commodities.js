@@ -170,9 +170,20 @@ export const COMMODITIES = {
     // (price returned $78,052 in spot check). 24/7 feed; engine still pauses
     // snapshots off-hours because the IBIT chain is frozen overnight and
     // running edge math against a stale smile would just chase moving spot.
+    // ⚠️ RETAINED FOR REFERENCE ONLY — bitcoin no longer reads Pyth. See
+    // useBrtiSpot below. Left in place because kalshi-event.js and the docs
+    // still describe the symbol, and deleting it makes the diff read as if the
+    // symbol were wrong rather than unused.
     pythSymbol: 'BTC/USD',
     spotUnit: '$/BTC',
-    spotLabel: 'Pyth BTC/USD',
+    spotLabel: 'BRTI constituent basket',
+    // Spot comes from the free BRTI-constituent basket (Coinbase, Kraken,
+    // Bitstamp, Gemini), NOT Pyth. Kalshi settles KXBTCD on the CF Benchmarks
+    // BRTI, which is COMPUTED from those exchanges — so this is a step toward
+    // the settlement number, not away from it. Pyth was always a proxy, and as
+    // of the 2026-08-26 Core upgrade it is also a paid one.
+    // ⛔ Do NOT set this on silver/gold: Kalshi settles those on Pyth itself.
+    useBrtiSpot: true,
     enabled: true,
     // V2 cutover ON (2026-07-27). The 05-21 "drift <=0.15pp at hourly T"
     // rationale was written for the +/-3.0-capped 60d drift — true but moot:

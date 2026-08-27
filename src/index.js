@@ -11,6 +11,7 @@ import {
 } from './observability/health.js';
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
 import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts } from './feeds/pyth.js';
+import { startBrtiSpot, stopBrtiSpot, BRTI_SOURCE_TAG } from './feeds/brti-spot.js';
 // isOptionsMarketOpen still lives in massive.js (pure utility, no provider
 // coupling). Lifecycle goes through the options-provider abstraction so the
 // chain source can swap via OPTIONS_PROVIDER env without engine changes.
@@ -148,6 +149,12 @@ for (const config of enabledCommodities) {
     // Oil hybrid: Yahoo spot (CL=F / CLM26.NYM) + provider chain. The 15min
     // Yahoo poll cadence gets a 17min stale window. No Pyth feed for oil.
     markFeedRequired('yahoo_cl_f_spot', { maxStaleMs: 17 * 60 * 1000 });
+  } else if (config.useBrtiSpot) {
+    // Bitcoin: BRTI constituent basket, 10s poll. 5min stale window matches
+    // config.maxSpotAgeMs — the engine's own spot-age gate — so the readiness
+    // gate and the per-snapshot gate agree on what "dead" means instead of one
+    // passing while the other demotes.
+    markFeedRequired(BRTI_SOURCE_TAG, { maxStaleMs: 5 * 60 * 1000 });
   } else {
     markFeedRequired(`pyth_${config.pythSymbol.replace(/[/]/g, '_').toLowerCase()}`);
   }
@@ -548,7 +555,12 @@ async function bootstrapAll() {
     new Set(
       [
         // Weekly commodity engines. Yahoo-sourced ones (oil) never used Pyth.
-        ...enabledCommodities.filter((c) => !c.useYahooSpot).map((c) => c.pythSymbol),
+        // Yahoo-sourced (oil) and BRTI-sourced (bitcoin) engines never use Pyth.
+        // Leaving bitcoin in would subscribe BTC/USD to a feed nothing reads and
+        // put a permanently-401 row in /health that no consumer depends on.
+        ...enabledCommodities
+          .filter((c) => !c.useYahooSpot && !c.useBrtiSpot)
+          .map((c) => c.pythSymbol),
         // 15-minute engines subscribe INDEPENDENTLY. Deriving this list from
         // enabledCommodities alone silently starved 15m WTI: the weekly oil
         // engine is Yahoo-sourced and therefore filtered out above, so
@@ -559,6 +571,8 @@ async function bootstrapAll() {
     ),
   );
   startPyth(pythSymbols);
+  // Bitcoin spot: free BRTI constituent basket, independent of Pyth entirely.
+  if (enabledCommodities.some((c) => c.useBrtiSpot)) startBrtiSpot();
   for (const state of engines.values()) {
     bootstrapEngine(state).catch((err) => {
       console.error(`[${state.config.commodity}] bootstrap failed`, err);
@@ -994,6 +1008,7 @@ async function shutdown(signal) {
   stopPairDiscover();
   stopKalshi();
   stopAllPyth();
+  stopBrtiSpot();
   stopAllOptionsFeeds();
   stopYahooOil();
   if (calibrationTimer) clearInterval(calibrationTimer);

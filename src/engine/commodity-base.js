@@ -51,6 +51,7 @@ import {
 import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/options-provider.js';
 import { getPrice } from '../feeds/pyth.js';
+import { getBrtiSpot } from '../feeds/brti-spot.js';
 import { getOilSpot, getContractSpot } from '../feeds/yahoo-oil.js';
 import { synthesizeWtiSpot } from '../feeds/uso-synthetic.js';
 import { getFredDailyClose } from '../feeds/fred.js';
@@ -472,7 +473,10 @@ export function resolveTwapMu({ muRaw, muClamped = null, scale = BTC_MU_SCALE, c
 // upstream feed has no data yet (cold-start race) or a fail-open guard fires.
 export async function computeSnapshot(config, event, { now = new Date() } = {}) {
   // Spot source ladder (oil-specific path is the most complex):
-  //   silver/gold/bitcoin → Pyth via getPrice(config.pythSymbol)
+  //   silver/gold        → Pyth via getPrice(config.pythSymbol)
+  //   bitcoin            → BRTI constituent basket (getBrtiSpot) — Kalshi
+  //                        settles KXBTCD on CF Benchmarks BRTI, so the basket
+  //                        that BRTI is computed from beats Pyth's own aggregate
   //   oil PRIMARY        → USO-synthetic (Databento USO mid × FRED anchor)
   //   oil SECONDARY      → contract-aware Yahoo (CLM26.NYM etc.)
   //   oil TERTIARY       → Yahoo CL=F continuous (getOilSpot)
@@ -481,6 +485,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   // is covered without a deploy. See src/feeds/uso-synthetic.js.
   const useUsoSynthetic = config.useUsoSynthetic === true;
   const useYahooSpot = config.useYahooSpot === true;
+  const useBrtiSpot = config.useBrtiSpot === true;
 
   // Chain must be fetched before spot when useUsoSynthetic is on — the
   // synthetic needs the live USO mid that already rides on every chain
@@ -554,9 +559,13 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     }
   }
 
-  // TERTIARY: silver/gold/bitcoin = Pyth; oil = Yahoo CL=F continuous.
+  // TERTIARY: silver/gold = Pyth; bitcoin = BRTI basket; oil = Yahoo CL=F.
   if (!spot) {
-    spot = useYahooSpot ? getOilSpot() : getPrice(config.pythSymbol);
+    spot = useYahooSpot
+      ? getOilSpot()
+      : useBrtiSpot
+        ? getBrtiSpot()
+        : getPrice(config.pythSymbol);
     if (spot && useYahooSpot) {
       console.log(`[${config.commodity}] TERTIARY spot ${spot.source} = $${spot.price.toFixed(2)}`);
     }
@@ -564,7 +573,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 
   if (!spot) {
     console.warn(
-      `[${config.commodity}] no spot price (${useYahooSpot ? 'yahoo CL=F' : `pyth ${config.pythSymbol}`}) — skipping snapshot`,
+      `[${config.commodity}] no spot price (${
+        useYahooSpot ? 'yahoo CL=F' : useBrtiSpot ? 'BRTI basket' : `pyth ${config.pythSymbol}`
+      }) — skipping snapshot`,
     );
     return null;
   }

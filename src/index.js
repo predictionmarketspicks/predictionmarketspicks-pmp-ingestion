@@ -10,7 +10,7 @@ import {
   evaluateLiveness,
 } from './observability/health.js';
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
-import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts } from './feeds/pyth.js';
+import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts, WTI_FRONT_MONTH_SYMBOL } from './feeds/pyth.js';
 import { startBrtiSpot, stopBrtiSpot, BRTI_SOURCE_TAG } from './feeds/brti-spot.js';
 // isOptionsMarketOpen still lives in massive.js (pure utility, no provider
 // coupling). Lifecycle goes through the options-provider abstraction so the
@@ -555,12 +555,19 @@ async function bootstrapAll() {
     new Set(
       [
         // Weekly commodity engines. Yahoo-sourced ones (oil) never used Pyth.
-        // Yahoo-sourced (oil) and BRTI-sourced (bitcoin) engines never use Pyth.
-        // Leaving bitcoin in would subscribe BTC/USD to a feed nothing reads and
-        // put a permanently-401 row in /health that no consumer depends on.
+        // BRTI-sourced (bitcoin) engines never use Pyth. Oil is filtered by
+        // useYahooSpot but takes the WTI front month explicitly below.
         ...enabledCommodities
           .filter((c) => !c.useYahooSpot && !c.useBrtiSpot)
           .map((c) => c.pythSymbol),
+        // Oil's PRIMARY spot is the Pyth front-month WTI future (2026-08-27).
+        // Subscribed EXPLICITLY rather than via c.pythSymbol, which is the string
+        // 'WTI' and has no feed id, and explicitly rather than leaning on
+        // METALS_15M_SYMBOLS below — the 15-minute engines are independently
+        // toggleable, and inheriting oil's spot from them would silently starve
+        // the weekly engine the day someone turns them off. That is the same
+        // coupling the comment below this one was written about, in reverse.
+        ...(enabledCommodities.some((c) => c.usePythWtiSpot) ? [WTI_FRONT_MONTH_SYMBOL] : []),
         // 15-minute engines subscribe INDEPENDENTLY. Deriving this list from
         // enabledCommodities alone silently starved 15m WTI: the weekly oil
         // engine is Yahoo-sourced and therefore filtered out above, so

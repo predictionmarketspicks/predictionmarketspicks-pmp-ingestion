@@ -126,6 +126,25 @@ export const COMMODITIES = {
     // deriveEtfSpotByParity in feeds/databento.js returns ~real USO.
     // Tracking: handoffs/OIL_USO_SYNTHETIC_DISABLE_2026-05-22.md
     useUsoSynthetic: false,
+    // NEW PRIMARY 2026-08-27: Pyth front-month WTI future, read free off Pythnet
+    // (src/feeds/pythnet.js). KXWTI settles on the ICE WTI front-month, and Pyth
+    // publishes exactly that contract, auto-rolling by expiry — so this tracks the
+    // settled instrument instead of a 15-min-delayed continuous scrape, and needs
+    // no contract-aware rollover hack. Kalshi settles the sibling KXWTI15M series
+    // on Pyth WTI, and an earlier in-repo study put it at 99.5% verdict agreement
+    // with the front month (src/engine/metals-15m.js header).
+    //
+    // Why this became worth doing now: oil had been running on the THIRD rung of a
+    // three-rung ladder for at least 3 weeks — 900/900 rows `yahoo_cl_f`, with
+    // rung 1 (USO-synthetic) deliberately disabled and rung 2 (contract-aware
+    // Yahoo, which writes its own `yahoo_<contract>_nym` source) producing nothing.
+    // Yahoo also flaps past its 17-min staleness threshold, which is what made
+    // /health report unhealthy.
+    //
+    // ⚠️ Still a PROXY. KXWTI settles on ICE and we do not have ICE. This is a
+    // better proxy, not the settlement source — do not describe it as one.
+    // Yahoo stays wired below as fallback; set this false to revert in one line.
+    usePythWtiSpot: true,
     useYahooSpot: true,
     bypassWriterTag: true,
     // Contract-aware spot (Part B of OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13).

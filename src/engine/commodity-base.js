@@ -52,6 +52,12 @@ import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/options-provider.js';
 import { getPrice } from '../feeds/pyth.js';
 import { getBrtiSpot } from '../feeds/brti-spot.js';
+import { WTI_FRONT_MONTH_SYMBOL } from '../feeds/pyth.js';
+
+/** Oil snapshots run on a 5-min cadence, so a Pyth tick older than 10 min means
+ *  the feed is dead rather than quiet. Falls through to Yahoo, never publishes. */
+const PYTH_WTI_MAX_AGE_MS = 10 * 60 * 1000;
+
 import { getOilSpot, getContractSpot } from '../feeds/yahoo-oil.js';
 import { synthesizeWtiSpot } from '../feeds/uso-synthetic.js';
 import { getFredDailyClose } from '../feeds/fred.js';
@@ -486,6 +492,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   const useUsoSynthetic = config.useUsoSynthetic === true;
   const useYahooSpot = config.useYahooSpot === true;
   const useBrtiSpot = config.useBrtiSpot === true;
+  const usePythWtiSpot = config.usePythWtiSpot === true;
 
   // Chain must be fetched before spot when useUsoSynthetic is on — the
   // synthetic needs the live USO mid that already rides on every chain
@@ -520,6 +527,28 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     } else {
       console.warn(
         `[${config.commodity}] no underlyingPrice on chain contracts — falling back to contract-aware Yahoo`,
+      );
+    }
+  }
+
+  // PRIMARY (oil, 2026-08-27): Pyth front-month WTI future off Pythnet.
+  //
+  // Freshness is checked HERE rather than trusted, because getPrice() returns the
+  // last cached tick whether or not upstream is still alive — the exact shape that
+  // let gold and silver sit frozen for 28 hours while looking fine
+  // (docs/lessons/freshness-is-a-property-of-the-timestamp.md in the site repo).
+  // Stale => fall through to the Yahoo rungs rather than publish a dead number.
+  if (!spot && usePythWtiSpot) {
+    const px = getPrice(WTI_FRONT_MONTH_SYMBOL);
+    const ageMs = px ? Date.now() - px.publishTimeMs : Infinity;
+    if (px && ageMs <= PYTH_WTI_MAX_AGE_MS) {
+      spot = px;
+      console.log(
+        `[${config.commodity}] PRIMARY spot ${px.source} = $${px.price.toFixed(2)} (${Math.round(ageMs / 1000)}s old)`,
+      );
+    } else if (px) {
+      console.warn(
+        `[${config.commodity}] Pyth WTI is ${Math.round(ageMs / 60000)}min stale — falling back to Yahoo`,
       );
     }
   }

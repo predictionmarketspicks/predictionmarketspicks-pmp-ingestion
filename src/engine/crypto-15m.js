@@ -72,6 +72,15 @@ const TWAP_WINDOW_SEC = 60;
 /** Below this many graded windows the payload stays model_status='shadow'. */
 export const GRADED_WINDOWS_REQUIRED = 200;
 
+/**
+ * Kill switch, mirroring METALS_15M_ENABLED in metals-15m.js. Set
+ * CRYPTO_15M_ENABLED=0 and restart to stop this engine without touching the
+ * others — a redeploy or rollback to disable one 15-minute engine would take
+ * every other engine on this box down with it. Checked inside the run loop, not
+ * at bootstrap, so flipping it does not require the timers to be rebuilt.
+ */
+const ENABLED = process.env.CRYPTO_15M_ENABLED !== '0';
+
 /** Spot older than this and we refuse to price rather than guess. */
 const MAX_SPOT_AGE_S = 60;
 
@@ -244,6 +253,7 @@ export function buildPayload(cfg, { markets, spot, stats, gradedCount, now = Dat
 }
 
 export async function runCrypto15mOnce({ now = Date.now() } = {}) {
+  if (!ENABLED) return { written: 0, skipped: 'CRYPTO_15M_ENABLED=0' };
   state.lastRunAt = new Date(now).toISOString();
   let written = 0;
 

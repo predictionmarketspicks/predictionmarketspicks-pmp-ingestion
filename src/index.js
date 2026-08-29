@@ -70,6 +70,11 @@ import {
   stopMetals15m,
   getMetals15mState, METALS_15M_SYMBOLS } from './engine/metals-15m.js';
 import {
+  bootstrapCrypto15m,
+  stopCrypto15m,
+  getCrypto15mState,
+} from './engine/crypto-15m.js';
+import {
   bootstrapGasSnapshot,
   stopGasSnapshot,
   runGasSnapshotOnce,
@@ -579,7 +584,10 @@ async function bootstrapAll() {
   );
   startPyth(pythSymbols);
   // Bitcoin spot: free BRTI constituent basket, independent of Pyth entirely.
-  if (enabledCommodities.some((c) => c.useBrtiSpot)) startBrtiSpot();
+  // BRTI is now REQUIRED, not conditional: crypto-15m.js prices KXBTC15M off
+  // it and has no Pyth fallback, so gating it on the hourly commodities'
+  // useBrtiSpot flag would silently leave the 15-minute engine spot-less.
+  startBrtiSpot();
   for (const state of engines.values()) {
     bootstrapEngine(state).catch((err) => {
       console.error(`[${state.config.commodity}] bootstrap failed`, err);
@@ -783,6 +791,7 @@ const server = http.createServer((req, res) => {
     snap.engine.polymarket_snapshot = getPolymarketSnapshotState();
     snap.engine.polymarket_us_snapshot = getPolymarketUsSnapshotState();
     snap.engine.metals_15m = getMetals15mState();
+    snap.engine.crypto_15m = getCrypto15mState();
     snap.engine.gas_snapshot = getGasSnapshotState();
     snap.engine.wc_snapshot = getWcSnapshotState();
     snap.engine.wc_espn = getWcEspnGames();
@@ -986,6 +995,7 @@ bootstrapPolymarketUsSnapshot();
 // re-check when Kalshi lists nothing (weekends are dark). METALS_15M_ENABLED=0
 // to switch off without a redeploy.
 bootstrapMetals15m();
+bootstrapCrypto15m();
 
 bootstrapGasSnapshot();
 
@@ -1010,6 +1020,7 @@ async function shutdown(signal) {
   stopPolymarketSnapshot();
   stopPolymarketUsSnapshot();
   stopMetals15m();
+  stopCrypto15m();
   stopGasSnapshot();
   stopWcSnapshot();
   stopPairDiscover();

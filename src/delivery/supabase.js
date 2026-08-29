@@ -522,6 +522,59 @@ export async function recordFifteenMinObservation(o) {
   if (error) throw new Error(`record_fifteen_min_observation: ${error.message}`);
 }
 
+/**
+ * v2 of the 15-minute observation writer: same upsert as v1 plus SPOT, both
+ * sides of the book, and a model_version tag — and it logs a shadow tick on
+ * EVERY call rather than only on a flag.
+ *
+ * v1 is deliberately left in place and unchanged; the metals engine still uses
+ * it. Migrate metals to v2 only with a graded before/after, since the two write
+ * different numbers of shadow ticks.
+ *
+ * Why this exists: fifteen_min_shadow_ticks.spot was NULL on all 149,889 rows
+ * written by v1 — the RPC had no p_spot parameter and its INSERT never listed
+ * the column, so three weeks of research data cannot re-price under any
+ * alternative model. See handoffs/FIFTEEN_MIN_ENGINE_V2_2026-08-29.md §3.2.
+ */
+export async function recordFifteenMinObservationV2(o) {
+  const sb = getClient();
+  const { error } = await sb.rpc('record_fifteen_min_observation_v2', {
+    p_commodity: o.commodity,
+    p_series: o.series,
+    p_event_ticker: o.eventTicker,
+    p_market_ticker: o.marketTicker,
+    p_window_open: o.windowOpen,
+    p_window_close: o.windowClose,
+    p_strike: o.strike,
+    p_spot: o.spot ?? null,
+    p_yes_bid_cents: o.yesBidCents ?? null,
+    p_yes_ask_cents: o.yesAskCents ?? null,
+    p_mid_cents: o.midCents,
+    p_fair: o.fair,
+    p_sigma: o.sigma,
+    p_divergence_pp: o.divergencePp,
+    p_band_pp: o.bandPp,
+    p_tau_s: o.tauS,
+    p_volume_fp: o.volumeFp,
+    p_oi_fp: o.oiFp,
+    p_model_version: o.modelVersion ?? null,
+  });
+  if (error) throw new Error(`record_fifteen_min_observation_v2: ${error.message}`);
+}
+
+/** Settled windows for a commodity. Gates whether a tool may publish a fair
+ *  value at all: below the engine's threshold the payload stays shadow. */
+export async function countGradedFifteenMinWindows(commodity) {
+  const sb = getClient();
+  const { count, error } = await sb
+    .from('fifteen_min_settles')
+    .select('id', { count: 'exact', head: true })
+    .eq('commodity', commodity)
+    .in('result', ['yes', 'no']);
+  if (error) throw new Error(`count graded 15m windows: ${error.message}`);
+  return count ?? 0;
+}
+
 /** Returns true when this call is the one that graded the window. */
 export async function finalizeFifteenMinSettle(s) {
   const sb = getClient();

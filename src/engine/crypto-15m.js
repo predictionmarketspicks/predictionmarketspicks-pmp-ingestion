@@ -98,6 +98,9 @@ export const CRYPTO_15M = {
 };
 
 const state = {
+  observationFailures: 0,
+  lastObservationError: null,
+  lastObservationErrorAt: null,
   writes: 0,
   observations: 0,
   graded: 0,
@@ -315,9 +318,22 @@ export async function runCrypto15mOnce({ now = Date.now() } = {}) {
           });
           state.observations += 1;
         } catch (err) {
-          // Never take the payload writer down for the research table.
+          // Never take the payload writer down for the research table — but DO
+          // surface the failure. This catch used to console.warn() and nothing
+          // else, so when every write was rejected by a CHECK constraint that did
+          // not list 'btc', /health reported observations: 0 with lastError: null
+          // — indistinguishable from "still warming up". It stayed that way for
+          // the engine's whole first hour and only the Fly log had it.
+          //
+          // That silence was not cosmetic: no observations means no settled
+          // windows, so the graded count never leaves 0 and model_status stays
+          // 'shadow' forever. The tool could never have shipped, and the health
+          // endpoint would have said everything was fine the entire time.
+          state.lastObservationError = (err?.message || err).toString().slice(0, 200);
+          state.lastObservationErrorAt = new Date(now).toISOString();
+          state.observationFailures += 1;
           console.warn(
-            `[crypto-15m] ${cfg.commodity} observation failed: ${(err?.message || err).toString().slice(0, 200)}`,
+            `[crypto-15m] ${cfg.commodity} observation failed: ${state.lastObservationError}`,
           );
         }
       }

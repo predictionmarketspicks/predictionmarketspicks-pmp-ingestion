@@ -136,3 +136,38 @@ describe('applyEngineRules', () => {
     expect(v.suppress || v.downgrade).toBe(true);
   });
 });
+
+// 'direction' predicate (2026-08-29) — side-specific price-band rules.
+// The oil YES 20-39c bucket bled while NO 20-39c profited; a band rule without
+// a side key would suppress both. Safety property under test: a ctx with no
+// direction NEVER matches a direction-keyed rule (fails toward publishing).
+describe('direction predicate', () => {
+  const dctx = { ...ctx, direction: 'BUY YES' };
+
+  it('matches the publish direction case-insensitively', () => {
+    expect(conditionMatches({ direction: 'BUY YES' }, dctx)).toBe(true);
+    expect(conditionMatches({ direction: 'buy yes' }, dctx)).toBe(true);
+    expect(conditionMatches({ direction: 'BUY NO' }, dctx)).toBe(false);
+  });
+
+  it('conjoins with a price band — the oil rule shape', () => {
+    const cond = { direction: 'BUY YES', implied_prob_min: 0.2, implied_prob_max: 0.39 };
+    expect(conditionMatches(cond, { ...dctx, impliedProb: 0.3 })).toBe(true);
+    expect(conditionMatches(cond, { ...dctx, impliedProb: 0.3, direction: 'BUY NO' })).toBe(false);
+    expect(conditionMatches(cond, { ...dctx, impliedProb: 0.5 })).toBe(false);
+  });
+
+  it('never matches when ctx has no direction (fail toward publishing)', () => {
+    expect(conditionMatches({ direction: 'BUY YES' }, ctx)).toBe(false);
+  });
+
+  it('applies end to end through applyEngineRules', () => {
+    __setRulesForTest([
+      rule({ scope: 'oil-edge', condition: { direction: 'BUY YES', implied_prob_min: 0.2, implied_prob_max: 0.39 } }),
+    ]);
+    const oil = { commodity: 'oil', dow: 2, hourUtc: 15, impliedProb: 0.3, direction: 'BUY YES' };
+    expect(applyEngineRules(oil).suppress).toBe(true);
+    expect(applyEngineRules({ ...oil, direction: 'BUY NO' }).suppress).toBe(false);
+    __setRulesForTest([], false);
+  });
+});

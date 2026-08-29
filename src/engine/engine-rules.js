@@ -34,6 +34,12 @@ const PREDICATE_KEYS = new Set([
   'hour_utc',
   'implied_prob_min',
   'implied_prob_max',
+  // The side the engine is about to publish ('BUY YES' / 'BUY NO'), evaluated
+  // against the row's computed direction BEFORE rules apply. Added 2026-08-29:
+  // the oil-edge bleed is YES-specific (YES 20-39c ran 18% win / -$5.58 while
+  // NO 20-39c made +$4.79), and without this key a price-band rule cannot help
+  // but suppress the profitable side along with the losing one.
+  'direction',
 ]);
 
 // Action PARAMETERS, not predicates. `engine_rules` has no params column, so a
@@ -140,6 +146,13 @@ export function conditionMatches(condition, ctx) {
         break;
       case 'implied_prob_max':
         if (!(ctx.impliedProb != null && ctx.impliedProb <= Number(raw))) return false;
+        break;
+      case 'direction':
+        // Exact, case-insensitive match on the engine's publish direction.
+        // A ctx without a direction never matches a direction-keyed rule --
+        // same fail-toward-publishing posture as a null impliedProb above.
+        if (ctx.direction == null) return false;
+        if (String(raw).toUpperCase() !== String(ctx.direction).toUpperCase()) return false;
         break;
       default:
         return false;

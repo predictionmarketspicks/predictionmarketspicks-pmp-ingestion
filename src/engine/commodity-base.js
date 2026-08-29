@@ -1283,6 +1283,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       dow: now.getUTCDay(),
       hourUtc: now.getUTCHours(),
       impliedProb: kalshiProb,
+      // The direction computed above, pre-rules -- lets a rule target one side
+      // of a price band (see PREDICATE_KEYS note on 'direction').
+      direction,
     });
     if (ruleVerdict.matched.length > 0) {
       if (ruleVerdict.suppress) {

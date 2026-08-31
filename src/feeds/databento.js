@@ -269,6 +269,34 @@ async function pollOnce(underlying) {
       ? filtered.reduce((min, c) => (c.expirationDate < min ? c.expirationDate : min), filtered[0].expirationDate)
       : null;
 
+    // ── TERM-MIXING PROBE (EDGE_MARKETS §2.4, 2026-08-31) — MEASUREMENT ONLY ──
+    //
+    // buildIvSmile (commodity-base.js) filters contracts by IV range and
+    // liquidity but NEVER by expiry, so if a chain spans several expiration
+    // dates it builds one strike→IV curve out of mixed terms. IV has a term
+    // structure, so such a curve belongs to no actual expiry and every
+    // probability priced off it inherits that.
+    //
+    // Whether that happens is an EMPIRICAL question about what the sidecar
+    // returns, and this process cannot answer it from the code: `/chain/` takes
+    // no expiry parameter and the answer depends on the live OPRA response. So
+    // count first and fix second — the same order the Mcp-Session-Id probe used,
+    // for the same reason: the alternative is changing live pricing math on four
+    // paying surfaces to fix a problem nobody has yet shown exists.
+    //
+    // If this logs 1 expiry, there is nothing to fix. If it logs several, the
+    // fix is to scope the smile to the expiry nearest the event's close.
+    const expiries = new Set(filtered.map((c) => c.expirationDate).filter(Boolean));
+    if (expiries.size > 1) {
+      console.warn(
+        `[databento] TERM-MIX ${underlying}: chain spans ${expiries.size} expiries ` +
+          `(${[...expiries].sort().join(', ')}) across ${filtered.length} contracts — ` +
+          `buildIvSmile does not filter by expiry, so the smile mixes terms`,
+      );
+    } else {
+      console.log(`[databento] ${underlying}: single-expiry chain (${filtered.length} contracts)`);
+    }
+
     chainCache.set(underlying, {
       fetchedAt: now,
       expirationDate,

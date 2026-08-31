@@ -293,6 +293,15 @@ async function pollOnce(underlying) {
           `(${[...expiries].sort().join(', ')}) across ${filtered.length} contracts — ` +
           `buildIvSmile does not filter by expiry, so the smile mixes terms`,
       );
+    } else if (filtered.length === 0) {
+      // ⛔ NOT A RESULT. An empty chain trivially has one distinct expiry, so
+      // the clean-looking branch below would report "single-expiry" for a poll
+      // that saw nothing at all — off-hours, a dead sidecar, or a filter that
+      // ate everything all read identically. Same failure the repo already has
+      // a rule about ("never log a checkmark for a 0-row upsert"): an absence
+      // dressed as an answer is worse than no answer, because it ends the
+      // investigation. Say "no data" and keep the question open.
+      console.log(`[databento] ${underlying}: no chain this poll (0 contracts) — term-mix UNMEASURED`);
     } else {
       console.log(`[databento] ${underlying}: single-expiry chain (${filtered.length} contracts)`);
     }

@@ -229,9 +229,11 @@ export function buildPayload(cfg, { markets, spot, stats, gradedCount, now = Dat
         open: active.open_time,
         close: active.close_time,
         seconds_remaining: Math.round(secondsRemaining),
+        // 0-100, matching metals-15m.js — the two engines share one page
+        // consumer contract and shipped on different scales (this one 0-1).
         elapsed_pct:
           Number.isFinite(openMs) && closeMs > openMs
-            ? Math.min(1, Math.max(0, (now - openMs) / (closeMs - openMs)))
+            ? Math.min(100, Math.max(0, ((now - openMs) / (closeMs - openMs)) * 100))
             : null,
       },
       strike,

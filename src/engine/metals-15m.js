@@ -68,6 +68,12 @@ const FEE_COEFFICIENT = 0.07;
 
 const SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
 
+// Spot older than this and we refuse to price rather than guess — parity with
+// crypto-15m.js. A frozen Pyth feed must never produce a fair value: the
+// 2026-08-26 Hermes outage pinned metals spot for 28 hours and the engine
+// kept pricing off it.
+const MAX_SPOT_AGE_S = 60;
+
 export const METALS = {
   gold: {
     commodity: 'gold',
@@ -135,11 +141,20 @@ function numOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Price in CENTS from either the *_dollars string or the legacy cent number. */
+/** Price in CENTS from either the *_dollars string or the legacy cent number.
+ *  Kalshi sends the STRING '0.0000' (and '1.0000' on the far side) for a side
+ *  with no quote — a sentinel, not a price (see the KXNFL props incident,
+ *  2026-08-29: '0.0000' is truthy and parses to 0). Both shapes return null
+ *  here so a one-sided book yields mid === null and nothing downstream can
+ *  mistake an empty side for a 0c or 100c quote. */
 export function priceCents(market, side) {
   const dollars = numOrNull(market?.[`${side}_dollars`]);
-  if (dollars !== null) return Math.round(dollars * 100);
-  return numOrNull(market?.[side]);
+  if (dollars !== null) {
+    return dollars > 0 && dollars < 1 ? Math.round(dollars * 100) : null;
+  }
+  const cents = numOrNull(market?.[side]);
+  if (cents === null) return null;
+  return cents > 0 && cents < 100 ? cents : null;
 }
 
 /** Size/volume from *_fp string or legacy numeric. */
@@ -292,21 +307,24 @@ export function buildPayload(cfg, { markets, spot, stats, now = Date.now() }) {
   const spotPrice = spot?.price ?? null;
   const spotAgeS = spot ? Math.max(0, (now - spot.publishTimeMs) / 1000) : null;
 
+  const spotFresh = spotAgeS !== null && spotAgeS <= MAX_SPOT_AGE_S;
   const fair =
-    strike !== null && spotPrice !== null && sigma !== null
+    strike !== null && spotPrice !== null && sigma !== null && spotFresh
       ? fairYes({ spot: spotPrice, strike, sigmaAnnual: sigma, tauYears })
       : null;
 
   const band = fair !== null ? feeBandPp({ fair, bidCents: bid, askCents: ask }) : null;
   const divergence = fair !== null && mid !== null ? fair * 100 - mid : null;
 
+  // Quality ladder, in crypto-15m.js order: stale_spot is checked BEFORE
+  // sigma's `warming` — a dead feed must not present as a 5-minute warm-up.
   // `warming` is the cold-buffer contract: short-horizon-vol needs 30 ticks at
   // 10s = ~5 min after a redeploy before sigma is non-null. Surface it rather
   // than silently publishing a strike-only card.
   let quality = 'ok';
-  if (sigma === null) quality = 'warming';
-  else if (spotAgeS !== null && spotAgeS > 60) quality = 'stale_spot';
-  else if (strike === null) quality = 'no_strike';
+  if (strike === null) quality = 'no_strike';
+  else if (spotPrice === null || !spotFresh) quality = 'stale_spot';
+  else if (sigma === null) quality = 'warming';
 
   return {
     as_of: nowIso,
@@ -597,4 +615,4 @@ export async function sweepSettles({ now = Date.now(), timeoutMs = 20_000 } = {}
   return { graded };
 }
 
-export const __test__ = { FEE_COEFFICIENT, SECONDS_PER_YEAR, numOrNull };
+export const __test__ = { FEE_COEFFICIENT, SECONDS_PER_YEAR, MAX_SPOT_AGE_S, numOrNull };

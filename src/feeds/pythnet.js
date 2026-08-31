@@ -33,12 +33,14 @@
 // The magic/version/type triple IS the version guard — if Pyth ever changes the
 // layout these stop matching and we throw rather than decoding nonsense.
 
-const DEFAULT_RPCS = ['https://pythnet.rpcpool.com']
+// api2 403'd on getAccountInfo when this file shipped (2026-08-27) but was
+// re-probed 2026-08-31 and now serves it (slot-current, same account bytes as
+// rpcpool). Second in the list: rpcpool stays primary, api2 is the failover
+// the loop below walks to. mainnet-beta must NEVER be added — stale-copy trap.
+const DEFAULT_RPCS = ['https://pythnet.rpcpool.com', 'https://api2.pythnet.pyth.network']
 
-/** Comma-separated override so a second endpoint can be added without a deploy.
- *  Only one public Pythnet RPC works today: api2.pythnet.pyth.network answers
- *  getHealth but 403s on getAccountInfo (verified 2026-08-27), and mainnet-beta
- *  is the stale-copy trap above. If another appears, set PYTHNET_RPC_URLS. */
+/** Comma-separated override so endpoints can be swapped without a deploy.
+ *  Setting PYTHNET_RPC_URLS REPLACES the default list entirely. */
 const RPCS = (process.env.PYTHNET_RPC_URLS || '')
   .split(',')
   .map((s) => s.trim())
@@ -59,6 +61,22 @@ const STATUS_TRADING = 1
  * stale, so anything in that class fails here by three orders of magnitude.
  */
 const MAX_ONCHAIN_AGE_MS = 24 * 60 * 60 * 1000
+
+/** Metals stop printing Friday ~21:00-22:00 UTC and resume Sunday ~22:00-23:00
+ *  UTC, so by late Sunday the last legitimate on-chain print is ~49h old and
+ *  the 24h gate above made every Saturday a standing false alarm. Widen to 72h
+ *  for the metals pair on Sat/Sun (UTC) ONLY — day-of-week is the cheapest
+ *  signal the code can know without a Kalshi call. The mainnet-beta abandoned
+ *  copy is 700+ DAYS stale, so it still fails the widened gate by orders of
+ *  magnitude. */
+const WEEKEND_MAX_ONCHAIN_AGE_MS = 72 * 60 * 60 * 1000
+const WEEKEND_WIDENED_SYMBOLS = new Set(['XAU/USD', 'XAG/USD'])
+
+export function maxOnchainAgeMs(symbol, now = new Date()) {
+  if (!WEEKEND_WIDENED_SYMBOLS.has(symbol)) return MAX_ONCHAIN_AGE_MS
+  const day = now.getUTCDay()
+  return day === 0 || day === 6 ? WEEKEND_MAX_ONCHAIN_AGE_MS : MAX_ONCHAIN_AGE_MS
+}
 
 const RPC_TIMEOUT_MS = 8000
 
@@ -147,7 +165,7 @@ export async function fetchPythnetPrice(symbol, feedId) {
     try {
       const parsed = parsePriceAccount(await rpcGetAccount(rpc, account))
       const ageMs = Date.now() - parsed.publishTimeMs
-      if (ageMs > MAX_ONCHAIN_AGE_MS) {
+      if (ageMs > maxOnchainAgeMs(symbol)) {
         // An abandoned or wrong account, not a quiet market. Try the next RPC
         // rather than publishing it — this is the mainnet-beta trap.
         throw new Error(

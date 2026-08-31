@@ -62,8 +62,28 @@ describe('Bitcoin TWAP-aware prob + short-horizon RV + tier ceiling config', () 
     expect(COMMODITIES.bitcoin.minMinutesToClose).toBeUndefined();
   });
 
-  it('silver / gold / oil / spx / copper opt out of every TWAP/short-horizon knob', () => {
-    for (const c of ['silver', 'gold', 'oil', 'spx', 'copper']) {
+  // SUPERSEDED IN PART, 2026-08-31 (EDGE_MARKETS §1.1). This used to assert that
+  // gold/silver/oil opted out of tierCeilingByMinutes too. They no longer do —
+  // that opt-out WAS the Friday-afternoon bug: a gold strike 0.5% OTM at T=2h
+  // printed model 99.1% against a 79¢ book and published STRONG, because the
+  // minutes-to-close ceiling bitcoin carries was bitcoin-only. The TWAP and
+  // short-horizon-RV knobs stay bitcoin-only (they model crypto microstructure
+  // and 24/7 settlement, which metals do not have); the CONTAINMENT knobs are
+  // now shared. spx and copper keep the full opt-out — they were not in §1.1's
+  // scope and nothing has measured them.
+  it('gold / silver / oil keep the crypto-specific knobs off but now carry containment', () => {
+    for (const c of ['silver', 'gold', 'oil']) {
+      expect(COMMODITIES[c].twapWindowSeconds ?? null).toBe(null);
+      expect(COMMODITIES[c].useShortHorizonRv ?? null).toBe(null);
+      expect(COMMODITIES[c].smileKalshiCorrCheck ?? null).toBe(null);
+      // Containment, shared with bitcoin as of §1.1:
+      expect(COMMODITIES[c].tierCeilingByMinutes).toBeTruthy();
+      expect(COMMODITIES[c].postSpreadGate).toBe(true);
+    }
+  });
+
+  it('spx / copper still opt out of every TWAP/short-horizon knob', () => {
+    for (const c of ['spx', 'copper']) {
       expect(COMMODITIES[c].twapWindowSeconds ?? null).toBe(null);
       expect(COMMODITIES[c].useShortHorizonRv ?? null).toBe(null);
       expect(COMMODITIES[c].tierCeilingByMinutes ?? null).toBe(null);

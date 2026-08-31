@@ -20,8 +20,24 @@ describe('applyCalibrationTierCeiling', () => {
     }
   });
 
-  it('never touches silver/gold/oil — different model, not implicated', () => {
+  // SUPERSEDED 2026-08-31 (EDGE_MARKETS §1.1). The old assertion — and its
+  // rationale, "different model, not implicated" — was falsified in production:
+  // on 2026-08-28 a gold strike 0.5% OTM at T=2h printed model 99.1% against a
+  // 79¢ book and shipped STRONG through edge_alerts. Same phantom-edge shape
+  // bitcoin was ceilinged for; the metals model was never immune, it was just
+  // never contained. Metals and oil now sit under the same ceiling and lift it
+  // the same way: their OWN calibration map must be ACTIVE.
+  it('ceilings silver/gold/oil too, until their own map is active', () => {
     for (const c of ['silver', 'gold', 'oil']) {
+      expect(applyCalibrationTierCeiling(c, 'STRONG', shadow)).toBe('MODERATE');
+      expect(applyCalibrationTierCeiling(c, 'STRONG', active)).toBe('STRONG');
+      // A ceiling, never a demotion — non-STRONG tiers pass through untouched.
+      expect(applyCalibrationTierCeiling(c, 'MODERATE', shadow)).toBe('MODERATE');
+    }
+  });
+
+  it('leaves un-scoped commodities alone (spx/copper were never measured)', () => {
+    for (const c of ['spx', 'copper']) {
       expect(applyCalibrationTierCeiling(c, 'STRONG', shadow)).toBe('STRONG');
     }
   });

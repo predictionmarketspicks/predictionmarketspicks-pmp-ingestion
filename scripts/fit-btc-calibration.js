@@ -68,8 +68,26 @@ async function postBotLog(content) {
   }
 }
 
-const TOOL_SLUG = 'bitcoin-edge';
-const COMMODITY = 'bitcoin';
+// ── Commodity/slug selection (EDGE_MARKETS §1.1, 2026-08-31) ─────────────────
+// Was hardcoded to bitcoin. Metals and oil now sit under the same tier ceiling
+// (src/delivery/tier-ceiling.js), and a ceiling only lifts when that
+// commodity's OWN map is active — so both scripts must be runnable per
+// commodity or gold/silver can never be promoted out of the cap.
+//
+// Defaults are unchanged (bitcoin), so every existing invocation and cron line
+// behaves exactly as before. Fitting is safe to run; PROMOTION stays manual and
+// gated on out-of-sample Brier (§9 governance) — this only chooses the target.
+//   node scripts/{script} --commodity gold [--tool-slug gold-edge]
+const argValue = (name) => {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--')
+    ? process.argv[i + 1]
+    : null;
+};
+const COMMODITY = (argValue('commodity') || 'bitcoin').toLowerCase();
+// Slug convention is `<commodity>-edge` across the tool registry; override only
+// if a surface ever breaks it.
+const TOOL_SLUG = argValue('tool-slug') || `${COMMODITY}-edge`;
 const MODEL_VERSION = 'v2_physical';
 const SHRINK_PRIOR = 100; // lambda = n_eff / (n_eff + 100)
 const MIN_EVENTS = 8; // below this a 2-parameter fit is not worth writing

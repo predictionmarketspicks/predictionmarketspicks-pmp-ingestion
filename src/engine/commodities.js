@@ -71,6 +71,29 @@ export const COMMODITIES = {
     // Intraday history retention (INTRADAY_EDGE_HISTORY_2026-07-05). Append the
     // banded strike subset to commodity_edge_intraday every tick; nightly rollup
     // + 7-day prune handle the rest. Band = ±intradayBandPct of spot ∪ live book.
+    // --- Containment kit ported from bitcoin (EDGE_MARKETS §1.1, 2026-08-31) ---
+    // Metals/oil shipped raw probAboveStrikePhysical with none of bitcoin's
+    // post-incident guards. Observed live 2026-08-28: at T=2h, gold σ_blend
+    // ≈0.14 → σ√τ ≈0.21%; a strike 0.5% OTM prints d₂=2.37 → model 99.1% vs a
+    // 79¢ book → +20pp "edge" → STRONG in edge_alerts. Bitcoin's measured
+    // version of the same disease: claimed 0.794, realized 0.481.
+    //
+    // Graduated tier ceiling by minutes-to-close — same mechanism as bitcoin's,
+    // scaled to the daily/weekly settle horizon (bitcoin is hourly, so its
+    // 30/10/2 ladder would sit entirely inside the window where the Aug 28 row
+    // fired). STRONG needs ≥120min (the observed T=2h failure is inside it),
+    // MODERATE ≥30min, SPECULATIVE ≥5min; inside 5min every row goes PASS.
+    tierCeilingByMinutes: { STRONG: 120, MODERATE: 30, SPECULATIVE: 5 },
+    // Post-spread, side-aware BUY gate (mechanism: commodity-base.js
+    // postSpreadSideGate). YES must clear its ask-side spread by ≥5pp
+    // (MIN_EDGE_PP), or ≥10pp when yesAsk ≥70¢ (favorite band, via the default
+    // yesFavorite knobs — model saturation is worst exactly where the Aug 28
+    // row sat); YES under 15¢ is suppressed (longshot band). NO side stays
+    // ENABLED here — unlike bitcoin, there is no adverse live NO record for
+    // this engine — but at the stricter 10pp post-spread bar.
+    postSpreadGate: true,
+    minEdgePpNoSide: 0.1,
+    noSideEnabled: true,
     intradayHistory: true,
     intradayBandPct: 0.10,
   },
@@ -102,6 +125,29 @@ export const COMMODITIES = {
     // surface. See commodities.silver.pauseSnapshotsOffHours.
     pauseSnapshotsOffHours: true,
     // Intraday history retention — see commodities.silver.intradayHistory.
+    // --- Containment kit ported from bitcoin (EDGE_MARKETS §1.1, 2026-08-31) ---
+    // Metals/oil shipped raw probAboveStrikePhysical with none of bitcoin's
+    // post-incident guards. Observed live 2026-08-28: at T=2h, gold σ_blend
+    // ≈0.14 → σ√τ ≈0.21%; a strike 0.5% OTM prints d₂=2.37 → model 99.1% vs a
+    // 79¢ book → +20pp "edge" → STRONG in edge_alerts. Bitcoin's measured
+    // version of the same disease: claimed 0.794, realized 0.481.
+    //
+    // Graduated tier ceiling by minutes-to-close — same mechanism as bitcoin's,
+    // scaled to the daily/weekly settle horizon (bitcoin is hourly, so its
+    // 30/10/2 ladder would sit entirely inside the window where the Aug 28 row
+    // fired). STRONG needs ≥120min (the observed T=2h failure is inside it),
+    // MODERATE ≥30min, SPECULATIVE ≥5min; inside 5min every row goes PASS.
+    tierCeilingByMinutes: { STRONG: 120, MODERATE: 30, SPECULATIVE: 5 },
+    // Post-spread, side-aware BUY gate (mechanism: commodity-base.js
+    // postSpreadSideGate). YES must clear its ask-side spread by ≥5pp
+    // (MIN_EDGE_PP), or ≥10pp when yesAsk ≥70¢ (favorite band, via the default
+    // yesFavorite knobs — model saturation is worst exactly where the Aug 28
+    // row sat); YES under 15¢ is suppressed (longshot band). NO side stays
+    // ENABLED here — unlike bitcoin, there is no adverse live NO record for
+    // this engine — but at the stricter 10pp post-spread bar.
+    postSpreadGate: true,
+    minEdgePpNoSide: 0.1,
+    noSideEnabled: true,
     intradayHistory: true,
     intradayBandPct: 0.10,
   },
@@ -167,6 +213,29 @@ export const COMMODITIES = {
     // Pairs with requiredOffHours:false on the databento_uso readiness gate.
     pauseSnapshotsOffHours: true,
     // Intraday history retention — see commodities.silver.intradayHistory.
+    // --- Containment kit ported from bitcoin (EDGE_MARKETS §1.1, 2026-08-31) ---
+    // Metals/oil shipped raw probAboveStrikePhysical with none of bitcoin's
+    // post-incident guards. Observed live 2026-08-28: at T=2h, gold σ_blend
+    // ≈0.14 → σ√τ ≈0.21%; a strike 0.5% OTM prints d₂=2.37 → model 99.1% vs a
+    // 79¢ book → +20pp "edge" → STRONG in edge_alerts. Bitcoin's measured
+    // version of the same disease: claimed 0.794, realized 0.481.
+    //
+    // Graduated tier ceiling by minutes-to-close — same mechanism as bitcoin's,
+    // scaled to the daily/weekly settle horizon (bitcoin is hourly, so its
+    // 30/10/2 ladder would sit entirely inside the window where the Aug 28 row
+    // fired). STRONG needs ≥120min (the observed T=2h failure is inside it),
+    // MODERATE ≥30min, SPECULATIVE ≥5min; inside 5min every row goes PASS.
+    tierCeilingByMinutes: { STRONG: 120, MODERATE: 30, SPECULATIVE: 5 },
+    // Post-spread, side-aware BUY gate (mechanism: commodity-base.js
+    // postSpreadSideGate). YES must clear its ask-side spread by ≥5pp
+    // (MIN_EDGE_PP), or ≥10pp when yesAsk ≥70¢ (favorite band, via the default
+    // yesFavorite knobs — model saturation is worst exactly where the Aug 28
+    // row sat); YES under 15¢ is suppressed (longshot band). NO side stays
+    // ENABLED here — unlike bitcoin, there is no adverse live NO record for
+    // this engine — but at the stricter 10pp post-spread bar.
+    postSpreadGate: true,
+    minEdgePpNoSide: 0.1,
+    noSideEnabled: true,
     intradayHistory: true,
     intradayBandPct: 0.10,
   },

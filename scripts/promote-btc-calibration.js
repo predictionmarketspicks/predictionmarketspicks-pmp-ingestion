@@ -23,8 +23,26 @@
 import { getClient } from '../src/delivery/supabase.js';
 import { applyCalibration } from '../src/engine/calibration.js';
 
-const TOOL_SLUG = 'bitcoin-edge';
-const COMMODITY = 'bitcoin';
+// ── Commodity/slug selection (EDGE_MARKETS §1.1, 2026-08-31) ─────────────────
+// Was hardcoded to bitcoin. Metals and oil now sit under the same tier ceiling
+// (src/delivery/tier-ceiling.js), and a ceiling only lifts when that
+// commodity's OWN map is active — so both scripts must be runnable per
+// commodity or gold/silver can never be promoted out of the cap.
+//
+// Defaults are unchanged (bitcoin), so every existing invocation and cron line
+// behaves exactly as before. Fitting is safe to run; PROMOTION stays manual and
+// gated on out-of-sample Brier (§9 governance) — this only chooses the target.
+//   node scripts/{script} --commodity gold [--tool-slug gold-edge]
+const argValue = (name) => {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--')
+    ? process.argv[i + 1]
+    : null;
+};
+const COMMODITY = (argValue('commodity') || 'bitcoin').toLowerCase();
+// Slug convention is `<commodity>-edge` across the tool registry; override only
+// if a surface ever breaks it.
+const TOOL_SLUG = argValue('tool-slug') || `${COMMODITY}-edge`;
 const MODEL_VERSION = 'v2_physical';
 const MIN_EVENTS = 10;
 const MARKET_TOLERANCE = 0.01;
@@ -157,7 +175,7 @@ async function main() {
 
   console.log(`\npromoted map id=${map.id} to ACTIVE.`);
   console.log('The engine picks it up within the hour (or on next boot).');
-  console.log('REMINDER: write a tool_changes row for bitcoin-edge (resets_record=false).');
+  console.log(`REMINDER: write a tool_changes row for ${TOOL_SLUG} (resets_record=false).`);
 }
 
 main().catch((err) => {

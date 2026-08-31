@@ -23,7 +23,14 @@
 // (set in commodity-base from isCalibrationActive) and promotion is gated on
 // out-of-sample Brier in scripts/promote-btc-calibration.js.
 
-const CEILINGED_COMMODITIES = new Set(['bitcoin']);
+// WIDENED 2026-08-31 (EDGE_MARKETS §1.1). Metals and oil shipped the identical
+// disease bitcoin was ceilinged for, with none of the containment: at T=2h a
+// gold strike 0.5% OTM printed model 99.1% against a 79¢ book — a +20pp "edge",
+// published STRONG (live, 2026-08-28). The mechanism is not bitcoin-specific;
+// only the ceiling was. Fail-safe by construction: a commodity in this set
+// cannot publish STRONG until its OWN calibration map is ACTIVE, and promotion
+// stays manual (§9 governance).
+const CEILINGED_COMMODITIES = new Set(['bitcoin', 'gold', 'silver', 'oil']);
 
 // Returns the tier that may be PUBLISHED for this signal.
 // `meta` is the snapshot meta object; a missing/false calibrationActive means

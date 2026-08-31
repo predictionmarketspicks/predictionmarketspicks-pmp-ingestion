@@ -211,13 +211,50 @@ export const BTC_STRIKE_COUNT_WARN = 150;
 // leg-skew artifact, not a tradeable signal.
 export const KALSHI_MAX_SKEW_SECONDS = 90;
 
-// Sanity cap / defense-in-depth. Within EDGE_IMPLAUSIBLE_MINUTES_TO_CLOSE of an
-// event close, a genuine edge on a liquid hourly book is never this large —
-// anything above EDGE_IMPLAUSIBLE_PP is a data fault by construction (a stale
-// quote the freshness guards above didn't catch). Flagged 'edge_implausible'
-// and suppressed rather than published as a phantom BUY.
-export const EDGE_IMPLAUSIBLE_MINUTES_TO_CLOSE = 30;
-export const EDGE_IMPLAUSIBLE_PP = 0.25; // 25pp
+// Sanity cap / defense-in-depth — T-SCALED, ALL HORIZONS (EDGE_MARKETS §1.1,
+// 2026-08-31). Supersedes the fixed 2026-06-10 form (arm only ≤30min to close,
+// suppress only >25pp), which was blind to the Friday-afternoon metals disease:
+// at T=2h, gold σ_blend ≈0.14 → σ√τ ≈0.21%, so a strike just 0.5% OTM prints
+// d₂=2.37 → model 99.1% vs a 79¢ book → a +20pp "edge" → STRONG (observed live
+// 2026-08-28 in edge_alerts). 20pp cleared the old 25pp bar and 120min cleared
+// the old 30min arm, so the guard never fired. Bitcoin's measured version of
+// the same disease: claimed 0.794, realized 0.481.
+//
+// Threshold: suppress when |edge| > max(15pp, 6·σ√τ·100pp), where σ is the
+// annualized vol driving the model prob and τ the years to close.
+//
+// DERIVATION OF THE 6·σ√τ FORM. σ√τ is the model's own one-standard-deviation
+// log-price move over the contract's remaining life — the total uncertainty
+// BOTH the model and the book are pricing the same terminal event against. As
+// τ → 0 that uncertainty collapses and Φ(d₂) saturates: model and market are
+// then pinned by the same near-certain outcome, and any large residual gap can
+// only be the book's tail/fee premium or a stale quote — never information the
+// model has. So the ceiling must SHRINK toward a fixed floor near expiry and
+// may RELAX proportionally to remaining vol far from it (long-dated or
+// high-vol regimes, e.g. crypto cascade hours, where honest model-vs-order-
+// flow dispersion really can be large). Scaling linearly in σ√τ at 6pp of
+// probability per 1% of remaining vol keeps the ceiling: (a) inert for every
+// historically-validated edge — typical weekly-metals σ√τ ≈1-2% puts 6·σ√τ at
+// 6-12pp, below the 15pp floor, so the floor governs and sits safely above the
+// 12pp STRONG cutoff; (b) decisive against both observed phantom shapes — the
+// Aug 28 gold +20pp at σ√τ=0.21% (ceiling 15pp) and the 2026-06-10 BTC
+// 25pp+ near-close artifacts (ceiling 15pp at BTC's sub-hour σ√τ ≈0.3-0.9%).
+// Flagged 'edge_implausible' + hard-suppressed rather than published.
+export const EDGE_IMPLAUSIBLE_FLOOR_PP = 0.15; // 15pp absolute floor (fraction units)
+export const EDGE_IMPLAUSIBLE_SIGMA_MULT = 6;
+
+// Pure. sigmaAnnual = the annualized σ that produced the model prob (blend
+// preferred); tYears = years to close. Non-finite/non-positive inputs degrade
+// the σ√τ term to 0, leaving the 15pp floor — fail-SAFE (tightest ceiling),
+// since an edge with no honest σ behind it deserves the least benefit of doubt.
+export function edgeImplausibleThreshold(sigmaAnnual, tYears) {
+  const s = Number(sigmaAnnual);
+  const t = Number(tYears);
+  const sigmaSqrtTau = Number.isFinite(s) && s > 0 && Number.isFinite(t) && t > 0
+    ? s * Math.sqrt(t)
+    : 0;
+  return Math.max(EDGE_IMPLAUSIBLE_FLOOR_PP, EDGE_IMPLAUSIBLE_SIGMA_MULT * sigmaSqrtTau);
+}
 
 // Massive chain delta filter (plan §10) — keeps the in-memory map under control
 // across four ETFs. `null` delta passes through, so Phase 1 bridge-week traffic

@@ -44,8 +44,9 @@ import {
   OPTION_QUALITY_MIN_VOLUME,
   OPTION_QUALITY_MIN_OI,
   KALSHI_MAX_SKEW_SECONDS,
-  EDGE_IMPLAUSIBLE_MINUTES_TO_CLOSE,
-  EDGE_IMPLAUSIBLE_PP,
+  edgeImplausibleThreshold,
+  EDGE_IMPLAUSIBLE_FLOOR_PP,
+  EDGE_IMPLAUSIBLE_SIGMA_MULT,
   WATCH_EDGE_PP,
 } from './thresholds.js';
 import { getQuote } from '../feeds/kalshi.js';
@@ -1196,21 +1197,29 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       }
     }
 
-    // Sanity cap / defense-in-depth (2026-06-10 stale-Kalshi-leg fix). Near
-    // close, a real edge on a liquid hourly book is never 25pp+ — anything
-    // larger is a data fault by construction (leg skew or a stale quote the
-    // freshness guards above didn't catch, e.g. the 62c/75c-vs-21%/38% phantom
-    // BUY NO rows Benny saw 2026-06-10). Suppress instead of publishing.
+    // Sanity cap / defense-in-depth — T-scaled, ALL horizons (EDGE_MARKETS
+    // §1.1, 2026-08-31; supersedes the 2026-06-10 ≤30min/25pp form). An |edge|
+    // above max(15pp, 6·σ√τ) is a data fault or model saturation by
+    // construction — near expiry σ√τ collapses, Φ(d₂) pins at 0/1, and the
+    // residual gap is the book's tail premium, not information (the Friday
+    // 99%-vs-79¢ gold STRONGs, observed live 2026-08-28; bitcoin's measured
+    // version: claimed 0.794, realized 0.481). σ is whichever annualized vol
+    // actually drove the model prob this row (blend preferred); when chosenEdge
+    // is non-null the iv branch ran, so a σ is always available here.
+    // Derivation of the 6·σ√τ form: thresholds.js EDGE_IMPLAUSIBLE_SIGMA_MULT.
+    const implausibleSigma = sigmaBlendVal ?? sigmaIvVal ?? iv;
+    const implausibleCeiling = edgeImplausibleThreshold(implausibleSigma, T);
     if (
       qualityFlag == null &&
       chosenEdge != null &&
-      minutesToClose <= EDGE_IMPLAUSIBLE_MINUTES_TO_CLOSE &&
-      Math.abs(chosenEdge) > EDGE_IMPLAUSIBLE_PP
+      Math.abs(chosenEdge) > implausibleCeiling
     ) {
       qualityFlag = 'edge_implausible';
       rationale =
-        `edge_implausible: |edge|=${(Math.abs(chosenEdge) * 100).toFixed(1)}pp ` +
-        `with ${minutesToClose.toFixed(1)}min to close — data fault, not a tradeable edge`;
+        `edge_implausible: |edge|=${(Math.abs(chosenEdge) * 100).toFixed(1)}pp exceeds ` +
+        `${(implausibleCeiling * 100).toFixed(1)}pp ceiling (max(${(EDGE_IMPLAUSIBLE_FLOOR_PP * 100).toFixed(0)}pp, ` +
+        `${EDGE_IMPLAUSIBLE_SIGMA_MULT}·σ√τ)) with ${minutesToClose.toFixed(1)}min to close ` +
+        `— data fault or model saturation, not a tradeable edge`;
     }
 
     let fusedTierStr = chosenEdge != null ? fusedTier(Math.abs(chosenEdge)) : 'NO_EDGE';

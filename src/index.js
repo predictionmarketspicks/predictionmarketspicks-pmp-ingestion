@@ -98,6 +98,32 @@ import {
   getPairDiscoverState,
 } from './engine/pair-discover.js';
 
+// --- boot assertion (F8) ---
+//
+// Fail LOUDLY at boot instead of running mute. postToChannel() soft-returns on
+// a missing DISCORD_BOT_TOKEN and every caller swallows the promise, which is
+// how a 3.5-week silent alert outage stayed invisible. If a required secret is
+// absent the right behaviour is exit(1) so Fly restart-loops and the crash is
+// on the dashboard, not a quiet no-op.
+//
+// ⚠️ Redaction hazard: `vercel env pull` (and similar tooling) writes the
+// literal string "[SENSITIVE]" for redacted secrets. That is eleven characters
+// of garbage that passes a truthiness check, so it must FAIL this assertion too.
+const REQUIRED_BOOT_ENV = ['DISCORD_BOT_TOKEN', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY'];
+{
+  const bad = REQUIRED_BOOT_ENV.filter((name) => {
+    const v = process.env[name];
+    return !v || v.trim() === '' || v.trim() === '[SENSITIVE]';
+  });
+  if (bad.length) {
+    console.error(
+      `[boot] FATAL: required env missing, empty, or redacted ("[SENSITIVE]"): ${bad.join(', ')} — ` +
+        'refusing to start mute. Set the secret(s) (fly secrets set ...) and redeploy.',
+    );
+    process.exit(1);
+  }
+}
+
 initSentry();
 
 const PORT = Number(process.env.PORT || 8080);
@@ -715,6 +741,39 @@ function scheduleMovers() {
   }, MOVERS_INTERVAL_MS);
 }
 
+// --- daily canary (F8) ---
+//
+// One post per day to #bot-logs so SILENCE becomes a signal: if "canary ... ok"
+// stops appearing, either this process is down or the Discord delivery path is
+// broken — both are the silent-outage class this exists to catch. Failures are
+// loud (console + Sentry) but the real alarm is a human noticing the missing
+// line; that is the point.
+const CANARY_UTC_HOUR = 13; // 13:00 UTC ≈ 9:00 ET, after the morning jobs
+let canaryTimer = null;
+
+function msUntilNextCanary(now = new Date()) {
+  const next = new Date(Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), CANARY_UTC_HOUR, 0, 0,
+  ));
+  if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+  return next.getTime() - now.getTime();
+}
+
+function scheduleCanary() {
+  if (stopRequested) return;
+  canaryTimer = setTimeout(async () => {
+    try {
+      await postBotLog(`canary ${new Date().toISOString().slice(0, 10)} ok`);
+    } catch (err) {
+      // Deliberately NOT the swallowed .catch(() => {}) pattern — the canary is
+      // the one post whose failure must be visible somewhere.
+      console.error('[canary] post failed', err?.message || err);
+      Sentry.captureException(err);
+    }
+    scheduleCanary();
+  }, msUntilNextCanary());
+}
+
 function bootstrapMovers() {
   // Wait briefly so Kalshi WS + commodity engines have settled before the
   // first REST burst. 30s also avoids racing the engine's first snapshot log.
@@ -983,6 +1042,8 @@ bootstrapAll().catch((err) => {
 
 bootstrapMovers();
 
+scheduleCanary();
+
 bootstrapMacro();
 
 bootstrapPolymarketSnapshot();
@@ -1016,6 +1077,7 @@ async function shutdown(signal) {
     if (state.eventRefreshTimer) clearInterval(state.eventRefreshTimer);
   }
   if (moversState.scanTimer) clearTimeout(moversState.scanTimer);
+  if (canaryTimer) clearTimeout(canaryTimer);
   stopMacro();
   stopPolymarketSnapshot();
   stopPolymarketUsSnapshot();

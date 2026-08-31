@@ -39,6 +39,7 @@ import {
   upsertPowerRanks,
   upsertFreeAgents,
   upsertTeamDvoa,
+  recordExtCaptureRun,
 } from '../src/delivery/ext-feeds.js';
 import { stagingAgeHours, isCapturedToday, stagingPathFor } from '../src/feeds/ext-shared.js';
 
@@ -153,6 +154,21 @@ async function main() {
   }
   const written = summary.reduce((s, r) => s + (r.written || 0), 0);
   const blocked = summary.filter((r) => r.blocked).map((r) => r.name);
+  // Run-level heartbeat (F8): record what this run SAW, even when feeds were
+  // blocked — the ext-feeds-freshness workflow reads ext_capture_runs to tell
+  // "run never happened" apart from "run happened". Dry runs write nothing and
+  // record nothing. A failed heartbeat is loud and fails the run: an ingest
+  // whose heartbeat didn't land looks exactly like a missed run to the monitor,
+  // so pretending it succeeded would hide the very gap this exists to close.
+  if (!opts.dry) {
+    try {
+      await recordExtCaptureRun({ summary, source: opts.source });
+      console.log('heartbeat: ext_capture_runs row recorded.');
+    } catch (err) {
+      console.error(`heartbeat FAILED: ${err.message} — the freshness monitor will read this run as missing.`);
+      process.exitCode = 1;
+    }
+  }
   console.log(`done — ${written} total rows ${opts.dry ? 'would be written' : 'written'} across ${names.length} feed(s).`);
   if (blocked.length) {
     // Non-zero so an unattended run can't report success while feeds were

@@ -19,22 +19,69 @@ async function getJson(url, timeoutMs = 8000) {
   return res.json();
 }
 
-// Soonest-closing open event for a series. Sorts by event_ticker, which encodes
-// YYMMMDDHH date — same trick the Python engine uses.
+// Soonest-closing open event for a series.
+//
+// ⛔ NEVER a bare lexical sort on event_ticker (fixed 2026-08-31, EDGE_MARKETS
+// 0.2). Month abbreviations don't sort chronologically — 26OCT02 < 26SEP04 —
+// so when Kalshi lists an October weekly beside a September one (~Sep 18–25
+// every year, and every inverted month-end for daily series) a lexical sort
+// silently prices the FAR event: T balloons, the board goes all-PASS or
+// mispriced. We sort by parsed close date (API close_time/strike_date when the
+// payload carries one, else the YYMMMDD[HH] segment of the ticker), lexical as
+// tiebreak only. An unparseable candidate is excluded with a warning rather
+// than allowed to sort first; if NOTHING parses we fall back to the old
+// lexical sort loudly rather than kill the feed.
 //
 // Optional `filter` callback (event => boolean) lets the caller restrict the
 // candidate pool before picking the soonest. Used by the bitcoin engine to
 // drop KXBTCD hourly settles that fall outside the IBIT options chain window
 // (10 AM – 4 PM ET) so the engine doesn't try to compute edge math against a
 // frozen smile + moving spot.
+const TICKER_MONTHS = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+
+// Millisecond sort key for an event, or null when nothing parses.
+export function eventSortKey(ev) {
+  for (const field of ['close_time', 'strike_date', 'strike_period_end']) {
+    const v = ev?.[field];
+    if (typeof v === 'string' && v) {
+      const t = Date.parse(v);
+      if (Number.isFinite(t)) return t;
+    }
+  }
+  const m = String(ev?.event_ticker || '').match(/-(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})(\d{2})?/);
+  if (!m) return null;
+  const [, yy, mon, dd, hh] = m;
+  return Date.UTC(2000 + Number(yy), TICKER_MONTHS[mon], Number(dd), hh ? Number(hh) : 0);
+}
+
+// Pure selection over an already-fetched candidate list — split out so the
+// month-inversion cases are unit-testable without the network.
+export function pickNextEvent(candidates) {
+  if (!candidates.length) return null;
+  const keyed = [];
+  for (const ev of candidates) {
+    const t = eventSortKey(ev);
+    if (t == null) {
+      console.warn(`[kalshi-event] unparseable event date, excluded from front-event pick: ${ev?.event_ticker}`);
+      continue;
+    }
+    keyed.push([t, ev]);
+  }
+  if (!keyed.length) {
+    console.warn('[kalshi-event] no candidate parsed to a date — falling back to lexical sort');
+    return [...candidates].sort((a, b) => String(a.event_ticker).localeCompare(String(b.event_ticker)))[0];
+  }
+  keyed.sort((a, b) => a[0] - b[0] || String(a[1].event_ticker).localeCompare(String(b[1].event_ticker)));
+  return keyed[0][1];
+}
+
 export async function getNextEvent(seriesTicker, { filter } = {}) {
   const json = await getJson(`${KALSHI_API_BASE}/events?series_ticker=${seriesTicker}&status=open&limit=20`);
   const events = Array.isArray(json?.events) ? json.events : [];
   if (events.length === 0) return null;
   const candidates = typeof filter === 'function' ? events.filter(filter) : events;
   if (candidates.length === 0) return null;
-  candidates.sort((a, b) => String(a.event_ticker).localeCompare(String(b.event_ticker)));
-  return candidates[0];
+  return pickNextEvent(candidates);
 }
 
 // Per-market REST fetch — full data.

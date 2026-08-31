@@ -13,3 +13,6 @@ coverage
 # commit them. Only the *.example.json shape templates are tracked.
 data/ext-staging/*.json
 !data/ext-staging/*.example.json
+
+# env backups carry live creds — never trackable (WEEK1 F10, 2026-08-31)
+.env.bak*

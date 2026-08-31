@@ -98,6 +98,12 @@ export const COMMODITIES = {
     // counts fall by design — that is the point, and it is recorded in
     // tool_changes for each of the four surfaces.
     chargeFees: true,
+    // μ = 0 (EDGE_MARKETS §2.4, 2026-08-31). The 60-day trailing drift carried
+    // no information at the horizons we price and only displaced the model CDF.
+    // Measured, not assumed: see the backtest note in commodity-base.js.
+    // Bitcoin is NOT here — its drift path is the short-horizon momentum μ,
+    // already zeroed at BTC_MU_SCALE.
+    driftMuScale: 0,
     minEdgePpNoSide: 0.1,
     noSideEnabled: true,
     intradayHistory: true,
@@ -158,6 +164,12 @@ export const COMMODITIES = {
     // counts fall by design — that is the point, and it is recorded in
     // tool_changes for each of the four surfaces.
     chargeFees: true,
+    // μ = 0 (EDGE_MARKETS §2.4, 2026-08-31). The 60-day trailing drift carried
+    // no information at the horizons we price and only displaced the model CDF.
+    // Measured, not assumed: see the backtest note in commodity-base.js.
+    // Bitcoin is NOT here — its drift path is the short-horizon momentum μ,
+    // already zeroed at BTC_MU_SCALE.
+    driftMuScale: 0,
     minEdgePpNoSide: 0.1,
     noSideEnabled: true,
     intradayHistory: true,
@@ -252,6 +264,12 @@ export const COMMODITIES = {
     // counts fall by design — that is the point, and it is recorded in
     // tool_changes for each of the four surfaces.
     chargeFees: true,
+    // μ = 0 (EDGE_MARKETS §2.4, 2026-08-31). The 60-day trailing drift carried
+    // no information at the horizons we price and only displaced the model CDF.
+    // Measured, not assumed: see the backtest note in commodity-base.js.
+    // Bitcoin is NOT here — its drift path is the short-horizon momentum μ,
+    // already zeroed at BTC_MU_SCALE.
+    driftMuScale: 0,
     minEdgePpNoSide: 0.1,
     noSideEnabled: true,
     intradayHistory: true,

@@ -881,7 +881,22 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       sigmaIvVal = volEst?.sigma_iv ?? iv;
       sigmaRv20Val = volEst?.sigma_rv20 ?? null;
       sigmaSource = volEst?.source ?? 'iv_only';
-      const muForPhysical = muUsed != null ? muUsed : (RISK_FREE_RATE - q);
+      // DRIFT SCALE (EDGE_MARKETS §2.4, 2026-08-31). `config.driftMuScale` of 0
+      // zeroes the trailing-drift term for this commodity; 1 (the default) keeps
+      // it. Same lever bitcoin already pulled for the short-horizon momentum mu
+      // (BTC_MU_SCALE, thresholds.js) and for the same reason: a trailing
+      // estimate that carries no information still DISPLACES the whole model
+      // CDF, and displacement is what sets probabilities.
+      //
+      // Backtested before flipping, not asserted — 85 settled metals/oil events
+      // replayed at ~24h to close, paired and bootstrapped CLUSTERED BY EVENT
+      // (28 strikes share one event's spot/σ/μ, so row-level resampling would
+      // have overstated certainty ~5x). Zeroing μ improved Brier with the 95% CI
+      // entirely positive pooled [+0.00023, +0.00159] and on oil alone
+      // [+0.00031, +0.00238]; gold and silver were directionally positive but
+      // individually inconclusive at 15 events each.
+      const muScale = config.driftMuScale ?? 1;
+      const muForPhysical = muUsed != null ? muUsed * muScale : (RISK_FREE_RATE - q);
       // Sub-hour TWAP-settled commodities (KXBTCD): route through
       // probAboveTwap which integrates the Asian-window variance σ²(T-2τ/3)
       // and the drift period (T-τ/2). The σ + μ inputs differ depending on

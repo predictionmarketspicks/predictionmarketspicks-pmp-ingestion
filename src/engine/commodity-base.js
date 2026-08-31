@@ -404,6 +404,29 @@ export async function discoverEvent(config) {
   return fetchEvent(ev.event_ticker);
 }
 
+// Kalshi trading fee for ONE contract, as a probability FRACTION (EDGE_MARKETS
+// §1.4, 2026-08-31).
+//
+// ⛔ SOURCE OF TRUTH IS THE SITE: prediction-marketspicks/lib/tools/kalshi-fees.ts
+// (`feeCents`). It is replicated rather than imported because this engine is a
+// separate repo and cannot reach across; if the published schedule changes,
+// change it THERE and mirror here in the same commit.
+//
+//   fee = ceil(0.07 · p · (1−p) · 100) cents, per contract, taker.
+//
+// Two properties that matter for how it is used below:
+//   · it is SYMMETRIC in p — fee(p) === fee(1−p) — so the NO contract at
+//     (1 − yesBid) is charged exactly fee(yesBid). No separate NO branch.
+//   · it PEAKS at p=0.5 (1.75¢) and vanishes at the wings, so it bites hardest
+//     precisely in the mid-band that produces this tool's realised profit. A
+//     5pp gross edge at 50¢ is ~3.2pp after fee alone — which is why a tier
+//     computed on gross was never a statement about money.
+export function feeFraction(priceFraction) {
+  if (!Number.isFinite(priceFraction)) return 0;
+  const p = Math.min(1, Math.max(0, priceFraction));
+  return Math.ceil(0.07 * p * (1 - p) * 100) / 100;
+}
+
 // Post-spread, side-aware BUY gate (bitcoin only — BITCOIN_EDGE_NO_SIDE_FIX_2026-06-16).
 //
 // The legacy gate compared |edge| to a single symmetric threshold and set the
@@ -425,9 +448,20 @@ export function postSpreadSideGate({
   minEdgeYes,
   minEdgeNo,
   noSideEnabled = true,
+  chargeFees = false,
 }) {
-  const yesNet = chosenProb != null && yesAsk != null ? chosenProb - yesAsk : null;
-  const noNet = chosenProb != null && yesBid != null ? yesBid - chosenProb : null;
+  // NET OF FEES TOO (§1.4). The spread was already charged here — this adds the
+  // other real cost, so `netEdge` is what the position actually clears and the
+  // floors below are floors on MONEY, not on a gross gap. Opt-in per commodity
+  // via config.chargeFees so enabling it is a deliberate, recorded signal change
+  // (it moves published tiers) rather than a silent one.
+  //
+  // Charged on the side actually lifted: YES at the ask, NO at (1 − yesBid).
+  // feeFraction is symmetric, so the NO fee is feeFraction(yesBid).
+  const yesFee = chargeFees && yesAsk != null ? feeFraction(yesAsk) : 0;
+  const noFee = chargeFees && yesBid != null ? feeFraction(yesBid) : 0;
+  const yesNet = chosenProb != null && yesAsk != null ? chosenProb - yesAsk - yesFee : null;
+  const noNet = chosenProb != null && yesBid != null ? yesBid - chosenProb - noFee : null;
   if (yesNet != null && yesNet >= minEdgeYes) {
     return { pass: true, dirYes: true, netEdge: yesNet, yesNet, noNet, reason: null };
   }
@@ -985,6 +1019,11 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     let direction = 'PASS';
     let confidence = 'skip';
     let rationale = null;
+    // The edge THE POSITION ACTUALLY CLEARS — gross minus the ask-side spread
+    // minus the Kalshi fee (§1.4). Null on every row that never reaches the
+    // post-spread gate (no book, below the gross floor, or a commodity without
+    // it enabled), which is honest: we did not compute one.
+    let netEdgePp = null;
 
     // (The old TWAP hard-guard block was removed 2026-05-22. The graduated
     // tier-ceiling logic further down — `config.tierCeilingByMinutes` —
@@ -1070,6 +1109,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
           minEdgeYes,
           minEdgeNo: config.minEdgePpNoSide ?? MIN_EDGE_PP_NO,
           noSideEnabled: config.noSideEnabled ?? true,
+          chargeFees: config.chargeFees === true,
         });
 
         // Longshot suppression: no YES BUYs under 15c, full stop.
@@ -1077,7 +1117,8 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 
         if (g.pass && !yesLongshot) {
           dirYes = g.dirYes;
-          mag = g.netEdge; // confidence/tier reflect the post-spread side edge
+          mag = g.netEdge; // confidence/tier reflect the post-spread, post-fee side edge
+          netEdgePp = g.netEdge;
         } else {
           buyOk = false;
           direction = 'PASS';
@@ -1330,6 +1371,10 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       options_prob: optProb ?? null,
       edge_pp: edge ?? null,                  // V1 frozen for backtest A/B
       fused_edge_pp: chosenEdge ?? null,       // V2 active when useV2Cutover=true; drives Discord routing + fusedTier
+      // What the trade nets after BOTH costs. `fused_edge_pp` stays the gross
+      // model-vs-market gap so the backtest A/B keeps its basis; this is the
+      // figure the tier is computed from wherever chargeFees is on.
+      net_edge_pp: netEdgePp,
       direction,
       confidence,
       fused_confidence: fusedTierStr,

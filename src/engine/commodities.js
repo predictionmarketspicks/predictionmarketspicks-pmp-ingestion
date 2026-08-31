@@ -92,6 +92,12 @@ export const COMMODITIES = {
     // ENABLED here — unlike bitcoin, there is no adverse live NO record for
     // this engine — but at the stricter 10pp post-spread bar.
     postSpreadGate: true,
+    // Net of the Kalshi fee too (§1.4, 2026-08-31). The spread was already
+    // charged; a fee peaking at 1.75c on a 50c contract is most of a thin edge,
+    // so a tier computed without it was never a claim about money. Published
+    // counts fall by design — that is the point, and it is recorded in
+    // tool_changes for each of the four surfaces.
+    chargeFees: true,
     minEdgePpNoSide: 0.1,
     noSideEnabled: true,
     intradayHistory: true,
@@ -146,6 +152,12 @@ export const COMMODITIES = {
     // ENABLED here — unlike bitcoin, there is no adverse live NO record for
     // this engine — but at the stricter 10pp post-spread bar.
     postSpreadGate: true,
+    // Net of the Kalshi fee too (§1.4, 2026-08-31). The spread was already
+    // charged; a fee peaking at 1.75c on a 50c contract is most of a thin edge,
+    // so a tier computed without it was never a claim about money. Published
+    // counts fall by design — that is the point, and it is recorded in
+    // tool_changes for each of the four surfaces.
+    chargeFees: true,
     minEdgePpNoSide: 0.1,
     noSideEnabled: true,
     intradayHistory: true,
@@ -234,6 +246,12 @@ export const COMMODITIES = {
     // ENABLED here — unlike bitcoin, there is no adverse live NO record for
     // this engine — but at the stricter 10pp post-spread bar.
     postSpreadGate: true,
+    // Net of the Kalshi fee too (§1.4, 2026-08-31). The spread was already
+    // charged; a fee peaking at 1.75c on a 50c contract is most of a thin edge,
+    // so a tier computed without it was never a claim about money. Published
+    // counts fall by design — that is the point, and it is recorded in
+    // tool_changes for each of the four surfaces.
+    chargeFees: true,
     minEdgePpNoSide: 0.1,
     noSideEnabled: true,
     intradayHistory: true,
@@ -330,6 +348,12 @@ export const COMMODITIES = {
     // that clear MIN_EDGE_PP gross but fail their side's net floor go PASS/low.
     // Silver/gold/oil leave postSpreadGate unset -> byte-identical symmetric path.
     postSpreadGate: true,
+    // Net of the Kalshi fee too (§1.4, 2026-08-31). The spread was already
+    // charged; a fee peaking at 1.75c on a 50c contract is most of a thin edge,
+    // so a tier computed without it was never a claim about money. Published
+    // counts fall by design — that is the point, and it is recorded in
+    // tool_changes for each of the four surfaces.
+    chargeFees: true,
     minEdgePpNoSide: 0.1, // NO-side post-spread floor (moot while noSideEnabled=false)
     // NO side OFF (2026-07-27): the NO side is where the model error pools.
     // Live: post-7/21 NO picks went 1-for-15; every bot NO fill 7/24+7/27

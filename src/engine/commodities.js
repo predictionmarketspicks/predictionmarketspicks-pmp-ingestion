@@ -347,6 +347,23 @@ export const COMMODITIES = {
     // trivially within the public API budget, and Databento has no per-request
     // cost (streaming sidecar). Off-hours stays slow (engine pauses writes).
     snapshotIntervalMarketMs: BTC_SNAPSHOT_INTERVAL_MARKET_MS,
+    // ── Intraday path history (lead-lag study — SPEED_EDGE_PROGRAM_2026-09-01) ──
+    // Bitcoin was deliberately excluded from this table, and the exclusion was
+    // right: it ticks at BTC_SNAPSHOT_INTERVAL_MARKET_MS (15s) against 5 min for
+    // silver/gold/oil — 20x — and writes ~36 rows/snapshot, i.e. ~207,000
+    // rows/day (~100 MB/day) if simply switched on. Measured 2026-08-31 against
+    // commodity_edge_signals; the whole table is 58k rows / 28 MB today.
+    //
+    // So the band is NOT the control here. index.js captures `inBand || liveBook`,
+    // and an actively-quoted BTC event has a two-sided book on many strikes, which
+    // bypasses the band entirely. The control is TIME: persist at most one
+    // snapshot per intradayMinIntervalMs, which also lands BTC at the same 5-min
+    // resolution the other three carry — the resolution the lead-lag query's
+    // lead(kalshi_yes, 6) = 30m step already assumes. Sampling faster than the
+    // rest would silently change what "6 rows ahead" means.
+    intradayHistory: true,
+    intradayBandPct: 0.03,          // hourly BTC strikes are ~$100 apart; +/-10% is thousands
+    intradayMinIntervalMs: 5 * 60 * 1000,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
     snapshotIntervalExpirationMs: BTC_SNAPSHOT_INTERVAL_MARKET_MS,
     // Strike band: persist/evaluate only strikes within ±6% of spot OR with a
@@ -466,6 +483,10 @@ export const COMMODITIES = {
     // regime). 24h volume on a single event around 26k contracts as of
     // 2026-05-21 — second-highest non-crypto Kalshi series after KXBTCD.
     seriesTicker: 'KXINXU',
+    // Intraday path history — 5-min cadence like the metals, so no decimation
+    // needed. See commodities.bitcoin.intradayHistory for why BTC differs.
+    intradayHistory: true,
+    intradayBandPct: 0.10,
     // SPY ETF — by 10× the most liquid OPRA-listed equity options chain.
     // Must add `SPY` to DATABENTO_SYMBOLS Fly secret BEFORE flipping
     // enabled:true (handoffs/SP500_EDGE_ENGINE_2026-05-21.md §Phase 0).
@@ -513,6 +534,11 @@ export const COMMODITIES = {
   copper: {
     commodity: 'copper',
     seriesTicker: 'KXCOPPERMON',
+    // Intraday path history. NOTE: `enabled: false` below, so this is inert
+    // until a copper spot feed is wired — set now so turning copper on does not
+    // silently start it without price-path history.
+    intradayHistory: true,
+    intradayBandPct: 0.10,
     underlyingEtf: 'CPER',
     pythSymbol: 'XCU/USD',
     spotUnit: '$/lb',

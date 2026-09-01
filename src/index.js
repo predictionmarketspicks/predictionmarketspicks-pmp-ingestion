@@ -92,11 +92,37 @@ import {
 } from './engine/wc-snapshot.js';
 import { runWcMispricingsOnce } from './engine/wc-mispricings.js';
 import {
+
   bootstrapPairDiscover,
   stopPairDiscover,
   runPairDiscoverOnce,
   getPairDiscoverState,
 } from './engine/pair-discover.js';
+
+// ── Intraday-history decimation ──────────────────────────────────────────────
+// commodity_edge_intraday is a 5-minute price-path table (silver/gold/oil all
+// snapshot at SNAPSHOT_INTERVAL_MARKET_MS = 5 min). Bitcoin ticks at 15s, so
+// writing it every tick is 20x the row rate — ~207,000 rows/day against a whole
+// table of 58k, which is why bitcoin was excluded outright rather than banded.
+//
+// `intradayMinIntervalMs` lets a fast commodity join the table at the table's
+// own resolution instead of its engine's. Two reasons that matters beyond size:
+// the lead-lag study steps forward with lead(kalshi_yes, 6) to mean 30 minutes,
+// so a commodity sampled 20x denser silently redefines that step; and the 7-day
+// (now 30-day) prune is shared, so one firehose commodity evicts the others.
+//
+// In-process memory on purpose: a Fly restart costs one extra snapshot, and the
+// insert is idempotent on (commodity, snapshot_at, event_ticker, strike) anyway.
+// A commodity with no intradayMinIntervalMs is unthrottled — silver/gold/oil are
+// already at the target cadence, so nothing changes for them.
+const LAST_INTRADAY_WRITE_MS = new Map();
+
+function intradayDue(config) {
+  const minMs = config.intradayMinIntervalMs;
+  if (!minMs) return true;
+  const last = LAST_INTRADAY_WRITE_MS.get(config.commodity);
+  return last == null || Date.now() - last >= minMs;
+}
 
 // --- boot assertion (F8) ---
 //
@@ -335,7 +361,7 @@ async function runSnapshotOnceInner(state) {
     // ±intradayBandPct of spot ∪ any strike with a live two-sided book, so
     // actively-quoted wing strikes still get captured. Isolated in try/catch —
     // a history write outage must never block the primary upsert or Discord.
-    if (config.intradayHistory === true) {
+    if (config.intradayHistory === true && intradayDue(config)) {
       const band = config.intradayBandPct ?? 0.10;
       const spot = snap.meta.spotPrice;
       const banded = snap.rows.filter((r) => {
@@ -345,6 +371,7 @@ async function runSnapshotOnceInner(state) {
       });
       try {
         const { count: hist } = await insertCommodityEdgeIntraday(banded);
+        LAST_INTRADAY_WRITE_MS.set(config.commodity, Date.now());
         console.log(`[${config.commodity}] intraday history: +${hist} rows (band ±${(band * 100).toFixed(0)}%, ${banded.length}/${snap.rows.length} strikes)`);
       } catch (err) {
         console.warn(`[${config.commodity}] intraday history write failed: ${err?.message || err}`);

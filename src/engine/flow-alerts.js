@@ -20,7 +20,10 @@
 
 import { setFeedStatus, recordTick, registerFeed } from '../observability/health.js';
 import { filterAlreadyPostedKeys, recordPostedAlerts } from '../delivery/supabase.js';
-import { postBotLogEmbed } from '../delivery/discord.js';
+// postBotLogEmbed import REMOVED with the per-event posts (§4.1). buildEmbed is
+// kept and still exported — the heartbeat rollup and the tests use the shape,
+// and deleting it would make restoring per-event posts a rewrite rather than a
+// revert.
 import { isOptionsMarketOpen } from '../feeds/massive.js';
 
 const SIDECAR_HOST = process.env.DATABENTO_SIDECAR_HOST || '127.0.0.1';
@@ -217,11 +220,19 @@ async function tick() {
     const nowIso = new Date().toISOString();
     const recordRows = [];
     for (const a of fresh) {
-      const embed = buildEmbed(a);
-      try {
-        await postBotLogEmbed(embed, { content: `🚨 Flow alert — ${a.type}` });
-        posted += 1;
-        recordRows.push({
+      // ⛔ NO PER-EVENT DISCORD POST (DISCORD_CONVERSION_MACHINE §4.1).
+      //
+      // This loop put 96 flow:* embeds into #bot-logs in 48 hours and made the
+      // ops bus unreadable — errors, feed-health, sweep summaries and freshness
+      // alarms were drowning in telemetry. #bot-logs is where you look when
+      // something is broken, so volume there has a real cost.
+      //
+      // The DB write stays: posted_alerts keeps every flow:* key, the cooldown
+      // dedup above still applies, and discord-heartbeat (jobid 69, 22:00) rolls
+      // the day up into ONE line. Nothing is lost, it is just not narrated
+      // event by event.
+      posted += 1;
+      recordRows.push({
           alert_key: alertKey(a),
           posted_at: nowIso,
           alert_type: 'flow',
@@ -240,9 +251,6 @@ async function tick() {
             price: a.price,
           },
         });
-      } catch (err) {
-        console.warn(`[flow-alerts] discord post failed: ${err?.message || err}`);
-      }
     }
     if (recordRows.length > 0) {
       await recordPostedAlerts(recordRows);
@@ -252,7 +260,7 @@ async function tick() {
   setFeedStatus(FEED_NAME, { connected: true, lastError: null });
   recordTick(FEED_NAME);
   if (posted > 0) {
-    console.log(`[flow-alerts] posted ${posted}/${candidates.length} alert(s)`);
+    console.log(`[flow-alerts] recorded ${posted}/${candidates.length} alert(s) (Discord silenced — rolled up by discord-heartbeat)`);
   }
 }
 

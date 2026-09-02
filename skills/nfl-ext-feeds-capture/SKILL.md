@@ -168,7 +168,7 @@ node --env-file-if-exists=.env -e "import('./src/delivery/discord.js').then(d =>
 
 If `DISCORD_BOT_TOKEN` isn't set, the helper no-ops with a warning — in that case surface the miss in your run summary so Benny still sees it. Always also state the miss in the notification back to Benny.
 
-🚨 **KNOWN BROKEN as of 2026-08-03: `DISCORD_BOT_TOKEN` is present in `.env` but its value is EMPTY (zero-length), so `postBotLog` returns `false` and prints `[discord] DISCORD_BOT_TOKEN not set — skipping post`.** This kills the alert path for **every** job in this repo, not just this skill — and it is why a PFF login that died between 6/21 and 8/3 produced no alert for six weeks. Verify before trusting any alert:
+✅ **RESOLVED — `DISCORD_BOT_TOKEN` verified SET (len 72) on 2026-09-02, and the Run B miss that day reached `#bot-logs`.** History, because it can regress: from 2026-06-21 to at least 2026-08-03 the var was present in `.env` but EMPTY (zero-length), so `postBotLog` returned `false` and printed `[discord] DISCORD_BOT_TOKEN not set — skipping post` — which killed the alert path for **every** job in this repo and is why a dead PFF login produced no alert for six weeks. Verify before trusting any alert:
 
 ```bash
 node --env-file-if-exists=.env -e "console.log('DISCORD_BOT_TOKEN', process.env.DISCORD_BOT_TOKEN ? 'SET (len '+process.env.DISCORD_BOT_TOKEN.length+')' : 'EMPTY/UNSET')"

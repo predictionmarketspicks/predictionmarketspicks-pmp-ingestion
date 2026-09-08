@@ -7,6 +7,7 @@ import {
   registerFeed,
   markFeedRequired,
   recordTick,
+  setFeedStatus,
   evaluateLiveness,
 } from './observability/health.js';
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
@@ -216,6 +217,30 @@ for (const config of enabledCommodities) {
     markFeedRequired(`pyth_${config.pythSymbol.replace(/[/]/g, '_').toLowerCase()}`);
   }
   registerFeed(`${config.commodity}_engine`);
+  // ⛔ TWO FEEDS, ON PURPOSE — this is the 2026-09-04..08 gold/silver outage.
+  //
+  //   <commodity>_engine       age = last SUCCESSFUL WRITE. A data signal.
+  //   <commodity>_engine_loop  age = last LOOP ITERATION. A liveness signal.
+  //
+  // Only the loop feed is required, and that split is the whole point. Gold and
+  // silver sat for four days pointed at a retired Kalshi ticker: no open event,
+  // so runSnapshotOnceInner warned and returned before recordTick, the write feed
+  // simply stopped aging forward with `lastError: null`, and /health reported
+  // `status: ok` throughout because neither engine was required at all.
+  //
+  // Making the WRITE feed required instead would not work: these engines write on
+  // a 5-min interval but only when there is something to price, and gold/silver
+  // were observed writing once a day even while healthy. Any threshold loose
+  // enough not to page on that is far too loose to catch a four-day death. The
+  // loop, by contrast, ticks every SNAPSHOT_INTERVAL_MARKET_MS by construction —
+  // so it is the thing that can be gated tightly and honestly.
+  //
+  // requiredOffHours mirrors the engine's own pause flag rather than restating
+  // it: an engine that deliberately stops off-hours must not page for stopping.
+  markFeedRequired(`${config.commodity}_engine_loop`, {
+    maxStaleMs: Math.max(config.snapshotIntervalMarketMs * 4, 20 * 60 * 1000),
+    requiredOffHours: !config.pauseSnapshotsOffHours,
+  });
 }
 markFeedRequired('kalshi');
 registerFeed('movers_engine');
@@ -298,6 +323,12 @@ async function runSnapshotOnce(state) {
     await runSnapshotOnceInner(state);
   } finally {
     state.snapshotInFlight = false;
+    // The liveness heartbeat — in `finally`, so it records whether the pass
+    // wrote, skipped for want of a market, or threw. This is the feed that is
+    // markFeedRequired; <commodity>_engine stays a pure data signal. Ticking it
+    // here and nowhere else is what makes "the loop is running but producing
+    // nothing" a state /health can actually show.
+    recordTick(`${state.config.commodity}_engine_loop`);
   }
 }
 
@@ -315,17 +346,34 @@ async function runSnapshotOnceInner(state) {
     await refreshEvent(state);
   }
   if (!state.currentEvent) {
+    // ⛔ SAY WHY. This branch ran ~1,150 times across four days for gold and
+    // silver (Kalshi had retired KXGOLDW/KXSILVERW) and left NO trace on
+    // /health: a console.warn is not an error, so `lastError` stayed null and
+    // "alive with no market" was indistinguishable from "process dead". The
+    // reason is the whole diagnosis — surface it.
     console.warn(`[${config.commodity}] no event — skipping snapshot`);
+    setFeedStatus(`${config.commodity}_engine`, {
+      connected: false,
+      lastError: `no open ${config.seriesTicker} event — nothing to price (series retired or rolled?)`,
+    });
     return;
   }
   try {
     const snap = await computeSnapshot(config, state.currentEvent);
     if (!snap) {
-      // commodity-base logs the specific reason (missing pyth, missing chain, etc.)
+      // commodity-base logs the specific reason (missing pyth, missing chain,
+      // etc.) — but only to stdout, where nothing watches it. Mirror it onto
+      // the feed for the same reason as the no-event branch above.
+      setFeedStatus(`${config.commodity}_engine`, {
+        connected: false,
+        lastError: `computeSnapshot returned nothing for ${state.currentEvent.eventTicker || config.seriesTicker} — see logs for the gate that refused`,
+      });
       return;
     }
     state.snapshotCount += 1;
     state.lastSnapshotMeta = snap.meta;
+    // Clear the reason on success, or a one-off skip would look permanent.
+    setFeedStatus(`${config.commodity}_engine`, { connected: true, lastError: null });
     recordTick(`${config.commodity}_engine`);
 
     // Strike-count sanity (2026-06-10 BITCOIN_EDGE_STRIKE_BAND handoff). A banded

@@ -431,10 +431,59 @@ export async function runMetals15mOnce({ now = Date.now() } = {}) {
             ourSpot: d.spot,
             spotAgeS: d.spot_age_s,
             leadS: d.window.seconds_remaining,
+            kind: 'settle',
           });
         } catch (err) {
           console.warn(
             `[metals-15m] ${cfg.commodity} settle-spot capture failed: ${(err?.message || err).toString().slice(0, 200)}`,
+          );
+        }
+      }
+
+      // The SIGNAL capture — the first tick this window's divergence clears its
+      // own fee band, i.e. the moment someone acting on this tool would buy.
+      //
+      // ⛔ RECORDS THE EXECUTABLE BOOK, not the mid. Every edge figure we have
+      // for this tool is measured against the mid, and you cannot trade the mid.
+      // Measured 2026-09-08 over 2,086 graded windows per metal: the flagged
+      // side wins 55.2% (gold) / 54.0% (silver) and STILL loses money at the mid
+      // (−0.35c / −1.34c per contract). The real fill is the ask, so the honest
+      // number is worse — and yes_bid/yes_ask were never persisted for metals,
+      // so it has never been measurable. This is that measurement.
+      //
+      // Insert-only (ignoreDuplicates on the signal kind): the first qualifying
+      // tick is the entry a trader could actually have taken.
+      if (
+        !d.market_closed &&
+        d.window?.close &&
+        d.fair_yes != null &&
+        d.divergence_pp != null &&
+        d.fee_band_pp != null &&
+        Math.abs(d.divergence_pp) > d.fee_band_pp &&
+        d.book?.yes_bid != null &&
+        d.book?.yes_ask != null
+      ) {
+        try {
+          await recordSettlementSpotCapture({
+            commodity: cfg.commodity,
+            series: cfg.series,
+            kind: 'signal',
+            eventTicker: d.window.event_ticker,
+            marketTicker: d.window.ticker,
+            windowCloseAt: d.window.close,
+            ourSpot: d.spot,
+            spotAgeS: d.spot_age_s,
+            leadS: d.window.seconds_remaining,
+            yesBidCents: d.book.yes_bid,
+            yesAskCents: d.book.yes_ask,
+            midCents: d.book.mid,
+            strike: d.strike,
+            fair: d.fair_yes,
+            tauS: d.window.seconds_remaining,
+          });
+        } catch (err) {
+          console.warn(
+            `[metals-15m] ${cfg.commodity} signal capture failed: ${(err?.message || err).toString().slice(0, 200)}`,
           );
         }
       }

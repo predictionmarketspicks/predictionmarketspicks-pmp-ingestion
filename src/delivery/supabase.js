@@ -610,20 +610,38 @@ export async function finalizeFifteenMinSettle(s) {
  */
 export async function recordSettlementSpotCapture(o) {
   const sb = getClient();
+  // ⛔ THE CONFLICT RULE IS OPPOSITE FOR THE TWO KINDS, on purpose.
+  //   'settle' — later ticks OVERWRITE. lead_s falls as the close approaches, so
+  //              the last write is the read nearest the settling instant.
+  //   'signal' — the first qualifying tick WINS and later ones are ignored. A
+  //              trader buys when the edge first appears; letting a later tick
+  //              overwrite would silently record a better entry than anyone
+  //              could have taken, which is backtest fiction.
+  const kind = o.kind ?? 'settle';
   const { error } = await sb
     .from('settlement_spot_captures')
     .upsert(
       {
         commodity: o.commodity,
         series: o.series,
+        kind,
         event_ticker: o.eventTicker ?? null,
         market_ticker: o.marketTicker ?? null,
         window_close_at: o.windowCloseAt,
         our_spot: o.ourSpot,
         spot_age_s: o.spotAgeS ?? null,
         lead_s: o.leadS ?? null,
+        yes_bid_cents: o.yesBidCents ?? null,
+        yes_ask_cents: o.yesAskCents ?? null,
+        mid_cents: o.midCents ?? null,
+        strike: o.strike ?? null,
+        fair: o.fair ?? null,
+        tau_s: o.tauS ?? null,
       },
-      { onConflict: 'commodity,window_close_at', ignoreDuplicates: false },
+      {
+        onConflict: 'commodity,window_close_at,kind',
+        ignoreDuplicates: kind === 'signal',
+      },
     );
   if (error) throw new Error(`settlement_spot_captures upsert: ${error.message}`);
 }

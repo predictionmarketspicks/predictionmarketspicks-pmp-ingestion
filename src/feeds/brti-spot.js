@@ -23,8 +23,8 @@
 // Measured at build time, all four live within 0.014% of each other:
 //     Coinbase 80048.89 · Kraken 80050.00 · Bitstamp 80055.33 · Gemini 80044.17
 //
-// ⚠️ This is deliberately NOT extended to silver/gold. Kalshi settles KXSILVERW
-// and KXGOLDW on **Pyth itself** (settlement_sources = "Pyth - Silver" /
+// ⚠️ This is deliberately NOT extended to silver/gold. Kalshi settles KXSILVERD
+// and KXGOLDD on **Pyth itself** (settlement_sources = "Pyth - Silver" /
 // "Pyth - Gold"). Swapping those to a free substitute would price us against a
 // different number than the one that settles the contract — basis risk we would
 // be introducing, not removing. Metals need a real Pyth key. Do not "finish the

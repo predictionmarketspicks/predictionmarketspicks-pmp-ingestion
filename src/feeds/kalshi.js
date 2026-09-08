@@ -32,7 +32,11 @@ const KALSHI_WS_PATH = '/trade-api/ws/v2';
 // observation history when GLD/USO/CPER engines come online.
 // KXBTCD added 2026-05-21 — bitcoin was missed during the 2026-05-04 Massive
 // real-time cutover and was reading Kalshi only via per-snapshot REST.
-const PHASE_1_SERIES = ['KXSILVERW', 'KXGOLDW', 'KXWTI', 'KXBTCD'];
+// ⛔ Metals are the DAILY series since 2026-09-04 — the weekly KXSILVERW/KXGOLDW
+// were retired by Kalshi (all finalized, zero open events). This watchlist is
+// load-bearing: leave a dead ticker here and the book never arrives for the
+// live one, which is a second, independent way to reproduce the same outage.
+const PHASE_1_SERIES = ['KXSILVERD', 'KXGOLDD', 'KXWTI', 'KXBTCD'];
 // KXBTCD has ~30-40 strikes per active event vs ~12-15 for the weekly metals,
 // and the engine ticks on one event at a time — so the slice cap is wider
 // AND we filter KXBTCD to the soonest in-window event before slicing.

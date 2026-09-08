@@ -40,7 +40,19 @@ import {
 export const COMMODITIES = {
   silver: {
     commodity: 'silver',
-    seriesTicker: 'KXSILVERW',
+    // ⛔ DAILY, not weekly. Kalshi retired the weekly metals series after
+    // 2026-09-04T21:00Z (KXGOLDW / KXSILVERW are 200/200 finalized, zero open
+    // events) and replaced it with a DAILY series. The engines sat pointed at the
+    // dead ticker for four days: no currentEvent, so runSnapshotOnceInner warns
+    // and returns BEFORE recordTick, which is silence rather than an error, and
+    // /health said status:ok throughout because these feeds are not
+    // markFeedRequired. Nothing was broken except the ticker.
+    // Settlement source is UNCHANGED and verified 2026-09-08 against
+    // /series/<t>.settlement_sources: KXGOLDD -> "Pyth - Gold",
+    // KXSILVERD -> "Pyth - Silver", identical to the weekly series, so
+    // pythSymbol / spotLabel below stay correct.
+    // Handoff: handoffs/GOLD_SILVER_WEEKLY_MARKET_DELISTED_2026-09-08.md
+    seriesTicker: 'KXSILVERD',
     underlyingEtf: 'SLV',
     pythSymbol: 'XAG/USD',
     spotUnit: '$/oz',
@@ -111,7 +123,19 @@ export const COMMODITIES = {
   },
   gold: {
     commodity: 'gold',
-    seriesTicker: 'KXGOLDW',
+    // ⛔ DAILY, not weekly. Kalshi retired the weekly metals series after
+    // 2026-09-04T21:00Z (KXGOLDW / KXSILVERW are 200/200 finalized, zero open
+    // events) and replaced it with a DAILY series. The engines sat pointed at the
+    // dead ticker for four days: no currentEvent, so runSnapshotOnceInner warns
+    // and returns BEFORE recordTick, which is silence rather than an error, and
+    // /health said status:ok throughout because these feeds are not
+    // markFeedRequired. Nothing was broken except the ticker.
+    // Settlement source is UNCHANGED and verified 2026-09-08 against
+    // /series/<t>.settlement_sources: KXGOLDD -> "Pyth - Gold",
+    // KXSILVERD -> "Pyth - Silver", identical to the weekly series, so
+    // pythSymbol / spotLabel below stay correct.
+    // Handoff: handoffs/GOLD_SILVER_WEEKLY_MARKET_DELISTED_2026-09-08.md
+    seriesTicker: 'KXGOLDD',
     underlyingEtf: 'GLD',
     pythSymbol: 'XAU/USD',
     spotUnit: '$/oz',

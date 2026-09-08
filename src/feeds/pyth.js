@@ -176,7 +176,7 @@ async function fetchOnce(symbol) {
   // the exported functions and SOURCE_TAGS are unchanged, so `getPrice()`
   // callers, the health feed keys (`pyth_xag_usd`, …) and the `spot_source`
   // written to commodity_edge_signals all keep working — and `pyth_xag_usd`
-  // stays TRUE, because it is still Pyth. Kalshi settles KXSILVERW/KXGOLDW on
+  // stays TRUE, because it is still Pyth. Kalshi settles KXSILVERD/KXGOLDD on
   // these exact feeds, so any non-Pyth substitute would have been wrong here.
   const px = await fetchPythnetPrice(symbol, feedId);
   return {

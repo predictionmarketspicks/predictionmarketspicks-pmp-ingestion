@@ -1,4 +1,4 @@
-// Silver Edge engine — Pyth XAG/USD spot + Massive SLV chain + Kalshi KXSILVERW.
+// Silver Edge engine — Pyth XAG/USD spot + Massive SLV chain + Kalshi KXSILVERD.
 // Phase 2A reduced this file to a thin wrapper around commodity-base.js. The
 // shared compute path is identical to what shipped in Phase 1 — refactor only,
 // no methodology change.

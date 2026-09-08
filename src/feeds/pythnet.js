@@ -9,7 +9,7 @@
 // Pyth's own appchain, where every publisher posts continuously — it is what
 // Hermes itself reads. Pythnet's RPC is public, so the same numbers are free at
 // the source. This is NOT a substitute feed or a proxy: Kalshi settles
-// KXSILVERW and KXGOLDW on Pyth XAG/USD and XAU/USD specifically, and this reads
+// KXSILVERD and KXGOLDD on Pyth XAG/USD and XAU/USD specifically, and this reads
 // exactly those price accounts.
 //
 // ⛔ NEVER READ THESE ACCOUNTS FROM SOLANA MAINNET-BETA.

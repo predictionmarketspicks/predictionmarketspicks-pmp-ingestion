@@ -1,6 +1,6 @@
-// Gold Edge engine — Pyth XAU/USD spot + Massive GLD chain + Kalshi KXGOLDW.
+// Gold Edge engine — Pyth XAU/USD spot + Massive GLD chain + Kalshi KXGOLDD.
 // Same compute path as silver via commodity-base.js. Pyth XAU/USD is verified
-// against KXGOLDW's settlement_sources (Phase B Python pipeline confirmed).
+// against KXGOLDD's settlement_sources (Phase B Python pipeline confirmed).
 
 import { computeSnapshot, discoverEvent } from './commodity-base.js';
 import { COMMODITIES } from './commodities.js';

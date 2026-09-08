@@ -7,8 +7,8 @@ null, the snapshot is skipped (logged warn, no DB write).
 
 | Commodity | Kalshi series | ETF | Pyth symbol | Feed ID verified | `enabled` | Notes |
 |-----------|---------------|-----|-------------|------------------|-----------|-------|
-| silver    | `KXSILVERW`   | SLV | `XAG/USD`   | ✅ verified       | `true`    | Kalshi `series.settlement_sources` confirmed |
-| gold      | `KXGOLDW`     | GLD | `XAU/USD`   | ✅ verified       | `true`    | Kalshi `series.settlement_sources` confirmed |
+| silver    | `KXSILVERD`   | SLV | `XAG/USD`   | ✅ verified       | `true`    | Kalshi `series.settlement_sources` confirmed |
+| gold      | `KXGOLDD`     | GLD | `XAU/USD`   | ✅ verified       | `true`    | Kalshi `series.settlement_sources` confirmed |
 | oil       | `KXWTI`       | USO | `WTI`       | ❌ unverified     | `false`   | See "Oil spot path" below |
 | copper    | `KXCOPPERMON` | CPER | `XCU/USD`  | ❌ unconfigured   | `false`   | See "Copper spot path" below |
 
@@ -83,3 +83,11 @@ delayed tier (greeks: {} on weekends and off-hours; missing-delta passthrough).
 After cutover, greeks populate live and the filter activates — chain shrinks
 from ~250 contracts → ~50–80 per ETF, keeping the in-memory map manageable
 across multiple commodities.
+
+> **2026-09-08 — metals moved weekly → daily.** Kalshi retired `KXGOLDW` / `KXSILVERW`
+> after 2026-09-04T21:00Z (200/200 finalized, zero open events) and replaced them with
+> `KXGOLDD` / `KXSILVERD`. Settlement source is unchanged and re-verified against
+> `/series/<ticker>.settlement_sources`: `Pyth - Gold` / `Pyth - Silver`, exactly as
+> before — the Pyth column above still holds. The engines sat on the dead ticker for
+> four days and wrote nothing, silently. Detail:
+> `prediction-marketspicks/handoffs/GOLD_SILVER_WEEKLY_MARKET_DELISTED_2026-09-08.md`.

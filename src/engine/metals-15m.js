@@ -42,6 +42,7 @@ import { normCdf } from './options.js';
 import {
   upsertWidgetPayloads,
   recordFifteenMinObservation,
+  recordSettlementSpotCapture,
   finalizeFifteenMinSettle,
   fetchUngradedFifteenMinWindows,
 } from '../delivery/supabase.js';
@@ -73,6 +74,18 @@ const SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
 // 2026-08-26 Hermes outage pinned metals spot for 28 hours and the engine
 // kept pricing off it.
 const MAX_SPOT_AGE_S = 60;
+
+/**
+ * How close to a window's close we start recording our own spot, in seconds.
+ *
+ * Kalshi settles on the close of the 1-minute candle that ENDS at the window
+ * close, so the read we want is the last one before that instant. The loop ticks
+ * every ~15s while a window is live, so 25s guarantees at least one capture and
+ * usually two; the later (closer) one overwrites the earlier — see
+ * recordSettlementSpotCapture. Widening this does not improve the estimate, it
+ * just stores an earlier read that then gets overwritten anyway.
+ */
+const SETTLE_CAPTURE_LEAD_S = 25;
 
 export const METALS = {
   gold: {
@@ -392,10 +405,43 @@ export async function runMetals15mOnce({ now = Date.now() } = {}) {
       await upsertWidgetPayloads(cfg.slug, envelope, ['hero']);
       written += 1;
 
+      const d = envelope.data;
+      // Our own read at the settling instant — the other half of the
+      // settlement-fidelity comparison against Kalshi's published
+      // `expiration_value`. Deliberately NOT in the settle sweep: that grades
+      // windows which may have closed hours earlier, so getPrice() there would
+      // store today's spot against an old settle. Failure is swallowed for the
+      // same reason as the shadow record below — the tool page is the product.
+      if (
+        !d.market_closed &&
+        d.window?.close &&
+        d.spot != null &&
+        d.spot_age_s != null &&
+        d.spot_age_s <= MAX_SPOT_AGE_S &&
+        d.window.seconds_remaining != null &&
+        d.window.seconds_remaining <= SETTLE_CAPTURE_LEAD_S
+      ) {
+        try {
+          await recordSettlementSpotCapture({
+            commodity: cfg.commodity,
+            series: cfg.series,
+            eventTicker: d.window.event_ticker,
+            marketTicker: d.window.ticker,
+            windowCloseAt: d.window.close,
+            ourSpot: d.spot,
+            spotAgeS: d.spot_age_s,
+            leadS: d.window.seconds_remaining,
+          });
+        } catch (err) {
+          console.warn(
+            `[metals-15m] ${cfg.commodity} settle-spot capture failed: ${(err?.message || err).toString().slice(0, 200)}`,
+          );
+        }
+      }
+
       // Phase 2: accumulate the shadow record. Only once fair value is real —
       // a `warming` tick has no model number to grade, and writing one would
       // put a null-fair row in the graded table.
-      const d = envelope.data;
       if (!d.market_closed && d.quality === 'ok' && d.fair_yes != null && d.book?.mid != null) {
         try {
           await recordFifteenMinObservation({

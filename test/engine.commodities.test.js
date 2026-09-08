@@ -23,14 +23,22 @@ describe('COMMODITIES registry', () => {
     ]);
   });
 
+  // ⛔ The metals tickers are DAILY since 2026-09-08. Kalshi retired the weekly
+  // series (KXGOLDW / KXSILVERW) after 2026-09-04T21:00Z — every market
+  // finalized, zero open events — and the engines, still pointed at the dead
+  // ticker, found no currentEvent and wrote nothing for four days without
+  // logging an error. This test is the guard that should have caught the change
+  // first; update it deliberately, never to make a red suite go green.
+  // ETF and Pyth symbol are UNCHANGED: settlement source is still
+  // "Pyth - Gold" / "Pyth - Silver" per /series/<ticker>.settlement_sources.
   it('locks the Kalshi series + ETF + Pyth symbol per commodity', () => {
     expect(COMMODITIES.silver).toMatchObject({
-      seriesTicker: 'KXSILVERW',
+      seriesTicker: 'KXSILVERD',
       underlyingEtf: 'SLV',
       pythSymbol: 'XAG/USD',
     });
     expect(COMMODITIES.gold).toMatchObject({
-      seriesTicker: 'KXGOLDW',
+      seriesTicker: 'KXGOLDD',
       underlyingEtf: 'GLD',
       pythSymbol: 'XAU/USD',
     });

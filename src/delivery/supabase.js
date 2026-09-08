@@ -590,6 +590,44 @@ export async function finalizeFifteenMinSettle(s) {
   return data === true;
 }
 
+/**
+ * Our own price read at the instant a Kalshi metals window settles.
+ *
+ * Kalshi publishes the print it settled on (`expiration_value`); this is the
+ * other half of that comparison, and without it there is nothing to score. See
+ * the migration note on settlement_spot_captures for why it cannot be
+ * backfilled (Pyth's free historical-bars endpoint 404s on every path).
+ *
+ * ⛔ LAST WRITE WINS, and that is the CLOSEST read — but only because `lead_s`
+ * falls monotonically as the window closes and the tick loop is sequential. The
+ * upsert itself is unconditional; there is no comparison in the conflict clause.
+ * If ticks ever run concurrently, or a retry replays an older tick, this stops
+ * being true and the row can regress to a worse read. `lead_s` is stored so that
+ * is visible in the data instead of silently averaged in — check it before
+ * trusting a capture, and add an explicit `where excluded.lead_s < …` guard here
+ * if the loop ever goes concurrent. A read 25s early is a materially worse
+ * estimate of a 1-minute candle close than one taken at 2s.
+ */
+export async function recordSettlementSpotCapture(o) {
+  const sb = getClient();
+  const { error } = await sb
+    .from('settlement_spot_captures')
+    .upsert(
+      {
+        commodity: o.commodity,
+        series: o.series,
+        event_ticker: o.eventTicker ?? null,
+        market_ticker: o.marketTicker ?? null,
+        window_close_at: o.windowCloseAt,
+        our_spot: o.ourSpot,
+        spot_age_s: o.spotAgeS ?? null,
+        lead_s: o.leadS ?? null,
+      },
+      { onConflict: 'commodity,window_close_at', ignoreDuplicates: false },
+    );
+  if (error) throw new Error(`settlement_spot_captures upsert: ${error.message}`);
+}
+
 /** Event tickers for windows we have observed but not yet graded. */
 export async function fetchUngradedFifteenMinWindows(commodity, { limit = 40 } = {}) {
   const sb = getClient();

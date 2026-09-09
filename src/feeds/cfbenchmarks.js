@@ -145,8 +145,28 @@ async function writeCapture(target, boundaryMs, last) {
   }
 }
 
-function onValue(msg) {
-  const id = msg.index_id;
+/**
+ * Handle one cfbenchmarks_value envelope.
+ *
+ * ⛔ THE PAYLOAD IS NESTED UNDER `msg`, and `seq` is NOT. Measured live on the
+ * Fly machine 2026-09-09T00:03Z (scripts/verify-cfbenchmarks.mjs):
+ *
+ *   { type: 'cfbenchmarks_value', sid: 1, seq: 3,
+ *     msg: { index_id: 'BRTI', received_at: 1788912185073,
+ *            data: '{"type":"value","time":...,"id":"BRTI","value":"78527.36"}',
+ *            avg_60s_data: { value: '78527.45000000', window_size: 2, ... } } }
+ *
+ * The spec wrote these as `msg.index_id` / `msg.data` / `msg.avg_60s_data`
+ * meaning "fields of the message", which reads identically to top-level fields
+ * and is how this was first built. Reading them off the envelope yields
+ * `undefined` and drops EVERY tick — silently, because a dropped tick looks
+ * exactly like a quiet feed. This is what the entitlement probe caught.
+ *
+ * @param {object} envelope the full parsed WS frame
+ */
+function onValue(envelope) {
+  const msg = envelope?.msg ?? envelope;
+  const id = msg?.index_id;
   if (!id) return;
   let frame;
   try {
@@ -163,12 +183,14 @@ function onValue(msg) {
   // A seq gap means we missed prints. Counted rather than repaired: the running
   // average is only meaningful when the window is dense, and `avg_window_size`
   // is what records that per capture.
-  if (typeof msg.seq === 'number') {
-    if (st.lastSeq != null && msg.seq !== st.lastSeq + 1) {
+  // `seq` is on the ENVELOPE (measured live), unlike everything else here.
+  const seq = typeof envelope?.seq === 'number' ? envelope.seq : null;
+  if (seq != null) {
+    if (st.lastSeq != null && seq !== st.lastSeq + 1) {
       health.seqGaps++;
-      console.warn(`[cf] seq gap on ${id}: ${st.lastSeq} → ${msg.seq}`);
+      console.warn(`[cf] seq gap on ${id}: ${st.lastSeq} → ${seq}`);
     }
-    st.lastSeq = msg.seq;
+    st.lastSeq = seq;
   }
 
   const prev = latest.get(id) ?? null;
@@ -180,7 +202,7 @@ function onValue(msg) {
     source: CF_SPOT_SOURCE,
     avg60s: msg.avg_60s_data ?? null,
     avg15m: msg.last_60s_windowed_average_15min ?? null,
-    seq: typeof msg.seq === 'number' ? msg.seq : null,
+    seq,
   };
 
   // Boundary capture BEFORE overwriting `latest`: the row we want is the previous

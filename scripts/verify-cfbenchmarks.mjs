@@ -15,8 +15,9 @@
  * What it checks:
  *   1. WS `cfbenchmarks_value` accepts our RSA-PSS handshake and delivers BRTI.
  *   2. `msg.data` really is a STRING carrying the raw CF frame (8-dp strings).
- *   3. `avg_60s_data.window_size` is >= 50 on a fresh tick — the trailing 60-print
- *      average is the product; a sparse window makes it useless.
+ *   3. `avg_60s_data.window_size` reaches >= 50 AFTER a ~70s warm-up — the
+ *      trailing 60-print average is the product, and it starts at 1 and fills as
+ *      the subscription buffers prints, so it must not be asserted on frame 3.
  *   4. REST `/cfbenchmarks/values` responds, on `KALSHI_API_BASE` first and
  *      `external-api.kalshi.com` as the documented fallback (the docs name a
  *      different host than the one our other calls use; this settles which).
@@ -34,8 +35,14 @@ import WebSocket from 'ws';
 import { authHeaders, KALSHI_API_BASE, KALSHI_WS_URL, KALSHI_WS_PATH } from '../src/feeds/kalshi-auth.js';
 
 const INDEX_ID = process.env.CF_PROBE_INDEX || 'BRTI';
-const WS_TIMEOUT_MS = 25_000;
-const WANT_FRAMES = 3;
+// ⛔ THE TRAILING AVERAGE WARMS UP. Measured live 2026-09-09T00:03Z: window_size
+// was 1 on the first frame and 2 on the third — Kalshi computes the [t−60s, t)
+// average over the prints it has buffered FOR THIS SUBSCRIPTION, so it needs a
+// full minute before it means anything. Asserting >= 50 on frame 3 fails a
+// perfectly healthy feed, which is exactly what the first run of this probe did.
+const WARMUP_MS = 70_000;
+const WS_TIMEOUT_MS = WARMUP_MS + 20_000;
+const WANT_FRAMES = 75;
 
 const ok = (m) => console.log(`  ✓ ${m}`);
 const bad = (m) => console.log(`  ✗ ${m}`);
@@ -81,10 +88,18 @@ function probeWebSocket() {
       resolve(result);
     };
 
+    // Stop on EITHER enough frames or the warm-up elapsing — a feed that is
+    // slower than 1 Hz still passes on the second condition rather than being
+    // reported as absent.
+    const warmup = setTimeout(() => done({ ok: frames.length > 0, frames, subscribed, seqGaps }), WARMUP_MS);
     const timer = setTimeout(
       () => done({ ok: false, reason: `no cfbenchmarks_value frame within ${WS_TIMEOUT_MS}ms`, frames, subscribed }),
       WS_TIMEOUT_MS,
     );
+    const clearAll = () => {
+      clearTimeout(warmup);
+      clearTimeout(timer);
+    };
 
     ws.on('open', () => {
       ok(`WS open → ${KALSHI_WS_URL}`);
@@ -111,29 +126,30 @@ function probeWebSocket() {
         return;
       }
       if (msg.type === 'error') {
-        clearTimeout(timer);
+        clearAll();
         done({ ok: false, reason: `server error: ${JSON.stringify(msg)}`, frames, subscribed });
         return;
       }
       if (msg.type !== 'cfbenchmarks_value') return;
 
+      // `seq` is on the ENVELOPE; index_id / data / avg_60s_data are under `msg`.
       if (typeof msg.seq === 'number') {
         if (lastSeq != null && msg.seq !== lastSeq + 1) seqGaps++;
         lastSeq = msg.seq;
       }
-      frames.push(msg);
+      frames.push(msg.msg ?? msg);
       if (frames.length >= WANT_FRAMES) {
-        clearTimeout(timer);
+        clearAll();
         done({ ok: true, frames, subscribed, seqGaps });
       }
     });
 
     ws.on('error', (err) => {
-      clearTimeout(timer);
+      clearAll();
       done({ ok: false, reason: `socket error: ${err.message}`, frames, subscribed });
     });
     ws.on('close', (code) => {
-      clearTimeout(timer);
+      clearAll();
       done({ ok: frames.length >= 1, reason: `socket closed early (code ${code})`, frames, subscribed, seqGaps });
     });
   });
@@ -163,11 +179,15 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`  received ${wsResult.frames.length} frames, seq gaps: ${wsResult.seqGaps ?? 0}`);
-  for (const [i, f] of wsResult.frames.entries()) {
-    console.log(`\n  --- frame ${i + 1} ---`);
-    console.log(JSON.stringify(f, null, 2).slice(0, 1200));
+  console.log(`  received ${wsResult.frames.length} frames over ~${Math.round(WARMUP_MS / 1000)}s, seq gaps: ${wsResult.seqGaps ?? 0}`);
+  for (const i of [0, wsResult.frames.length - 1]) {
+    const f = wsResult.frames[i];
+    if (!f) continue;
+    console.log(`\n  --- frame ${i + 1} of ${wsResult.frames.length} ---`);
+    console.log(JSON.stringify(f, null, 2).slice(0, 900));
   }
+  const sizes = wsResult.frames.map((f) => Number(f?.avg_60s_data?.window_size)).filter(Number.isFinite);
+  if (sizes.length) console.log(`\n  avg_60s window_size curve: ${sizes[0]} → ${sizes[sizes.length - 1]} (max ${Math.max(...sizes)})`);
 
   const probe = wsResult.frames[wsResult.frames.length - 1];
   let hardFail = false;
@@ -197,9 +217,9 @@ async function main() {
   if (avg) {
     const size = Number(avg.window_size);
     console.log(`  avg_60s_data: value=${avg.value} window_size=${size} start=${avg.window_start_ts_ms} end=${avg.window_end_ts_exclusive}`);
-    if (size >= 50) ok(`window_size ${size} >= 50 — dense enough to price on`);
+    if (size >= 50) ok(`window_size ${size} >= 50 after warm-up — dense enough to price on`);
     else {
-      bad(`window_size ${size} < 50 — CF was sparse; treat these prints as suspect`);
+      bad(`window_size ${size} < 50 after ~${Math.round(WARMUP_MS / 1000)}s — CF is publishing sparsely; the settlement averages would be suspect`);
       hardFail = true;
     }
   } else {

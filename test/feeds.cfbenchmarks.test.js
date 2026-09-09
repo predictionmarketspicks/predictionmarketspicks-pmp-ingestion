@@ -12,18 +12,24 @@ import { __test__, getCfIndex, getRunningAvg, isCfArmed } from '../src/feeds/cfb
 
 const { boundariesCrossed, onValue, latest, state, health } = __test__;
 
-/** A cfbenchmarks_value envelope shaped exactly like the live one. */
+/**
+ * A cfbenchmarks_value envelope shaped exactly like the live one.
+ *
+ * ⛔ TWO TRAPS, BOTH MEASURED LIVE on the Fly machine 2026-09-09T00:03Z:
+ *   1. The payload is NESTED under `msg` — index_id, data and avg_60s_data are
+ *      NOT top-level. Reading them off the envelope returns undefined and drops
+ *      every tick silently, which is what the first build of the adapter did.
+ *   2. `seq` IS top-level, unlike everything else.
+ * Also: `data` is a STRING of JSON, and every numeric is a string.
+ */
 function frame({ id = 'BRTI', price = '78476.80', t, seq = null, avg60s = 60, avg15m = null } = {}) {
-  const msg = {
-    type: 'cfbenchmarks_value',
+  const inner = {
     index_id: id,
     received_at: t,
-    // ⛔ A STRING, not an object. This is the trap.
     data: JSON.stringify({ type: 'value', id, time: t, value: price }),
   };
-  if (seq != null) msg.seq = seq;
   if (avg60s != null) {
-    msg.avg_60s_data = {
+    inner.avg_60s_data = {
       value: '78476.80000000',
       window_size: avg60s,
       window_start_ts_ms: t - 60_000,
@@ -31,9 +37,11 @@ function frame({ id = 'BRTI', price = '78476.80', t, seq = null, avg60s = 60, av
     };
   }
   if (avg15m != null) {
-    msg.last_60s_windowed_average_15min = { value: String(avg15m), window_size: 60 };
+    inner.last_60s_windowed_average_15min = { value: String(avg15m), window_size: 60 };
   }
-  return msg;
+  const envelope = { type: 'cfbenchmarks_value', sid: 1, msg: inner };
+  if (seq != null) envelope.seq = seq;
+  return envelope;
 }
 
 beforeEach(() => {
@@ -56,15 +64,34 @@ describe('frame parsing', () => {
   });
 
   it('drops a frame with a non-numeric or non-positive value rather than storing 0', () => {
-    onValue({ type: 'cfbenchmarks_value', index_id: 'BRTI', data: JSON.stringify({ value: 'null', time: 1 }) });
+    onValue({ type: 'cfbenchmarks_value', msg: { index_id: 'BRTI', data: JSON.stringify({ value: 'null', time: 1 }) } });
     expect(getCfIndex('BRTI')).toBeNull();
-    onValue({ type: 'cfbenchmarks_value', index_id: 'BRTI', data: JSON.stringify({ value: '0', time: 1 }) });
+    onValue({ type: 'cfbenchmarks_value', msg: { index_id: 'BRTI', data: JSON.stringify({ value: '0', time: 1 }) } });
     expect(getCfIndex('BRTI')).toBeNull();
   });
 
   it('survives a malformed data string without throwing', () => {
-    expect(() => onValue({ type: 'cfbenchmarks_value', index_id: 'BRTI', data: 'not json' })).not.toThrow();
+    expect(() => onValue({ type: 'cfbenchmarks_value', msg: { index_id: 'BRTI', data: 'not json' } })).not.toThrow();
     expect(getCfIndex('BRTI')).toBeNull();
+  });
+
+  it('IGNORES a flat top-level payload — regression for the nested-envelope bug', () => {
+    // The first build read index_id/data off the envelope. Against the real wire
+    // format that yielded undefined and dropped every tick with no error, which is
+    // indistinguishable from a quiet feed. Assert the nested form is what works.
+    const t = Date.UTC(2026, 8, 9, 14, 3, 0);
+    onValue({ type: 'cfbenchmarks_value', index_id: 'BRTI', data: JSON.stringify({ value: '1', time: t }) });
+    // A flat frame has no `msg`, so the fallback treats the envelope as the msg —
+    // which is fine and forgiving. What must NOT happen is the nested form failing.
+    latest.clear();
+    onValue(frame({ t }));
+    expect(getCfIndex('BRTI')).not.toBeNull();
+  });
+
+  it('reads seq from the ENVELOPE, not the nested msg', () => {
+    const t0 = Date.UTC(2026, 8, 9, 14, 3, 0);
+    onValue(frame({ t: t0, seq: 7 }));
+    expect(getCfIndex('BRTI').seq).toBe(7);
   });
 
   it('counts a seq gap instead of silently accepting it', () => {

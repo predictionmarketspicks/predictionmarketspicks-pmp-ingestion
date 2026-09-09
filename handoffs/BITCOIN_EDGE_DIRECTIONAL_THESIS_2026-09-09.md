@@ -1,6 +1,6 @@
 # Bitcoin Edge — the engine cannot express the product's thesis, and throws away the data that would
 
-**Status**: §5 step 1 (chain capture) SHIPPED 2026-09-09 — see §8. **It immediately proved that open interest and volume are NOT flowing (§9), which blocks two of the four candidate signals and means dealer gamma has been silently dead since the Databento cutover.** Needs Benny's call before step 2.
+**Status**: §5 step 1 (chain capture) SHIPPED 2026-09-09 — see §8. **It proved open interest is NOT flowing and that dealer gamma has been silently dead since the Databento cutover (§9). Volume IS flowing — an early read said otherwise and was wrong; see §9.4.** Three of the four candidate signals are live; only ΔOI is blocked.
 **Date**: 2026-09-09
 **Origin**: Benny, on being asked whether "the model reproduces the market's distribution" is the
 intended end state: *"the idea is to predict the path… call buying at higher strikes, or down if
@@ -237,3 +237,59 @@ two *flow* signals Benny described most directly — "call buying at higher stri
 ⚠️ **Do not start §5 step 2 on the blocked signals.** Building put/call imbalance against columns
 that are structurally null produces a signal that is all nulls and looks like "no edge" rather than
 "no data" — the same silent-failure shape as the gamma bug above.
+
+
+---
+
+## 9.4 CORRECTION — volume IS flowing; the first read was a cold sidecar (2026-09-09, same day)
+
+§9 above concluded that both `open_interest` AND `volume_24h` were absent, on the strength of the
+first four captures. **The volume half of that was wrong, and the error was mine: I generalised
+from two snapshots taken four minutes after the market open.**
+
+Probing the sidecar directly at 15:51 UTC:
+
+```
+/chain/IBIT  →  2634 contracts | volume_24h not-null 2634 | volume_24h >0 177 | open_interest not-null 0
+                sum volume_24h 24,524
+```
+
+And running the engine's own `normalizeAndSolve` + delta filter over that payload gives 60
+survivors: **54 with volume > 0, 6 with volume 0, ZERO null**. The captures bear it out — every
+snapshot from 13:49 onward is 100% non-null and 100% > 0 on volume, all four commodities:
+
+```
+snapshot_at                 commodity  rows  with_vol  vol>0  with_oi
+2026-09-09 15:55:10.882+00  bitcoin      25     25       25      0
+2026-09-09 15:55:01.524+00  silver       35     35       35      0
+2026-09-09 15:54:52.168+00  gold         25     25       25      0
+2026-09-09 15:54:51.762+00  oil          30     30       30      0
+```
+
+**Cause of the false read:** the sidecar's `volume_24h` is a rolling 24h sum that is not
+initialised in the first minutes after the open, so it returns `null` there. `passesQualityFilters`
+uses null-passthrough by design (`if (c.volume24h != null && ...)`) precisely so a cold start
+doesn't empty the chain — so those contracts survive the filter carrying a null volume, and the
+13:34 and 13:39 captures recorded exactly that. **This is a real, if minor, data-quality wrinkle
+worth knowing: early-session captures carry null volume and must be excluded from any flow study.**
+
+The writer was separately proven correct end-to-end on-box — fed two live contracts carrying
+`volume24h` 16 and 11, it stored 16 and 11.
+
+### 9.5 Revised signal availability — this supersedes the table in §9.2
+
+| candidate signal | needs | status |
+|---|---|---|
+| put/call **volume** imbalance above vs below spot | `volume_24h` | ✅ **available** (excluding the first ~15 min of the session) |
+| **risk reversal** (put IV − call IV at equidistant delta) | `iv` + `delta` | ✅ available |
+| Pyth short-horizon momentum | already computed | ✅ available (currently multiplied by zero) |
+| **ΔOI** by side and moneyness | `open_interest` | ⛔ **blocked** — Phase 2, and EOD-only even once wired |
+
+**Three of four are live.** The one blocked signal is also the weakest for an intraday product,
+since OI only updates end-of-day. So the practical answer to §9.3 is: **do not flip the provider
+and do not rush Phase 2 for the directional work** — build on volume, skew and momentum first, and
+wire OI later on its own merits.
+
+⚠️ **The gamma finding in §9.1 stands and is unaffected.** OI really is absent, so
+`computeDealerGamma` really has been returning a constant NEUTRAL — bitcoin non-zero on 3 of 78
+days. That is still a live bug worth fixing on its own, independent of any of this.

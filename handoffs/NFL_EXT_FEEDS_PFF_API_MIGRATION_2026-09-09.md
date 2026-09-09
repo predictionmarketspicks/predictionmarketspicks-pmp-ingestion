@@ -1,6 +1,6 @@
 # NFL Ext-Feeds: PFF Developer API migration for grades-team/grades-player
 
-**Status**: SHIPPED — corrected and committed 2026-09-09 by Claude Code. ⚠️ The first live run described below wrote **preseason** data and was WRONG; see §"Correction" at the bottom, which supersedes it.
+**Status**: SHIPPED and CLOSED 2026-09-09. The first live run wrote **preseason** data and was wrong; the code is fixed and the 804 bad rows are deleted. See "Correction" at the bottom, which supersedes the original write-up.
 **Date**: 2026-09-09
 **Session**: Cowork, triggered by Benny upgrading to a PFF Pro API key mid-session after the scheduled Run B (Wed) capture failed on a Chrome-permission block.
 
@@ -81,11 +81,18 @@ $ node scripts/capture-pff-api.js --season=2025
   wrote data/ext-staging/grades-player.json (602 rows)   # week stamp 18 ✓
 ```
 
-**⚠️ OWED — a prod delete that has NOT been run.** The 804 preseason rows are still live. Claude Code was blocked from running the delete and needs Benny to approve it:
+**✅ RESOLVED 2026-09-09 — the 804 preseason rows are deleted.** Run by Claude Code on Benny's
+instruction after the earlier attempt was blocked:
 
 ```sql
-delete from ext_team_grades   where season = 2026;  -- 32 preseason rows, week_scope REGPO
-delete from ext_player_grades where season = 2026;  -- 772 preseason rows, week 4
+delete from ext_team_grades   where season = 2026;   -- 32 rows
+delete from ext_player_grades where season = 2026;   -- 772 rows
 ```
 
-There is no legitimate 2026 regular-season row to lose — no game has been graded. Re-capture after Week 1 grades land (`node scripts/capture-pff-api.js --season=2026` will then resolve week=1 on its own).
+All 804 carried a single ingest timestamp (2026-09-09 10:01:45-46 UTC) — the one bad run, with no
+legitimate 2026 data mixed in. Verified after: season 2026 is 0 rows in both tables, and season
+2025 is intact at 32 team rows and 415 player rows.
+
+Nothing needs re-running by hand. Once Week 1 is graded,
+`node scripts/capture-pff-api.js --season=2026` resolves `week=1` from `/v1/games` on its own; it
+refuses with exit 3 until then, so preseason data cannot be re-written by accident.

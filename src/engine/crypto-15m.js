@@ -56,6 +56,7 @@ import {
 import { probAboveTwap } from './options.js';
 import { getShortHorizonStats } from './short-horizon-vol.js';
 import { getBrtiSpot } from '../feeds/brti-spot.js';
+import { getBtcSpot } from '../feeds/btc-spot.js';
 import {
   upsertWidgetPayloads,
   recordFifteenMinObservationV2,
@@ -145,7 +146,7 @@ export function fairYesTwap({ spot, strike, sigmaAnnual, tauYears }) {
   return Number.isFinite(p) ? Math.min(Math.max(p, 0), 1) : null;
 }
 
-export function buildPayload(cfg, { markets, spot, stats, gradedCount, now = Date.now() }) {
+export function buildPayload(cfg, { markets, spot, btcSpot = null, stats, gradedCount, now = Date.now() }) {
   const { active, next } = classifyWindows(markets, now);
   const nowIso = new Date(now).toISOString();
   const modelStatus = (gradedCount ?? 0) >= GRADED_WINDOWS_REQUIRED ? 'graded' : 'shadow';
@@ -154,7 +155,15 @@ export function buildPayload(cfg, { markets, spot, stats, gradedCount, now = Dat
     ? { open: next.open_time, close: next.close_time, strike_locks_at: next.open_time }
     : null;
 
-  const spotPrice = spot?.price ?? null;
+  // ⛔ THE PAYLOAD CARRIES THE PUBLIC SPOT; THE AGE IS THE REFERENCE'S AGE.
+  // `spot` here is the REFERENCE (btcSpot.ref) — the CF Benchmarks index the model
+  // priced on, which is licensed and must not be published. `spot_age_s` is
+  // deliberately measured on the reference, because freshness is a property of what
+  // we PRICED on: if the index read is 90s old the number is stale even if the
+  // basket ticked a second ago. With the CF feed disarmed both are the basket and
+  // this is exactly the previous behaviour.
+  const spotPrice = btcSpot ? btcSpot.pub.price : (spot?.price ?? null);
+  const spotSource = btcSpot ? btcSpot.pubSource : (spot?.source ?? null);
   const spotAgeS = spot ? Math.max(0, (now - spot.publishTimeMs) / 1000) : null;
   const sigma = stats?.sigma_annual ?? null;
 
@@ -180,6 +189,7 @@ export function buildPayload(cfg, { markets, spot, stats, gradedCount, now = Dat
         window: null,
         strike: null,
         spot: spotPrice,
+        spot_source: spotSource,
         spot_age_s: spotAgeS,
         sigma_15m: sigma,
         fair_yes: null,
@@ -277,11 +287,14 @@ export async function runCrypto15mOnce({ now = Date.now() } = {}) {
   for (const cfg of Object.values(CRYPTO_15M)) {
     try {
       const markets = await fetchWindows(cfg.series, { now });
-      const spot = getBrtiSpot();
+      // ⛔ ref prices the model, pub is published. See btc-spot.js.
+      const s = getBtcSpot();
+      const spot = s ? s.ref : null;
       const stats = getShortHorizonStats(cfg.shCommodity, { lookbackMin: 15, now: new Date(now) });
       const envelope = buildPayload(cfg, {
         markets,
         spot,
+        btcSpot: s,
         stats,
         gradedCount: state.gradedCount[cfg.commodity] ?? 0,
         now,
@@ -317,6 +330,11 @@ export async function runCrypto15mOnce({ now = Date.now() } = {}) {
             volumeFp: d.book.volume_fp,
             oiFp: d.book.oi_fp,
             modelVersion: 'twap-v1',
+            // p_spot keeps its meaning (the PUBLIC basket, via d.spot); these two
+            // record what we actually priced on, for the basket-era vs index-era
+            // split when A5 is re-run. ⛔ Internal, never rendered.
+            refSpot: s ? s.ref.price : null,
+            spotSource: s ? s.refSource : null,
           });
           state.observations += 1;
         } catch (err) {

@@ -53,6 +53,10 @@ import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/options-provider.js';
 import { getPrice } from '../feeds/pyth.js';
 import { getBrtiSpot } from '../feeds/brti-spot.js';
+// Bitcoin's spot ladder is now ref/pub split — see the header of btc-spot.js.
+// ⛔ The engine prices on `.ref` (the CF Benchmarks settlement index, OPRA-class)
+// and WRITES `.pub` (the public exchange basket). Never the other way round.
+import { getBtcSpot } from '../feeds/btc-spot.js';
 import { WTI_FRONT_MONTH_SYMBOL } from '../feeds/pyth.js';
 
 /** Oil snapshots run on a 5-min cadence, so a Pyth tick older than 10 min means
@@ -536,6 +540,10 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   const chain = getChain(config.underlyingEtf);
 
   let spot = null;
+  // Bitcoin only: the ref/pub pair from getBtcSpot(). Null on every other
+  // commodity and whenever the CF feed is disarmed, in which case `.ref` and
+  // `.pub` are both the basket and nothing downstream changes.
+  let btcSpot = null;
 
   // PRIMARY (oil only): USO-synthetic. Derives WTI spot from live USO mid
   // off the chain × daily wti/uso ratio anchored to FRED DCOILWTICO.
@@ -623,13 +631,20 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     }
   }
 
-  // TERTIARY: silver/gold = Pyth; bitcoin = BRTI basket; oil = Yahoo CL=F.
+  // TERTIARY: silver/gold = Pyth; bitcoin = CF Benchmarks BRTI (basket fallback); oil = Yahoo CL=F.
   if (!spot) {
-    spot = useYahooSpot
-      ? getOilSpot()
-      : useBrtiSpot
-        ? getBrtiSpot()
-        : getPrice(config.pythSymbol);
+    if (useYahooSpot) {
+      spot = getOilSpot();
+    } else if (useBrtiSpot) {
+      // ⛔ TWO NUMBERS FROM HERE ON. `btcSpot.ref` prices the model; `btcSpot.pub`
+      // is the only one that may be written to a row or a payload. `spot` is bound
+      // to ref so every probability/edge computation below is on the settlement
+      // index unchanged; the row writer reaches for `publicSpot` explicitly.
+      btcSpot = getBtcSpot();
+      spot = btcSpot ? btcSpot.ref : null;
+    } else {
+      spot = getPrice(config.pythSymbol);
+    }
     if (spot && useYahooSpot) {
       console.log(`[${config.commodity}] TERTIARY spot ${spot.source} = $${spot.price.toFixed(2)}`);
     }
@@ -1395,8 +1410,18 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       fused_confidence: fusedTierStr,
       rationale,
       quality_flag: qualityFlag,
-      spot_price: spotPrice,
-      spot_source: spot.source,
+      // ⛔ THE PUBLIC COLUMNS CARRY THE PUBLIC BASKET. On bitcoin the model priced
+      // on `btcSpot.ref` (the CF Benchmarks index, licensed) while these two
+      // columns are read by /api/tools/bitcoin-edge, the widgets and the alerts
+      // payload — so they get `btcSpot.pub`. Every other commodity is unchanged:
+      // btcSpot is null and these fall through to `spot`.
+      spot_price: btcSpot ? btcSpot.pub.price : spotPrice,
+      spot_source: btcSpot ? btcSpot.pubSource : spot.source,
+      // ⛔ INTERNAL ONLY (OPRA-class). The reference we actually priced on. Never
+      // mapped into a payload — enforced site-side by `npm run lint:source-mask`.
+      ref_spot: btcSpot ? btcSpot.ref.price : null,
+      ref_spot_source: btcSpot ? btcSpot.refSource : null,
+      ref_spot_age_s: btcSpot ? btcSpot.refAgeS : null,
       underlying_etf: config.underlyingEtf,
       underlying_price: etfPrice,
       fred_divergence_bp: fredDivergenceBp,

@@ -558,6 +558,13 @@ export async function recordFifteenMinObservationV2(o) {
     p_volume_fp: o.volumeFp,
     p_oi_fp: o.oiFp,
     p_model_version: o.modelVersion ?? null,
+    // ⛔ INTERNAL ONLY (OPRA-class). The CF Benchmarks index this tick was priced
+    // on, plus which feed it came from. These land in fifteen_min_shadow_ticks for
+    // calibration — they never leave the database. `p_spot` above stays the PUBLIC
+    // basket so `disp_pct` (derived from it inside the RPC) keeps the meaning the
+    // A5 moneyness buckets were measured on.
+    p_ref_spot: o.refSpot ?? null,
+    p_spot_source: o.spotSource ?? null,
   });
   if (error) throw new Error(`record_fifteen_min_observation_v2: ${error.message}`);
 }
@@ -637,6 +644,16 @@ export async function recordSettlementSpotCapture(o) {
         strike: o.strike ?? null,
         fair: o.fair ?? null,
         tau_s: o.tauS ?? null,
+        // CF Benchmarks bitcoin (E2). `avg60s` is the 60-print settlement average
+        // as WE recorded it — the number the contract actually settles on, which is
+        // why the bitcoin scorecard scores it rather than an instantaneous tick.
+        // `avgWindowSize` < 55 means CF was sparse and the average is suspect.
+        // `source` is 'cf_ws' for a live observation; 'cf_rest_backfill' rows are
+        // CALIBRATION ONLY and are excluded from the public scorecard.
+        // ⛔ OPRA-class values. They live in this table and never leave the DB.
+        avg_60s: o.avg60s ?? null,
+        avg_window_size: o.avgWindowSize ?? null,
+        source: o.source ?? null,
       },
       {
         onConflict: 'commodity,window_close_at,kind',

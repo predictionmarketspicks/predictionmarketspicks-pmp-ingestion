@@ -13,6 +13,7 @@ import {
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
 import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts, WTI_FRONT_MONTH_SYMBOL } from './feeds/pyth.js';
 import { startBrtiSpot, stopBrtiSpot, BRTI_SOURCE_TAG } from './feeds/brti-spot.js';
+import { startCfBenchmarks, stopCfBenchmarks, isCfArmed, cfHealth, CF_SOURCE_TAG } from './feeds/cfbenchmarks.js';
 // isOptionsMarketOpen still lives in massive.js (pure utility, no provider
 // coupling). Lifecycle goes through the options-provider abstraction so the
 // chain source can swap via OPTIONS_PROVIDER env without engine changes.
@@ -213,6 +214,16 @@ for (const config of enabledCommodities) {
     // gate and the per-snapshot gate agree on what "dead" means instead of one
     // passing while the other demotes.
     markFeedRequired(BRTI_SOURCE_TAG, { maxStaleMs: 5 * 60 * 1000 });
+    // The CF Benchmarks index feed is registered but NOT required by default.
+    // ⛔ CF_REQUIRED stays 0 for the first week on purpose: the basket keeps
+    // readiness green while we learn this socket's reconnect behaviour, and a new
+    // feed that can 503 the whole app on day one is how a improvement becomes an
+    // outage. Flip to 1 only once /health shows a week of clean cf_brti ticks.
+    // With CF_INDEX_IDS unset the feed is disarmed and this is a no-op either way.
+    registerFeed(CF_SOURCE_TAG);
+    if (isCfArmed() && process.env.CF_REQUIRED === '1') {
+      markFeedRequired(CF_SOURCE_TAG, { maxStaleMs: 60 * 1000 });
+    }
   } else {
     markFeedRequired(`pyth_${config.pythSymbol.replace(/[/]/g, '_').toLowerCase()}`);
   }
@@ -689,6 +700,12 @@ async function bootstrapAll() {
   // it and has no Pyth fallback, so gating it on the hourly commodities'
   // useBrtiSpot flag would silently leave the 15-minute engine spot-less.
   startBrtiSpot();
+  // ⛔ THE BASKET ABOVE STAYS RUNNING REGARDLESS. It is the PUBLIC spot under the
+  // default licensing posture AND the fallback rung when this socket drops — a
+  // fallback that only runs during an outage is the one that fails during an
+  // outage. Disarmed unless CF_INDEX_IDS is set (see cfbenchmarks.js header:
+  // run scripts/verify-cfbenchmarks.mjs on the machine before arming).
+  startCfBenchmarks();
   for (const state of engines.values()) {
     bootstrapEngine(state).catch((err) => {
       console.error(`[${state.config.commodity}] bootstrap failed`, err);
@@ -884,6 +901,12 @@ const server = http.createServer((req, res) => {
       grace: liveness.grace,
       stale: liveness.stale,
     };
+    // CF Benchmarks index feed. ⛔ AGGREGATES ONLY — connection state, tick clock,
+    // seq gaps, the last window_size and the capture count. NO index VALUE and no
+    // running average: /health is a public endpoint and those are licensed data.
+    // `avg60sWindowSizeLast` is the one that matters operationally — < 55 means CF
+    // was sparse and the settlement averages we recorded are suspect.
+    snap.cfBenchmarks = cfHealth();
     snap.engine = {
       env: ENGINE_ENV,
       // Which calibration maps are loaded and whether any GOVERNS decisions.
@@ -1164,6 +1187,7 @@ async function shutdown(signal) {
   stopKalshi();
   stopAllPyth();
   stopBrtiSpot();
+  stopCfBenchmarks();
   stopAllOptionsFeeds();
   stopYahooOil();
   if (calibrationTimer) clearInterval(calibrationTimer);

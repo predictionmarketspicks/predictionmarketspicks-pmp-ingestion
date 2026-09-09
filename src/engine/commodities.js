@@ -324,6 +324,14 @@ export const COMMODITIES = {
     // symbol were wrong rather than unused.
     pythSymbol: 'BTC/USD',
     spotUnit: '$/BTC',
+    // ⛔ spotLabel DESCRIBES THE DISPLAYED NUMBER, and it is rendered publicly —
+    // src/delivery/discord.js prints `Spot (${meta.spotLabel})` beside the value in
+    // the #cmdty-edge embed. The displayed value is `btcSpot.pub`, the PUBLIC
+    // exchange basket, so this must keep naming the basket. Calling it "CF
+    // Benchmarks BRTI" would label a basket median as the licensed index — wrong
+    // twice over: factually, and as a redistribution claim about a number that is
+    // not the index. The fact that the MODEL prices on the index is stated in the
+    // methodology copy on site, which is a statement about method, not data.
     spotLabel: 'BRTI constituent basket',
     // Spot comes from the free BRTI-constituent basket (Coinbase, Kraken,
     // Bitstamp, Gemini), NOT Pyth. Kalshi settles KXBTCD on the CF Benchmarks

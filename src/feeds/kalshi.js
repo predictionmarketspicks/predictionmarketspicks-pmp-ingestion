@@ -18,14 +18,17 @@
 // in 2-decimal fixed-point. We parse to floats once at ingest and store in the
 // in-memory quote map so the silver engine can read synchronously.
 
-import crypto from 'node:crypto';
 import WebSocket from 'ws';
 
 import { setFeedStatus, recordTick } from '../observability/health.js';
-
-const KALSHI_API_BASE = process.env.KALSHI_API_BASE || 'https://api.elections.kalshi.com/trade-api/v2';
-const KALSHI_WS_URL = process.env.KALSHI_WS_URL || 'wss://api.elections.kalshi.com/trade-api/ws/v2';
-const KALSHI_WS_PATH = '/trade-api/ws/v2';
+// Signing moved to kalshi-auth.js so the CF Benchmarks adapter can share it —
+// it needs its own socket, because this one is torn down hourly at HH:00:30 UTC.
+import {
+  authHeaders,
+  KALSHI_API_BASE,
+  KALSHI_WS_URL,
+  KALSHI_WS_PATH,
+} from './kalshi-auth.js';
 
 // Series → max markets to subscribe per series. Phase 1 is silver-focused but
 // gold/oil stay subscribed so /health stays multi-series and Phase 2 has
@@ -60,29 +63,6 @@ const quoteMap = new Map();
 // Series → array of (market_ticker, event_ticker) pairs the engine needs to
 // scope its work. Refreshed on every WS connect.
 const seriesIndex = new Map();
-
-function rsaPssSign(timestampMs, method, path) {
-  const pem = process.env.KALSHI_PRIVATE_KEY;
-  if (!pem) throw new Error('KALSHI_PRIVATE_KEY not set');
-  const msg = `${timestampMs}${method}${path}`;
-  const sig = crypto.sign('sha256', Buffer.from(msg), {
-    key: pem,
-    padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
-    saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST,
-  });
-  return sig.toString('base64');
-}
-
-function authHeaders(method, path) {
-  const keyId = process.env.KALSHI_API_KEY_ID;
-  if (!keyId) throw new Error('KALSHI_API_KEY_ID not set');
-  const ts = Date.now().toString();
-  return {
-    'KALSHI-ACCESS-KEY': keyId,
-    'KALSHI-ACCESS-SIGNATURE': rsaPssSign(ts, method, path),
-    'KALSHI-ACCESS-TIMESTAMP': ts,
-  };
-}
 
 // Unauthenticated — /markets is public. Keeps a PEM bug isolated to the WS path.
 async function fetchMarketsForSeries(seriesTicker) {

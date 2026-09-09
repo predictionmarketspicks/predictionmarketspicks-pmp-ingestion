@@ -40,6 +40,9 @@
 
 import { setFeedStatus, recordTick } from '../observability/health.js';
 import { recordTick as recordPriceTick } from '../engine/short-horizon-vol.js';
+// Read-only, to decide which feed owns the vol buffer. No cycle: cfbenchmarks.js
+// does not import this file.
+import { getCfIndex, CF_MAX_AGE_MS, isCfArmed } from './cfbenchmarks.js';
 
 const POLL_INTERVAL_MS = 10_000; // matches the Pyth poller this replaces
 const FETCH_TIMEOUT_MS = 8_000;
@@ -154,7 +157,21 @@ async function pollOnce() {
   // model. Without this the engine falls back to shortHorizonVolScale and tags
   // every row quality_flag='cold_buffer' — i.e. skipping it looks like it works
   // and silently degrades every snapshot.
-  recordPriceTick('bitcoin', price, publishTimeMs);
+  // ⛔ EXACTLY ONE FEED MAY WRITE THE BITCOIN VOL BUFFER, AND IT IS NOT A STYLE
+  // POINT. short-horizon-vol.js holds 600 slots sized for a 10 s cadence and its
+  // σ constants were FIT on that cadence; MIN_TICK_INTERVAL_MS is 800 ms, so it
+  // does NOT deduplicate two 10 s writers. Both this poller and the CF adapter
+  // record every ~10 s, so with CF armed the effective cadence would be ~5 s and
+  // the 15-minute lookback would silently become ~7.5 minutes — the exact σ-regime
+  // change the CF-side throttle exists to prevent, arrived by the other door.
+  //
+  // CF wins when it has a fresh print: it IS the index the contracts settle on, so
+  // realised vol measured on it is the more correct input. Checked per tick rather
+  // than once at boot so that if the socket dies the basket resumes owning the
+  // buffer instead of leaving it to go quiet.
+  const cf = isCfArmed() ? getCfIndex('BRTI') : null;
+  const cfOwnsVol = cf != null && Date.now() - cf.publishTimeMs <= CF_MAX_AGE_MS;
+  if (!cfOwnsVol) recordPriceTick('bitcoin', price, publishTimeMs);
 }
 
 function schedule() {

@@ -35,6 +35,7 @@ import {
   SNAPSHOT_INTERVAL_EXPIRATION_MS,
   BTC_SNAPSHOT_INTERVAL_MARKET_MS,
   BTC_STRIKE_BAND_PCT,
+  BTC_MIN_SECONDS_TO_CLOSE,
 } from './thresholds.js';
 
 export const COMMODITIES = {
@@ -403,6 +404,18 @@ export const COMMODITIES = {
     // produced on the hourly $100-spaced KXBTCD chain. Applied at persist time
     // in commodity-base.js — skipped strikes write no row at all.
     strikeBandPct: BTC_STRIKE_BAND_PCT,
+    // The band's live-book arm requires a TRADEABLE book — a permanent 0.99/1.00
+    // deep-ITM quote is not a trader quoting the wing, and treating it as one
+    // readmitted ~90 dead strikes per snapshot, each printing an identical
+    // +0.5pp. thresholds.js BTC_WING_*.
+    //
+    // Near-expiry guard: inside 120s of close the lognormal CDF is degenerate
+    // and any edge it prints is an artifact of T → 0, not a mispricing. Rows
+    // still persist (99.98% of bitcoin history is that slice — it is the only
+    // intraday record there is) but carry quality_flag='near_expiry' and are
+    // hard-suppressed to PASS. Bitcoin-only; the daily commodities never get
+    // close enough to expiry at their cadence to need it.
+    minSecondsToClose: BTC_MIN_SECONDS_TO_CLOSE,
     // WATCH tier: 3-5pp directional leans surface as confidence='watch' (not a
     // BUY). Keeps the public board alive in calm hours without faking signals.
     watchTierEnabled: true,

@@ -180,6 +180,46 @@ export const SILVER_SNAPSHOT_INTERVAL_OFF_MS = SNAPSHOT_INTERVAL_OFF_MS;
 // silver/gold/oil leave it unset and keep the full ladder.
 export const BTC_STRIKE_BAND_PCT = 0.06;
 
+// ⛔ The live-book arm of that union must require a TRADEABLE book, not any book
+// (BITCOIN_EDGE_MU_CAP_SATURATION_2026-08-13 §7.3/§7.4). Every deep-ITM strike
+// permanently carries a 0.99/1.00 quote, so a bare `yesBid > 0 && yesAsk > 0`
+// test is ALWAYS true for them and the `||` readmits every strike the ±6% band
+// just excluded. Measured on the 2026-08-13 19:59:45Z board: 94 rows, all PASS,
+// all edge +0.01, strikes spanning −14.6% to +5.8% of spot — roughly ninety dead
+// deep-ITM strikes each showing model 1.0000 vs market mid 0.995 = +0.5pp. That
+// uniform positive tilt IS the "we are long-only-YES" complaint; it is a
+// persistence defect, not a model tilt.
+//
+// A strike beyond the band earns its place only if a trader could actually take
+// the other side of it: both quotes off the rails and a spread a taker can cross.
+export const BTC_WING_MIN_BID = 0.01;
+export const BTC_WING_MAX_ASK = 0.99;
+export const BTC_WING_MAX_SPREAD = 0.15;
+
+// Snapshots inside this many seconds of close are numerically degenerate and
+// must never be treated as signal (§7.2). As T → 0 the lognormal CDF collapses
+// toward a step function while the market still prices real uncertainty, which
+// manufactures edges no model should print — measured examples: model 0.0011
+// against a two-sided 0.45/0.55 market (−54.9pp), model 0.1495 against 0.82/0.83
+// (−67.6pp). 99.98% of persisted bitcoin history (16,174 of 16,177 rows over 30
+// days) sits under one minute to close, so this is also the slice every
+// calibration study to date was unknowingly fit on. Rows inside the guard are
+// still written — they are the only intraday history there is — but they carry
+// quality_flag='near_expiry' and are hard-suppressed to PASS.
+export const BTC_MIN_SECONDS_TO_CLOSE = 120;
+
+// The strike-band predicate, pure and exported so the invariant has a test
+// instead of living inside a 900-line snapshot function (test/engine.btc-strike-band.test.js).
+// Keep a strike iff it is inside ±band of spot, OR a trader could actually take
+// the other side of it out on the wing.
+export function keepStrike(market, spotPrice, band) {
+  if (market?.floorStrike == null || !(spotPrice > 0)) return false;
+  if (Math.abs(market.floorStrike / spotPrice - 1) <= band) return true;
+  const bid = market.yesBid ?? 0;
+  const ask = market.yesAsk ?? 0;
+  return bid >= BTC_WING_MIN_BID && ask <= BTC_WING_MAX_ASK && ask - bid <= BTC_WING_MAX_SPREAD;
+}
+
 // Bitcoin pass cadence — every 15s during the market window (down from the 5min
 // shared market cadence). The WHOLE pass stays atomic: Databento IBIT NBBO (in-
 // memory sidecar read) + Kalshi book refetch (one with_nested_markets call) +

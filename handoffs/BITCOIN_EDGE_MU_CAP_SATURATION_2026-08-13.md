@@ -1,8 +1,10 @@
 # Bitcoin Edge — the drift cap IS the model: mu pinned at ±12/yr displaces the whole CDF
 
 **Status**: §4.1 SHIPPED + DEPLOYED `49113ed` (2026-08-13) — centre fixed as predicted.
-§4.2 is now the BINDING error and is WORSE than this doc estimated. §4.3/§4.4 not started.
-§5 loose thread RESOLVED — not a bug. See §7 for the measured post-change result.
+**§7.4 #1 (band union) and #2 (near-expiry guard) SHIPPED 2026-09-09 — see §9, which is the
+current state of this doc.** §7.4 #3 (persist intraday ladders) and #4 / §4.2 (the 1.64× width
+error) remain open and are now the binding problem. §4.3 stays blocked behind them.
+§5 loose thread RESOLVED — not a bug. §7 is the 2026-08-13 measurement that motivated §9.
 **Date**: 2026-08-13
 **Files implicated**: `src/engine/thresholds.js` (`BTC_MU_SCALE`, `BTC_MU_CAP_ANNUAL`), `src/engine/commodity-base.js` (`resolveTwapMu`, ~L800), `src/engine/short-horizon-vol.js`
 **Related**: `BITCOIN_V2_CUTOVER_2026-07-27.md` (introduced the physical-measure mu path)
@@ -222,3 +224,182 @@ it reconciles against `prob_physical` to ±0.005, as it should under `v2_physica
 
 Baseline was trustworthy; §4.1 was safe to start. **Query `fused_edge_pp`, never
 `edge_pp`, when asking what the engine decided.**
+
+---
+
+# §7. Post-deploy verification (2026-08-13, ~20:30 UTC) — why the board reads long-only-YES
+
+Triggered by: "I feel like we are still long only yes sides." The instinct is correct.
+The mu change is implemented correctly; it is not the thing driving what's on screen.
+
+## 7.1 The mu-off change deployed and works
+
+`mu_used = 0` on every row from the **18:59:44 UTC** snapshot onward; 17:59:45 still
+carried `-12`. Deploy landed between 18:00 and 19:00 UTC. `49113ed` touches only the
+lambda + comments in `commodities.js`/`thresholds.js` — no collateral change to the
+strike band or gate. `4de804f` (gate reason codes) is committed and `main` is in sync
+with `origin/main`. **Both changes are properly implemented.** Centre error fell
+−0.49σ → −0.12σ as predicted.
+
+## 7.2 But 99.98% of persisted history is the final seconds before close
+
+| time to close | rows (30d) | avg abs edge | rows ≥20pp | max |
+|---|---|---|---|---|
+| **< 1 min** | **16,174** | 0.011 | 24 | **0.99** |
+| 1–5 min | 0 | — | — | — |
+| > 5 min | **3** | 0.010 | 0 | 0.01 |
+
+Full multi-strike ladders (116–127 rows) are written **only** in the final minute.
+Intraday snapshots persist **exactly one row each**, with `fused_edge_pp` NULL and no
+liquid book — confirmed at 57, 50, 46, 37, 35, 32, 31, 27, 26, 23, 22, 16, 14, 13, 11
+minutes to close, all `rows=1, liquid=0, fe_null=1`.
+
+At T→10s the lognormal CDF collapses toward a step function while the market still
+prices real uncertainty. That manufactures edges of a size no model should ever print:
+
+| snapshot | strike | market bid/ask | model prob | reported edge |
+|---|---|---|---|---|
+| 08-13 15:59:50 | 63,400 | 0.45 / 0.55 | **0.0011** | **−54.9pp** |
+| 08-03 13:59:49 | 63,300 | 0.07 / 0.08 | 0.7004 | **+62.5pp** |
+| 07-31 13:59:46 | 63,200 | 0.08 / 0.10 | 0.5121 | +42.2pp |
+| 07-27 19:59:50 | 64,900 | 0.82 / 0.83 | 0.1495 | −67.6pp |
+
+A model claiming 0.1% while a two-sided market quotes 45/55 is not an edge, it is a
+numerical artifact of T→0. **These are pure degeneracy, and they are what the backtest
+sees.**
+
+**This reframes the 7/27 decision.** `BITCOIN_V2_CUTOVER` concluded NO "hit ≤14% under
+EVERY mu variant including v2 — there is no lambda that rescues it." That is exactly the
+signature of a dataset dominated by T→0 rows: no drift parameter can rescue them because
+drift is not what is wrong with them. The NO side went 1-for-15 because it was buying
+step-function artifacts at the bell, not because the NO floor was too loose.
+
+Note the 08-13 row above: `yesNet = 0.0011 − 0.55 = −0.55` (no YES), `noNet = 0.45 −
+0.0011 = 0.449` — a **44.9pp** "BUY NO" that only `noSideEnabled: false` is suppressing.
+**Re-enabling the NO side without fixing T→0 first would immediately resume the 1-for-15.**
+This supersedes §4.3: the NO side is not merely "not ready", it is actively dangerous.
+
+## 7.3 The actual cause of the long-only-YES appearance
+
+Live board, 19:59:45 UTC: **94 rows, every one PASS, every one `edge_pp = +0.01`,
+rationale "Edge 0.5pp below 5pp threshold".** Strikes run 54,100–67,000 against spot
+63,338 — i.e. **−14.6% to +5.8%**, far outside the ±6% band that is supposed to apply.
+
+Cause is `commodity-base.js:722`:
+
+```js
+const withinBand = Math.abs(m.floorStrike / spotPrice - 1) <= band;   // ±6%
+const liveBook   = (m.yesBid ?? 0) > 0 && (m.yesAsk ?? 0) > 0;
+return withinBand || liveBook;                                        // union
+```
+
+Every deep-ITM strike permanently carries a 0.99 / 1.00 quote, so `liveBook` is **always
+true** for them and the `||` readmits every strike the band just excluded. The band is
+effectively inert on the ITM wing. Each readmitted strike then shows model `1.0000` vs
+market mid `0.995` = **+0.5pp, positive, on all ~90 of them**.
+
+That is the long-only-YES wall — roughly ninety dead deep-ITM strikes each contributing
+an identical small positive tilt. It is a **display/persistence defect, not a model
+tilt**, and it is independent of both the mu fix and the 1.64× width error.
+
+## 7.4 Revised priority
+
+1. **Fix the band union** — require a *tradeable* book, not any book:
+   `yesBid > 0.01 && yesAsk < 0.99 && (yesAsk - yesBid) <= someMaxSpread`, or simply
+   `withinBand && liveBook` for the ITM wing. Smallest change, biggest visible effect:
+   drops ~90 of 94 rows off the board and removes the false YES lean. **Do this first.**
+2. **Stop treating the final-minute snapshot as signal.** Add a `min_seconds_to_close`
+   guard (suggest 120s) below which the engine emits PASS and writes
+   `quality_flag='near_expiry'`. Then re-run the NO-side study on T>2min data only —
+   the existing 1-for-15 verdict is not trustworthy evidence about the NO side.
+3. **Persist intraday ladders.** One row per intraday snapshot means there is no usable
+   history at the horizons the tool actually trades. Every calibration study to date has
+   been fit on the 10-second-to-close slice.
+4. Width error 1.64× (§6 acceptance test) — still open, but now ranks behind the above.
+5. `BTC_MU_SCALE = 0` — **done and verified**, leave it.
+
+## 7.5 Verify commands
+
+```sql
+-- 1. band leak: strikes persisted outside ±6% of spot
+select count(*) filter (where abs(strike/spot_price - 1) > 0.06) outside_band, count(*) total
+from commodity_edge_signals where commodity='bitcoin'
+  and snapshot_at=(select max(snapshot_at) from commodity_edge_signals where commodity='bitcoin');
+-- expect outside_band = 0 after fix 1; was 90+/124 on 8/13
+
+-- 2. near-expiry concentration
+select count(*) filter (where extract(epoch from (event_close_at-snapshot_at)) < 60) under_1min,
+       count(*) total
+from commodity_edge_signals where commodity='bitcoin' and snapshot_at > now() - interval '7 days';
+-- was 16174/16177 on 8/13
+```
+
+
+---
+
+# §9. §7.4 #1 and #2 shipped (2026-09-09, Claude Code)
+
+## 9.1 Both defects re-measured before touching anything
+
+The §7.5 verify queries, run against the last 7 days of `commodity_edge_signals` on 2026-09-09:
+
+| signal | measured | §7 said |
+|---|---|---|
+| rows outside ±6% of spot | **1,704 / 4,390 (39%)** | 90+/124 on the 8/13 board |
+| rows inside 120s of close | **4,349 / 4,390 (99.1%)** | 16,174 / 16,177 (99.98%) over 30d |
+
+Both defects were still live and neither had drifted away. The latest single snapshot read
+11 rows / 0 outside band / 11 near-expiry, which is why a single-snapshot check is not the
+test — the band leak only shows on the fuller ladders.
+
+## 9.2 #1 — the band union now requires a tradeable book
+
+`commodity-base.js` used `withinBand || (yesBid > 0 && yesAsk > 0)`. The second arm is
+permanently true for deep-ITM strikes pinned at 0.99/1.00, so it readmitted every strike the
+band had just excluded. The predicate is now `keepStrike()` in `thresholds.js` — pure and
+exported, so the invariant has a test instead of living inside a 900-line snapshot function:
+
+```js
+export function keepStrike(market, spotPrice, band) {
+  if (market?.floorStrike == null || !(spotPrice > 0)) return false;
+  if (Math.abs(market.floorStrike / spotPrice - 1) <= band) return true;
+  const bid = market.yesBid ?? 0;
+  const ask = market.yesAsk ?? 0;
+  return bid >= BTC_WING_MIN_BID && ask <= BTC_WING_MAX_ASK && ask - bid <= BTC_WING_MAX_SPREAD;
+}
+```
+
+`BTC_WING_MIN_BID = 0.01`, `BTC_WING_MAX_ASK = 0.99`, `BTC_WING_MAX_SPREAD = 0.15`. The wing
+arm still does what Benny asked for on 2026-06-10 — cascade-hour strikes traders are actively
+quoting beyond ±6% survive — it just no longer counts a permanently-pinned quote as activity.
+
+## 9.3 #2 — near-expiry guard at 120s
+
+`BTC_MIN_SECONDS_TO_CLOSE = 120`, wired bitcoin-only as `config.minSecondsToClose`. Seconds to
+close is computed once per snapshot (T is constant across an event's strikes); inside the
+window every row takes `quality_flag='near_expiry'`, which is added to `HARD_SUPPRESS_FLAGS`
+so it forces PASS even for a consumer that doesn't filter on `quality_flag`.
+
+**Rows still persist.** They are the only intraday history that exists (§7.4 #3 is still open),
+so deleting them would destroy the record rather than fix it. They are flagged, suppressed, and
+must be excluded from every future calibration study — which is the real point, since §7.2
+established that every calibration fit to date was unknowingly fit on this slice.
+
+## 9.4 Tests
+
+`test/engine.btc-strike-band.test.js`, 9 cases — the pinned 0.99/1.00 deep-ITM regression, its
+dead-OTM mirror, a genuine crossable wing quote, an uncrossable spread, both bid/ask rails, the
+band edges, and degenerate inputs. Full suite: **43 files / 579 tests pass**.
+
+## 9.5 Not done — and it is the whole remaining problem
+
+- **§4.2 / §7.4 #4 — the 1.64× width error.** Untouched. The model still puts far too much mass
+  in the tails, and the §6 acceptance test still does not pass. This is now the binding error.
+- **§7.4 #3 — persist intraday ladders.** Untouched. One row per intraday snapshot means there
+  is still no usable history at the horizons the tool actually trades.
+- **§4.3 — the NO side stays off.** §7.2 is unchanged by this work: re-enabling before the width
+  error is fixed would resume the 1-for-15.
+- ⚠️ **Not deployed.** `pmp-ingestion` has no auto-deploy; this needs `fly deploy --remote-only`.
+- ⚠️ **The §6 three-snapshot acceptance test has NOT been re-run** against these changes. What is
+  verified here is the predicate (unit tests) and that both defects were live at the measured
+  rates above — not that the board's shape improved. Re-run §6 after deploy.

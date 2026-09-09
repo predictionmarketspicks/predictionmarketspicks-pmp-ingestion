@@ -48,6 +48,8 @@ import {
   EDGE_IMPLAUSIBLE_FLOOR_PP,
   EDGE_IMPLAUSIBLE_SIGMA_MULT,
   WATCH_EDGE_PP,
+  BTC_MIN_SECONDS_TO_CLOSE,
+  keepStrike,
 } from './thresholds.js';
 import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/options-provider.js';
@@ -838,17 +840,24 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   // via config.strikeBandPct; silver/gold/oil leave it unset and keep the full
   // (already-narrow) ladder. The live-book arm still captures cascade-hour wing
   // strikes that traders are actively quoting beyond ±6%.
+  //
+  // ⛔ The live-book arm requires a TRADEABLE book, not any book. `yesBid > 0 &&
+  // yesAsk > 0` is permanently true for every deep-ITM strike (they sit at
+  // 0.99/1.00 forever), so the `||` used to readmit every strike the band had
+  // just excluded — 90 of 94 rows on the 2026-08-13 19:59:45Z board, each
+  // contributing an identical +0.5pp. See thresholds.js BTC_WING_* and
+  // BITCOIN_EDGE_MU_CAP_SATURATION_2026-08-13 §7.3.
   if (config.strikeBandPct != null && spotPrice > 0) {
     const band = config.strikeBandPct;
     const before = snapshotMarkets.length;
+    let wingKept = 0;
     snapshotMarkets = snapshotMarkets.filter((m) => {
-      if (m.floorStrike == null) return false;
-      const withinBand = Math.abs(m.floorStrike / spotPrice - 1) <= band;
-      const liveBook = (m.yesBid ?? 0) > 0 && (m.yesAsk ?? 0) > 0;
-      return withinBand || liveBook;
+      if (!keepStrike(m, spotPrice, band)) return false;
+      if (Math.abs(m.floorStrike / spotPrice - 1) > band) wingKept += 1;
+      return true;
     });
     console.log(
-      `[${config.commodity}] strike band ±${(band * 100).toFixed(0)}% of $${spotPrice.toFixed(0)}: ${snapshotMarkets.length}/${before} strikes kept`,
+      `[${config.commodity}] strike band ±${(band * 100).toFixed(0)}% of $${spotPrice.toFixed(0)}: ${snapshotMarkets.length}/${before} strikes kept (${wingKept} beyond the band on a tradeable book)`,
     );
   }
 
@@ -863,7 +872,20 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     'kalshi_stale_divergence',
     'kalshi_thin_book_large_edge',
     'twap_settle_window',
+    'near_expiry',
   ]);
+
+  // Seconds to close is constant across the strikes of an event, so compute it
+  // once. Bitcoin-only via config.minSecondsToClose; the daily commodities have
+  // no T → 0 problem at their cadence and leave it unset.
+  const secondsToClose = Math.max(0, Math.round((closeMs - now.getTime()) / 1000));
+  const nearExpiry =
+    config.minSecondsToClose != null && secondsToClose < config.minSecondsToClose;
+  if (nearExpiry) {
+    console.log(
+      `[${config.commodity}] ${secondsToClose}s to close (< ${config.minSecondsToClose}s) — rows flagged near_expiry and suppressed to PASS`,
+    );
+  }
 
   const rows = [];
   for (const rawMarket of snapshotMarkets) {
@@ -987,6 +1009,14 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     // shipping kalshi_yes=0 + a fake edge against the options-implied prob.
     let qualityFlag = null;
     if (kalshiProb == null) qualityFlag = 'kalshi_no_book';
+    // Near-expiry degeneracy (BITCOIN_EDGE_MU_CAP_SATURATION_2026-08-13 §7.2).
+    // As T → 0 the lognormal CDF collapses toward a step function while the
+    // market still prices real uncertainty, so the "edge" is a numerical
+    // artifact of the horizon, not a disagreement — model 0.0011 against a
+    // two-sided 0.45/0.55 book is not a 54.9pp opportunity. The row still
+    // persists (it is the only intraday history there is) but can never be
+    // actionable, and every calibration study should exclude it.
+    if (qualityFlag == null && nearExpiry) qualityFlag = 'near_expiry';
     // Cold-buffer flag: short-horizon RV was requested but Pyth buffer was
     // empty / stale this tick. Row uses the σ × shortHorizonVolScale fallback
     // — site reader suppresses these so the public surface stays clean.

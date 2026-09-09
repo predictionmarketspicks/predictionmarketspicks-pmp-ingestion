@@ -4,7 +4,7 @@
 **§7.4 #1 (band union) and #2 (near-expiry guard) SHIPPED 2026-09-09. §7.4 #3 was ALREADY DONE
 and this doc did not know it. §7.2's central claim is WRONG — it read an upsert-keyed
 current-state table as a time series. See §10, which supersedes §7.2 and §7.4 #3.**
-The 1.64× width error (§4.2 / §7.4 #4) is the only binding item left. §4.3 stays blocked behind it.
+**§4.2's 1.64× width error does NOT reproduce — the §6 acceptance test now PASSES. See §11.** §4.3 stays blocked, but on a much smaller residual than this doc assumes.
 §5 loose thread RESOLVED — not a bug. §7 is the 2026-08-13 measurement that motivated §9.
 **Date**: 2026-08-13
 **Files implicated**: `src/engine/thresholds.js` (`BTC_MU_SCALE`, `BTC_MU_CAP_ANNUAL`), `src/engine/commodity-base.js` (`resolveTwapMu`, ~L800), `src/engine/short-horizon-vol.js`
@@ -480,3 +480,105 @@ the empty state. That is the intended behaviour — those two minutes were print
 −67.6pp artifacts — but it is a visible change and Benny should confirm he wants the board dark
 there rather than showing a "settling" state. **Verify on the first live hour; it has not been
 seen yet** (the engine has not run since deploy — bitcoin writes 13:00–19:00 UTC).
+
+
+---
+
+# §11. §4.2 re-measured over 5 days: the acceptance test passes (2026-09-09, Claude Code)
+
+§4.2 has been the named "binding error" since 8/13 on the strength of **one fit, on 8 strikes,
+on one snapshot** — which §7 itself flagged: *"a single mid-life fit on 8 strikes is suggestive,
+not conclusive"* and *"the acceptance test is defined over THREE snapshots and only ONE has been
+run."* It has now been run over 294.
+
+## 11.1 The tool
+
+`scripts/measure-btc-width.js` — the §6 fit, run over `commodity_edge_intraday` (§10.3) instead
+of one live board. It can run off-hours, breaks the error out by time-to-close, and shows
+per-day dispersion.
+
+```
+node --env-file-if-exists=.env scripts/measure-btc-width.js --days=9
+```
+
+Two methodology points that changed the answer, both worth keeping:
+
+- **Both curves must be fit on the SAME strikes.** 23% of intraday rows are `kalshi_no_book`
+  and carry `kalshi_yes = 0` (`commodity-base.js:1425`), so they drop out of the market fit but
+  not the model fit. Fitting each curve over whatever strikes it happened to have compares a σ
+  estimated over a narrow ATM window against one estimated over the full ladder — and since
+  neither distribution is truly lognormal (there is a smile), that alone moves the ratio.
+  Before intersecting, one day read 0.620; after, 0.844. **The outlier was the method.**
+- **Exclude flagged rows.** Same reason the board does.
+
+## 11.2 Result — 294 ladders, 2026-09-01 → 09-08
+
+| time to close | ladders | median shift (σ) | median width ratio |
+|---|---|---|---|
+| 5–15 min | 30 | −0.041 | 0.954 |
+| 15–30 min | 88 | −0.024 | 0.982 |
+| 30–45 min | 89 | −0.017 | 1.044 |
+| > 45 min | 87 | −0.037 | **1.117** |
+| **ALL** | **294** | **−0.026** | **1.002** |
+
+§6's healthy band is shift within ±0.10σ and ratio 0.95–1.05. **Overall: −0.026 and 1.002 — the
+acceptance test passes.** Three of four horizon buckets are in band. There is no 1.64×; there is
+no 1.20×.
+
+Per day the >30min ratio runs 0.933 / 0.988 / 1.090 / 1.098 / 1.343 — so the long-horizon excess
+is real but noisy, and one session (09-08) drives much of the median.
+
+## 11.3 The residual is NOT where §4.2 says it is
+
+§4.2 says *"suspect the σ blend (`sigma_blend` 0.545 vs `sigma_iv` 0.627) and the IBIT→BTC vol
+translation."* Measured live from the engine's own code path on 2026-09-09:
+
+```
+sigma_iv    = 38.1%      (IBIT, from the smile)
+sigma_rv20  = 45.65%     (IBIT 20d realized, Yahoo daily closes, √252)
+sigma_blend = 39.61%     ( = 0.80·IV + 0.20·RV20, vol.js COMMODITY_CFG.bitcoin )
+```
+
+The market at >45 min prices **42.0%** annualised. **The blend is 39.6% — BELOW the market, not
+above it.** So the IV/RV blend cannot be what makes the model too wide out there. The suspect
+named in §4.2 is exonerated.
+
+What remains is the other term. `commodity-base.js:961`:
+
+```js
+sigmaPhysical = alphaShortHorizon * shStats.sigma_annual + (1 - alphaShortHorizon) * sigmaIvBlend;
+```
+
+At >45 min α ≈ 0.13, and the model's implied σ is 45.7% against a 39.6% blend — so the 15-minute
+Pyth short-horizon RV is running far hot, hot enough to move the total 6pp at only 13% weight.
+
+⚠️ **I cannot put a number on it, and the obvious algebra is unsound.** Solving the blend at
+>45 min implies σ_short ≈ 87%, but the same solve at 5–15 min (α ≈ 0.81) predicts a model σ of
+78% where 54.1% is observed. Those cannot both be true of one constant, because medians of
+ratios are not ratios of medians across different subsets — and because σ_short evidently swings
+by regime. **That swing is itself the finding: the short-horizon estimator is noisy, and no fixed
+multiplier can correct a term whose error changes sign.** Tuning `w_iv`/`w_rv` to chase the
+>45min bucket would be fitting noise, and would be aimed at the wrong term besides.
+
+## 11.4 What actually unblocks this
+
+**The vol components are not persisted, so the decomposition can only be inferred.** Add
+`sigma_short`, `sigma_blend` and `alpha` to the `commodity_edge_intraday` write (they already
+exist in-process at `commodity-base.js:960-970`, and `sigmaSource` already encodes α in a
+string). That is a small migration plus three fields, and it turns §11.3 from algebra into a
+measurement. **Until then, do not touch the vol constants.**
+
+Suggested order:
+1. Persist the three σ components (needs Benny — a prod migration).
+2. Re-run `measure-btc-width.js` for a week and decompose the >45min bucket for real.
+3. Only then consider whether the short-horizon term needs a cap, a shrink toward the blend, or a
+   shorter `shortHorizonVolCapHours`.
+
+## 11.5 The product question this raises
+
+At shift −0.026σ and ratio 1.002, **the model now essentially reproduces the market's
+distribution.** That is what §6 defines as healthy, and it is coherent with §1 — a real
+mispricing is *local*, a kink at one or two strikes, not a global tilt. But it does mean the
+remaining edge has to come from the smile's shape, not from disagreeing about centre or width.
+Worth Benny deciding explicitly whether that is the intended end state before any further vol
+work is commissioned.

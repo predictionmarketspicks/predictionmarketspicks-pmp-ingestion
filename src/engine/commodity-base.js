@@ -1596,6 +1596,11 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       generatedAt: now.toISOString(),
       hoursToClose: (closeMs - now.getTime()) / 3.6e6,
       strikeCount: filteredRows.length,
+      // True when this snapshot sits inside config.minSecondsToClose. The caller
+      // uses it to SKIP the primary upsert — see the note on the near_expiry flag
+      // below and in src/index.js.
+      nearExpiry,
+      secondsToClose,
       topEdge,
       topTier: finalTopTier,
       topTierInt: confidenceTierInt(finalTopTier),

@@ -425,7 +425,30 @@ async function runSnapshotOnceInner(state) {
       }
     }
 
-    const { count, tag } = await upsertCommodityEdgeRows(snap.rows);
+    // ⛔ INSIDE THE NEAR-EXPIRY WINDOW, DO NOT UPSERT THE PRIMARY TABLE.
+    //
+    // commodity_edge_signals upserts on (commodity, snapshot_date, event_ticker,
+    // strike) — one row per strike per event, last write wins. The engine
+    // rewrites the same strikes all hour, so a strike's FINAL write almost
+    // always lands inside the guard window. Writing a near_expiry row there
+    // overwrites the good mid-life row, and the board's `quality_flag IS NULL`
+    // filter then drops that strike PERMANENTLY — not for the 120s the guard was
+    // written for.
+    //
+    // Measured 2026-09-09 on KXBTCD-26SEP0916: 58 rows near_expiry at 0-17s to
+    // close, 1 clean row left, and /api/tools/bitcoin-edge down to a single edge.
+    // Skipping the write instead leaves the last non-degenerate state on the
+    // board, which is what the guard was for. The T -> 0 rows are still captured
+    // by commodity_edge_intraday below, which is the only record of them.
+    let count = 0;
+    let tag = 'skipped_near_expiry';
+    if (snap.meta.nearExpiry) {
+      console.log(
+        `[${config.commodity}] ${snap.meta.secondsToClose}s to close — primary upsert SKIPPED so the board keeps its last non-degenerate state (intraday history still written)`,
+      );
+    } else {
+      ({ count, tag } = await upsertCommodityEdgeRows(snap.rows));
+    }
     const top = snap.meta.topEdge;
     const topStr = top
       ? `top=${top.direction} $${top.strike.toFixed(2)} ${(top.edge_pp * 100).toFixed(1)}pp ${snap.meta.topTier}`

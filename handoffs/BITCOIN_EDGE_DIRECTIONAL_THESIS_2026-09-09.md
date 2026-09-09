@@ -1,6 +1,6 @@
 # Bitcoin Edge — the engine cannot express the product's thesis, and throws away the data that would
 
-**Status**: §5 step 1 (chain capture) SHIPPED 2026-09-09 — see §8. Steps 2-4 not started and need Benny's call.
+**Status**: §5 step 1 (chain capture) SHIPPED 2026-09-09 — see §8. **It immediately proved that open interest and volume are NOT flowing (§9), which blocks two of the four candidate signals and means dealer gamma has been silently dead since the Databento cutover.** Needs Benny's call before step 2.
 **Date**: 2026-09-09
 **Origin**: Benny, on being asked whether "the model reproduces the market's distribution" is the
 intended end state: *"the idea is to predict the path… call buying at higher strikes, or down if
@@ -162,3 +162,78 @@ unknown, not "nobody holds it"; bid/ask never carried). Full suite 44 files / 58
 2. ⚠️ **Nothing is captured until the engine runs.** Bitcoin only writes 13:00–19:00 UTC (the
    IBIT chain needs US equity hours), so the first real rows land on the next market open after
    deploy. An empty table before then is expected, not a failure.
+
+
+---
+
+## 9. Day-one finding: OI and volume are not in the feed (2026-09-09, first live captures)
+
+The capture went live at the 13:30 UTC market open and worked mechanically — 4 snapshots across
+bitcoin/silver/gold/oil, calls and puts paired at the same strikes, `iv` and `delta` populated on
+62 of 62 rows. **`open_interest` and `volume_24h` are NULL on every row of every snapshot.**
+
+```
+snapshot_at                      rows  with_vol  with_oi
+2026-09-09 13:34:25.381+00        62      0        0
+2026-09-09 13:39:12.705+00        76      0        0
+2026-09-09 13:39:13.453+00        89      0        0
+2026-09-09 13:39:13.478+00       349      0        0
+```
+
+Not cold-start — it is systematic, across all four commodities, and it is **documented in our own
+code** at `src/feeds/databento.js:171`:
+
+> *"Volume is the sidecar's 24h rolling sum; **OI is null in Phase 1 (OPRA OI lives on the daily
+> statistics schema — wire in Phase 2)**."*
+
+The live provider is Databento (`OPTIONS_PROVIDER` defaults to `databento`; `databento_ibit` is the
+connected feed). Phase 2 was never wired. Massive — the other provider behind the same switch —
+*does* carry `open_interest` and `day.volume` (`src/feeds/massive.js:142-143`).
+
+### 9.1 This also means dealer gamma has been dead, quietly, for months
+
+`computeDealerGamma` skips any contract with `openInterest == null || <= 0`, so with OI null it
+contributes nothing and returns `netDealerGamma = 0`, `gammaEnvironment = 'NEUTRAL'`. Measured
+across `commodity_gamma_snapshots`:
+
+| commodity | days | days with non-zero gamma |
+|---|---|---|
+| bitcoin | 78 | **3** |
+| gold | 85 | 16 |
+| oil | 86 | 18 |
+| silver | 86 | 17 |
+
+Bitcoin's gamma signal has been inert on 96% of days. The non-zero days are the pre-cutover Massive
+window. **This is a live bug independent of the directional work** — a signal that silently stopped
+producing information and has been feeding a constant NEUTRAL into the engine ever since.
+
+### 9.2 What survives, and what does not
+
+Revising §5 step 2 against what is actually in the feed:
+
+| candidate signal | needs | status |
+|---|---|---|
+| put/call **volume** imbalance above vs below spot | `volume_24h` | ⛔ **blocked** |
+| **ΔOI** by side and moneyness | `open_interest` | ⛔ **blocked** |
+| **risk reversal** (put IV − call IV at equidistant delta) | `iv` + `delta` per side | ✅ **available now** — verified: calls and puts pair at the same strike with both fields |
+| Pyth short-horizon momentum | already computed | ✅ available (currently multiplied by zero) |
+
+So the thesis is not dead — the skew leg is arguably the cleanest single directional read an
+options chain offers, and it is computable from what we are already capturing as of today. But the
+two *flow* signals Benny described most directly — "call buying at higher strikes", "put increase"
+— are exactly the two that are blocked.
+
+### 9.3 The decision
+
+1. **Wire Databento's daily statistics schema for OI** — the documented Phase 2. Fixes dealer gamma
+   as a side effect. OI is end-of-day, so it gives ΔOI as a daily signal, not intraday.
+2. **Or flip `OPTIONS_PROVIDER=massive`**, which carries both fields today — but the cutover to
+   Databento was presumably deliberate and its rationale is not recorded here. Do not flip it
+   without finding out why it moved.
+3. **Intraday volume needs its own answer either way.** The Databento comment claims the sidecar
+   supplies a 24h rolling sum; it is arriving null. That is worth one probe of the sidecar's
+   `/chain/<underlying>` payload before assuming a schema change is required.
+
+⚠️ **Do not start §5 step 2 on the blocked signals.** Building put/call imbalance against columns
+that are structurally null produces a signal that is all nulls and looks like "no edge" rather than
+"no data" — the same silent-failure shape as the gamma bug above.

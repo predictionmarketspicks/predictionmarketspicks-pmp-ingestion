@@ -36,6 +36,12 @@ export function upsertFreeAgents(rows) {
   return upsert('ext_free_agents', rows, 'season,player_id');
 }
 
+// Per-player availability, depth order and snap share (PFF roster). Keyed on the
+// VENDOR id — see the migration header for why persisting it is deliberate.
+export function upsertRosterStatus(rows) {
+  return upsert('ext_player_status', rows, 'season,week,pff_player_id');
+}
+
 export function upsertTeamDvoa(rows) {
   return upsert('ext_team_dvoa', rows, 'season,week,team');
 }
@@ -47,6 +53,7 @@ export const EXT_FEED_WRITERS = {
   'power-ranks': upsertPowerRanks,
   'free-agency': upsertFreeAgents,
   'dvoa-team': upsertTeamDvoa,
+  'roster-status': upsertRosterStatus,
 };
 
 // ── run-level heartbeat (F8) ────────────────────────────────────────────────

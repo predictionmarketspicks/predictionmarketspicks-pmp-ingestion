@@ -59,7 +59,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STAGING_DIR = path.resolve(__dirname, '..', 'data', 'ext-staging');
 
 function parseArgs(argv) {
-  const opts = { season: undefined, week: undefined, feeds: ['grades-team', 'grades-player'] };
+  const opts = { season: undefined, week: undefined, feeds: ['grades-team', 'grades-player', 'roster-status'] };
   for (const a of argv) {
     if (a.startsWith('--season=')) opts.season = Number(a.slice('--season='.length));
     else if (a.startsWith('--week=')) opts.week = Number(a.slice('--week='.length));
@@ -129,10 +129,26 @@ async function fetchAllTeamSlugs(season) {
   return (body.rows || []).map((r) => ({ slug: r.slug, abbreviation: r.abbreviation }));
 }
 
-// One call per team → { playerId: { height, weight, age, eligibilityYear } }.
-// 32 calls total, paced at ~4/sec to stay well under the 100/min budget.
-async function fetchBioByPlayerId(season, teams) {
+// ONE pass over the 32 team rosters, feeding BOTH consumers.
+//
+// ⛔ THE ROSTER ENDPOINT IGNORES `season` — it serves TODAY'S roster whatever you
+// pass. Measured 2026-09-09: the rows returned for season=2025 contain 2026
+// rookies (Carson Beck, Jalon Daniels, Haynes King). So the crosswalk must match
+// against the CURRENT season's nflverse roster, not the season in the URL —
+// matching 2025 names scored 84.1% on prop-eligible players, matching 2026
+// scored 99.6%. Getting this backwards degrades the join silently, all season.
+//
+// The roster endpoint carries bio (height/weight/birthDate) AND availability
+// (status/depthOrder/snapPct). Fetching it twice would double 32 calls against a
+// 100-reads/min budget that is shared ACROSS THE WHOLE ACCOUNT, not per key
+// (src/lib/pff-api.js header), so the two feeds share one pass.
+//
+// Returns { bio, roster } — `bio` keyed by playerId for the grades-player join,
+// `roster` a flat array of availability rows for the roster-status staging file.
+// 32 calls total, paced at ~4/sec.
+async function fetchRosters(season, teams) {
   const bio = new Map();
+  const roster = [];
   for (const t of teams) {
     try {
       const body = await pffGet(`/v2/nfl/teams/${t.slug}/roster?season=${season}`);
@@ -143,13 +159,33 @@ async function fetchBioByPlayerId(season, teams) {
           age: ageFromBirthDate(row.birthDate),
           eligibilityYear: row.eligibilityYear ?? null,
         });
+        roster.push({
+          // The vendor id, persisted deliberately — it is the join key the
+          // crosswalk resolves to a gsis id once, instead of name-matching on
+          // every run. First vendor id kept in an ext_* table; see the
+          // handoff for why that is the point.
+          pff_player_id: row.playerId != null ? String(row.playerId) : null,
+          name: row.name ?? null,
+          team: t.abbreviation ?? null,
+          position: row.position ?? null,
+          alignment: row.alignment ?? null,
+          unit: row.unit ?? null,
+          // ⚠️ depth ORDER (1,2,3…), not the nflverse "named starter" mark.
+          depth_order: row.depthOrder ?? null,
+          // active | out | questionable | … — normalised downstream, not here.
+          // ext-parse's "never guess" rule: pass the vendor's own word through.
+          status: row.status ?? null,
+          snap_pct: row.snapPct ?? null,
+          snap_counts: row.snapCounts ?? null,
+          jersey: row.jersey ?? null,
+        });
       }
     } catch (err) {
-      console.warn(`  [grades-player] roster fetch failed for ${t.slug}: ${err.message}`);
+      console.warn(`  [roster] fetch failed for ${t.slug}: ${err.message}`);
     }
     await sleep(250);
   }
-  return bio;
+  return { bio, roster };
 }
 
 async function captureGradesPlayer(season, week, bioByPlayerId) {
@@ -232,7 +268,15 @@ async function main() {
   // files are keyed/consumed as regular-season. Refuse rather than publish them.
   const week = opts.week ?? (await lastGradedRegWeek(opts.season));
   console.log(`[week] regular-season week=${week} (${opts.week != null ? 'explicit --week' : 'derived from /v1/games has_stats'})`);
-  if (week < 1) {
+  // ⛔ THE WEEK-0 REFUSAL IS A *GRADES* GUARD, NOT A BLANKET ONE. teams/overview
+  // and the facets aggregate a season, so before week 1 they return preseason
+  // and must not be written as REGPO. A roster snapshot has no such problem —
+  // today's roster is today's roster, and the week before kickoff is exactly
+  // when its injury designations matter most. So refuse only if a GRADES feed
+  // was asked for.
+  const gradesRequested =
+    opts.feeds.includes('grades-team') || opts.feeds.includes('grades-player');
+  if (week < 1 && gradesRequested) {
     console.error(
       `No regular-season week of season ${opts.season} is graded yet — the only data ` +
       `/v1/teams/overview and /v1/facet/*/summary would return is PRESEASON, which is ` +
@@ -245,11 +289,32 @@ async function main() {
     await captureGradesTeam(opts.season, week);
   }
 
-  if (opts.feeds.includes('grades-player')) {
-    console.log('[grades-player] fetching team rosters for bio (32 calls, paced)…');
+  // ONE roster pass serves both grades-player (bio) and roster-status
+  // (availability). Only fetch it if at least one of them was requested.
+  const wantsPlayer = opts.feeds.includes('grades-player');
+  const wantsRoster = opts.feeds.includes('roster-status');
+  if (wantsPlayer || wantsRoster) {
+    console.log('[roster] fetching 32 team rosters (paced, shared by grades-player + roster-status)…');
     const teams = await fetchAllTeamSlugs(opts.season);
-    const bio = await fetchBioByPlayerId(opts.season, teams);
-    await captureGradesPlayer(opts.season, week, bio);
+    const { bio, roster } = await fetchRosters(opts.season, teams);
+
+    if (wantsRoster) {
+      // ⚠️ A roster/status feed is WEEK-scoped even though the endpoint is not:
+      // PFF serves today's roster, so the row is only meaningful stamped with
+      // the week it was captured for. Same reasoning as grades-player.
+      const rows = roster
+        .filter((r) => r.pff_player_id && r.name)
+        .map((r) => ({ ...r, week }));
+      writeStaging('roster-status', opts.season, rows);
+      const byStatus = {};
+      for (const r of rows) {
+        const k = String(r.status ?? 'unknown').toLowerCase();
+        byStatus[k] = (byStatus[k] || 0) + 1;
+      }
+      console.log(`  [roster-status] status mix: ${JSON.stringify(byStatus)}`);
+    }
+
+    if (wantsPlayer) await captureGradesPlayer(opts.season, week, bio);
   }
 
   console.log('done.');

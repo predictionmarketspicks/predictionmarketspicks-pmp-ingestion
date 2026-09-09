@@ -1,0 +1,47 @@
+{
+  "season": 2026,
+  "rows": [
+    {
+      "pff_player_id": "98689",
+      "name": "Rhamondre Stevenson",
+      "team": "NE",
+      "position": "HB",
+      "alignment": "HB",
+      "unit": "offense",
+      "depth_order": 1,
+      "status": "active",
+      "snap_pct": null,
+      "snap_counts": null,
+      "jersey": "38",
+      "week": 0
+    },
+    {
+      "pff_player_id": "86392",
+      "name": "Corey Kiner",
+      "team": "NE",
+      "position": "HB",
+      "alignment": "HB",
+      "unit": "offense",
+      "depth_order": 2,
+      "status": "active",
+      "snap_pct": null,
+      "snap_counts": null,
+      "jersey": "9",
+      "week": 0
+    },
+    {
+      "pff_player_id": "145059",
+      "name": "TreVeyon Henderson",
+      "team": "NE",
+      "position": "HB",
+      "alignment": "HB",
+      "unit": "offense",
+      "depth_order": 3,
+      "status": "out",
+      "snap_pct": null,
+      "snap_counts": null,
+      "jersey": "32",
+      "week": 0
+    }
+  ]
+}

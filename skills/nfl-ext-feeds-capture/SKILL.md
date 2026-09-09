@@ -39,6 +39,17 @@ Keep the job narrow: **login check → capture 5 JSONs → dry-count → real in
 
 Run A catches the Sunday slate (incl. SNF), graded overnight. Run B catches **Monday Night Football** graded + early-week injury/roster/FA moves. (There is no separate "injuries" feed — injury impact shows up inside the grade/snap drops and the FA/roster moves.)
 
+**`roster-status` is a MOVING feed and is not covered by the frozen-season rule.** Grades for a
+finished season never change; a roster does — designations move every practice report, and the week
+before kickoff is when they matter most. It also has no preseason-contamination problem, so unlike
+the two grades feeds it is **not** blocked by the week-0 refusal in `capture-pff-api.js`: today's
+roster is today's roster. Capture it on every Run A/B, in-season, regardless of graded week.
+
+⛔ **The roster endpoint IGNORES its `season` parameter** — it serves TODAY's roster whatever you
+pass. Measured 2026-09-09: rows returned for `season=2025` contain 2026 rookies. Anything joining
+this feed to nflverse must match against the CURRENT season's roster (84.1% vs 99.6% on
+prop-eligible players — see `gridiron_edge/scripts/seed_pff_xwalk.py --roster-season`).
+
 **Since 2026-09-09, `grades-team` and `grades-player` no longer need the Chrome/login step** — they run via the PFF Developer API (§2b). Only `power-ranks`, `dvoa-team`, and `free-agency` still need Benny's logged-in Chrome session, so a run where Claude-in-Chrome access is unavailable (e.g. an unattended session with no one to approve a browser permission prompt) can still land 2 of the 4-5 feeds via the API alone — capture those, alert on the rest (§7), don't block the whole run on the browser being reachable.
 
 **The cron fires year-round; YOU apply the season gate first (NFL season = Sept–Jan):**
@@ -112,6 +123,7 @@ For each feed: open the URL in the logged-in Chrome, read the rendered table (`g
 |---|---|---|---|---|---|
 | **`grades-team`** → `grades-team.json` | **PFF Developer API** (§2b): `GET /v1/teams/overview` via `scripts/capture-pff-api.js` — was `premium.pff.com/nfl/teams/{SEASON}/REGPO` | `PFF_API_KEY` | **none** — set `"week_scope": "REGPO"` (one row/team, season-cumulative) | **32 rows** | team, pf, pa, record, overall, off, pass, pblk, recv, run, rblk, def, rdef, tack, prsh, cov, spec |
 | **`grades-player`** → `grades-player.json` | **PFF Developer API** (§2b): `GET /v1/facet/{passing,rushing,receiving,field_goal}/summary` + roster bio, via `scripts/capture-pff-api.js` — was *Premium Stats → By Position* pages | `PFF_API_KEY` | **`week`: N** (derived, see §2b) | **hundreds** (772 seen 2026-09-09, season 2026 wk4 — larger than the old 415-row curated scrape because the API returns every player with a snap, not a paginated top-N) | name, position, team, jersey, age, college†, draft_year, draft_round†, draft_pick†, height, weight, forty†, rs†, off, pass, run, recv, pblk, rblk, war†, war_rank†, snaps{}, extra{} (†=null via this path, see §2b) |
+| **`roster-status`** → `roster-status.json` | **PFF Developer API** (§2b): `GET /v2/nfl/teams/{slug}/roster` via `scripts/capture-pff-api.js` — shares ONE roster pass with `grades-player`, so it costs no extra calls | `PFF_API_KEY` | **`week`: N** (stamped at capture; the endpoint has no week of its own) | **~1,596 rows** (whole active-roster league-wide, not just skill positions) | pff_player_id, name, team, position, alignment, unit, depth_order, status, snap_pct, snap_counts, jersey |
 | **`power-ranks`** → `power-ranks.json` | `pff.com/betting/nfl-power-rankings` — **use the CSV export, not the rendered table** | **PFF premium** (logged out = top 10 only) | **`week`: N** (0 = preseason) | **32 rows** | team, point_spread_rating, qb_rating, sos_to_date, sos_remaining, sim_avg_wins, make_playoffs_pct, win_division_pct, win_conference_pct, win_super_bowl_pct |
 | **`dvoa-team`** → `dvoa-team.json` | `ftnfantasy.com/stats/nfl/team-total-dvoa` (Export) | FTN login | **`week`: N** | **32 rows** | team, tot_dvoa(+rank), non_adj_voa, wins, losses, last_year_rank, off_dvoa(+rank), def_dvoa(+rank), st_dvoa(+rank), off_voa, def_voa, st_voa, est_wins(+rank), wei_dvoa(+rank), sched_past(+rank), sched_future(+rank), variance(+rank) |
 | **`free-agency`** → `free-agency.json` (Run B / FA window only) | `pff.com/nfl/free-agency?season={FA_SEASON}` (all ~16 pages) | PFF login | **none** | variable | name, position, age, status, team_from, team_to, contract_avg_yr, contract_guaranteed, contract_total, contract_proj_avg_yr, war, war_rank, history[3 seasons] |

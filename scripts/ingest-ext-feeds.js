@@ -30,12 +30,14 @@
 
 import { fetchOnce as fetchTeamGrades } from '../src/feeds/grades-team.js';
 import { fetchOnce as fetchPlayerGrades } from '../src/feeds/grades-player.js';
+import { fetchOnce as fetchRosterStatus } from '../src/feeds/roster-status.js';
 import { fetchOnce as fetchPowerRanks } from '../src/feeds/power-ranks.js';
 import { fetchOnce as fetchFreeAgents } from '../src/feeds/free-agency.js';
 import { fetchOnce as fetchTeamDvoa } from '../src/feeds/dvoa-team.js';
 import {
   upsertTeamGrades,
   upsertPlayerGrades,
+  upsertRosterStatus,
   upsertPowerRanks,
   upsertFreeAgents,
   upsertTeamDvoa,
@@ -63,6 +65,7 @@ function stalenessOf(feed, maxAgeHours) {
 const FEEDS = {
   'grades-team': { fetch: fetchTeamGrades, upsert: upsertTeamGrades },
   'grades-player': { fetch: fetchPlayerGrades, upsert: upsertPlayerGrades },
+  'roster-status': { fetch: fetchRosterStatus, upsert: upsertRosterStatus },
   'power-ranks': { fetch: fetchPowerRanks, upsert: upsertPowerRanks },
   'free-agency': { fetch: fetchFreeAgents, upsert: upsertFreeAgents },
   'dvoa-team': { fetch: fetchTeamDvoa, upsert: upsertTeamDvoa },

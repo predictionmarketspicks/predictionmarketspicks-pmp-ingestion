@@ -1607,6 +1607,15 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       // on uncalibrated edges (§4.5 read literally would do exactly that).
       calibrationActive: isCalibrationActive(config.commodity),
       gamma,
+      // The raw per-contract chain, passed through for the append-only capture in
+      // index.js (BITCOIN_EDGE_DIRECTIONAL_THESIS_2026-09-09 §5 step 1). NOTE this
+      // is the chain AFTER the provider's delta (0.15-0.85) and quality filters,
+      // which is what the engine itself sees — so the far-OTM wings, where
+      // directional call buying tends to show up first, are already truncated.
+      // Widening the fetch is a separate (vendor-cost) decision; capturing what we
+      // already have costs nothing and is strictly better than discarding it.
+      chainContracts: chain.contracts,
+      underlyingEtf: config.underlyingEtf,
       fredDivergenceBp,
       fredObservationDate,
       divergenceWarning,

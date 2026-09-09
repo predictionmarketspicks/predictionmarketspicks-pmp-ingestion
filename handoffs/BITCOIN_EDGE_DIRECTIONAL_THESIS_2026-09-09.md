@@ -1,6 +1,6 @@
 # Bitcoin Edge — the engine cannot express the product's thesis, and throws away the data that would
 
-**Status**: Assessment. Nothing built. Needs Benny's call on scope before any code.
+**Status**: §5 step 1 (chain capture) SHIPPED 2026-09-09 — see §8. Steps 2-4 not started and need Benny's call.
 **Date**: 2026-09-09
 **Origin**: Benny, on being asked whether "the model reproduces the market's distribution" is the
 intended end state: *"the idea is to predict the path… call buying at higher strikes, or down if
@@ -108,4 +108,57 @@ Steps 2–4 are a research project of real size with no guaranteed payoff — fl
 prediction on a one-hour contract is a hard problem, and the honest prior is that most of the
 candidate signals in step 2 will not survive step 3.
 
-**Worth starting step 1 now regardless of whether 2–4 get commissioned?** That is the decision.
+**Worth starting step 1 now regardless of whether 2–4 get commissioned?** Benny said yes; shipped, see §8. Steps 2–4 remain an open decision.
+
+---
+
+## 8. Step 1 shipped (2026-09-09)
+
+**Table** `options_chain_snapshots` — live, RLS enabled, **zero policies** (verified:
+`relrowsecurity = true`, `policies = 0`). Migration mirrored at
+`prediction-marketspicks/supabase/migrations/20260909120000_options_chain_snapshots.sql`.
+Columns: `commodity, underlying, snapshot_at, underlying_price, expiry, strike, contract_type,
+iv, delta, open_interest, volume_24h`. **Bid/ask/mid are deliberately absent** — the most
+sensitive fields in the feed, and no directional signal needs them.
+
+**Containment** — `options_chain_snapshots` added to `EXT_TABLE_PATTERNS` in
+`lib/lint-strings.js`, so naming it anywhere under `app/`, `components/`, `lib/` or `content/`
+hard-fails the site build. **Verified the gate actually fires**: a probe file naming the table
+produced `lint:source-mask FAILED 1 hit [internal options-chain capture table]`, and the linter
+returned to green once removed. A containment rule that does not trip is worthless.
+
+**Writer** `insertOptionsChainSnapshot()` in `src/delivery/supabase.js`, called from the snapshot
+loop in `src/index.js`, throttled to one capture per commodity per 5 minutes
+(`CHAIN_CAPTURE_INTERVAL_MS`) — the same resolution as `commodity_edge_intraday`, which is what
+any join between the two will want. Passive: changes no decision, read by nothing, wrapped in
+try/catch, and the writer logs rather than throws.
+
+**End-to-end verified against the live table**, not just unit-tested — the writer swallows errors,
+so a wrong `onConflict` would have failed *silently*:
+
+```
+writer result:      {"ok":true,"count":2}   # 3 contracts in, zero-strike one dropped
+idempotency re-run: {"ok":true,"count":0}   # duplicate ignored
+cleanup_options_chain_snapshots() -> 2      # TTL works, probe rows removed
+```
+
+Probe rows were dated 2020-01-01 precisely so the 30-day TTL would reclaim them; it did, and the
+table is now empty and clean.
+
+**TTL** `cleanup_options_chain_snapshots()`, 30-day whole-day boundary, scheduled as pg_cron
+**jobid 172** `options-chain-snapshots-cleanup` at `40 5 * * *` (verified active).
+
+Tests: `test/delivery.options-chain-capture.test.js`, 5 cases (both sides kept at the same strike
+— the pair IS the signal; nulls passed through rather than written as 0, since a missing OI is
+unknown, not "nobody holds it"; bid/ask never carried). Full suite 44 files / 584 tests pass.
+
+### Two limits to know before building on this
+
+1. ⚠️ **The captured chain is already filtered.** The provider applies a delta filter of
+   0.15–0.85 plus quality filters *before* the engine ever sees it (`src/feeds/massive.js`), so
+   **the far-OTM wings — where directional call buying typically shows up first — are truncated.**
+   Capturing what we already hold costs nothing; widening the fetch is a separate vendor-cost
+   decision, and step 2 should decide it early rather than discover it late.
+2. ⚠️ **Nothing is captured until the engine runs.** Bitcoin only writes 13:00–19:00 UTC (the
+   IBIT chain needs US equity hours), so the first real rows land on the next market open after
+   deploy. An empty table before then is expected, not a failure.

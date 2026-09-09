@@ -677,3 +677,61 @@ export async function fetchUngradedFifteenMinWindows(commodity, { limit = 40 } =
   if (error) throw new Error(`fetch ungraded 15m windows: ${error.message}`);
   return data ?? [];
 }
+
+// Append-only options-chain capture.
+// Spec: handoffs/BITCOIN_EDGE_DIRECTIONAL_THESIS_2026-09-09.md §5 step 1.
+//
+// The engines already fetch a full per-contract chain every pass and use it for
+// exactly two things — one IV per strike for the smile, and one directionless
+// net-dealer-gamma number — then discard the rest. Every directional signal the
+// product wants lives in what gets discarded, and it cannot be reconstructed
+// later without buying historical OPRA. This keeps it.
+//
+// ⛔ OPRA-class, internal calculation only. The table is RLS service-role-only
+// with zero policies and is pre-banned from the site repo by lint:source-mask.
+// Only DERIVED signals may ever publish. Bid/ask are deliberately NOT captured.
+//
+// Failures are LOGGED, NEVER THROWN. This is a passive recorder that must never
+// be able to break an edge upsert or a Discord post — same posture as
+// upsertGammaSnapshot. ignoreDuplicates makes a re-run idempotent.
+export async function insertOptionsChainSnapshot({ commodity, underlying, snapshotAt, contracts }) {
+  if (!commodity || !underlying || !Array.isArray(contracts) || contracts.length === 0) {
+    return { ok: false, count: 0, reason: 'invalid_input' };
+  }
+  const at = snapshotAt instanceof Date ? snapshotAt.toISOString() : snapshotAt;
+  const rows = [];
+  for (const c of contracts) {
+    if (c?.strike == null || !(c.strike > 0)) continue;
+    if (c.contractType !== 'call' && c.contractType !== 'put') continue;
+    rows.push({
+      commodity,
+      underlying,
+      snapshot_at: at,
+      underlying_price: c.underlyingPrice ?? null,
+      // The chain's expirationDate is already a YYYY-MM-DD string.
+      expiry: c.expirationDate ?? null,
+      strike: c.strike,
+      contract_type: c.contractType,
+      iv: c.iv ?? null,
+      delta: c.delta ?? null,
+      // ⚠️ END-OF-DAY. Intraday flow lives in volume_24h, not here.
+      open_interest: c.openInterest ?? null,
+      volume_24h: c.volume24h ?? null,
+    });
+  }
+  if (rows.length === 0) return { ok: false, count: 0, reason: 'no_valid_contracts' };
+
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('options_chain_snapshots')
+    .upsert(rows, {
+      onConflict: 'commodity,snapshot_at,expiry,strike,contract_type',
+      ignoreDuplicates: true,
+    })
+    .select('id');
+  if (error) {
+    console.warn(`[options_chain_snapshots] insert failed for ${commodity}: ${error.message}`);
+    return { ok: false, count: 0, reason: error.message };
+  }
+  return { ok: true, count: data?.length ?? 0 };
+}

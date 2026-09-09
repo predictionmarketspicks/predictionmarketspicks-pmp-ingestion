@@ -34,6 +34,7 @@ import { EXPIRATION_BURST_WINDOW_MS, BTC_STRIKE_COUNT_WARN } from './engine/thre
 import {
   upsertCommodityEdgeRows,
   insertCommodityEdgeIntraday,
+  insertOptionsChainSnapshot,
   upsertGammaSnapshot,
   filterAlreadyPostedKeys,
   recordPostedAlerts,
@@ -118,6 +119,21 @@ import {
 // A commodity with no intradayMinIntervalMs is unthrottled — silver/gold/oil are
 // already at the target cadence, so nothing changes for them.
 const LAST_INTRADAY_WRITE_MS = new Map();
+
+// ── Options-chain capture throttle ───────────────────────────────────────────
+// Same reasoning as the intraday decimation above: bitcoin ticks at 15s and the
+// chain is ~50-80 contracts, so writing every tick would be ~250k rows/day for
+// no extra information — the chain simply does not move that fast, and open
+// interest only updates end-of-day. One capture per CHAIN_CAPTURE_INTERVAL_MS
+// per commodity lands it at the same 5-minute resolution as
+// commodity_edge_intraday, which is what any join between the two will want.
+const CHAIN_CAPTURE_INTERVAL_MS = 5 * 60 * 1000;
+const LAST_CHAIN_CAPTURE_MS = new Map();
+
+function chainCaptureDue(commodity) {
+  const last = LAST_CHAIN_CAPTURE_MS.get(commodity);
+  return last == null || Date.now() - last >= CHAIN_CAPTURE_INTERVAL_MS;
+}
 
 function intradayDue(config) {
   const minMs = config.intradayMinIntervalMs;
@@ -434,6 +450,28 @@ async function runSnapshotOnceInner(state) {
         console.log(`[${config.commodity}] intraday history: +${hist} rows (band ±${(band * 100).toFixed(0)}%, ${banded.length}/${snap.rows.length} strikes)`);
       } catch (err) {
         console.warn(`[${config.commodity}] intraday history write failed: ${err?.message || err}`);
+      }
+    }
+
+    // Options-chain capture (BITCOIN_EDGE_DIRECTIONAL_THESIS_2026-09-09 §5 step 1).
+    // Passive recorder: it changes no decision, is read by nothing today, and
+    // exists so the directional work has flow history to test against later.
+    // Isolated in try/catch and the writer never throws — a capture outage must
+    // not be able to touch the primary upsert or Discord.
+    if (snap.meta.chainContracts?.length && chainCaptureDue(config.commodity)) {
+      try {
+        const cap = await insertOptionsChainSnapshot({
+          commodity: config.commodity,
+          underlying: snap.meta.underlyingEtf,
+          snapshotAt: snap.meta.generatedAt,
+          contracts: snap.meta.chainContracts,
+        });
+        LAST_CHAIN_CAPTURE_MS.set(config.commodity, Date.now());
+        if (cap.ok) {
+          console.log(`[${config.commodity}] chain capture: +${cap.count} contracts (${snap.meta.underlyingEtf})`);
+        }
+      } catch (err) {
+        console.warn(`[${config.commodity}] chain capture failed: ${err?.message || err}`);
       }
     }
 

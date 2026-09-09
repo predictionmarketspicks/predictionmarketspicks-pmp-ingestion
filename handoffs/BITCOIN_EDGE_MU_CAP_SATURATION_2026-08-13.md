@@ -1,9 +1,10 @@
 # Bitcoin Edge — the drift cap IS the model: mu pinned at ±12/yr displaces the whole CDF
 
 **Status**: §4.1 SHIPPED + DEPLOYED `49113ed` (2026-08-13) — centre fixed as predicted.
-**§7.4 #1 (band union) and #2 (near-expiry guard) SHIPPED 2026-09-09 — see §9, which is the
-current state of this doc.** §7.4 #3 (persist intraday ladders) and #4 / §4.2 (the 1.64× width
-error) remain open and are now the binding problem. §4.3 stays blocked behind them.
+**§7.4 #1 (band union) and #2 (near-expiry guard) SHIPPED 2026-09-09. §7.4 #3 was ALREADY DONE
+and this doc did not know it. §7.2's central claim is WRONG — it read an upsert-keyed
+current-state table as a time series. See §10, which supersedes §7.2 and §7.4 #3.**
+The 1.64× width error (§4.2 / §7.4 #4) is the only binding item left. §4.3 stays blocked behind it.
 §5 loose thread RESOLVED — not a bug. §7 is the 2026-08-13 measurement that motivated §9.
 **Date**: 2026-08-13
 **Files implicated**: `src/engine/thresholds.js` (`BTC_MU_SCALE`, `BTC_MU_CAP_ANNUAL`), `src/engine/commodity-base.js` (`resolveTwapMu`, ~L800), `src/engine/short-horizon-vol.js`
@@ -403,3 +404,79 @@ band edges, and degenerate inputs. Full suite: **43 files / 579 tests pass**.
 - ⚠️ **The §6 three-snapshot acceptance test has NOT been re-run** against these changes. What is
   verified here is the predicate (unit tests) and that both defects were live at the measured
   rates above — not that the board's shape improved. Re-run §6 after deploy.
+
+
+---
+
+# §10. §7.2 measured the wrong table, and §7.4 #3 was already built (2026-09-09, Claude Code)
+
+This section supersedes §7.2's interpretation and §7.4 item 3. The row counts in §7.2 are real;
+what they mean is not what the doc says.
+
+## 10.1 `commodity_edge_signals` is a CURRENT-STATE table, not a time series
+
+```js
+.upsert(stamped, { onConflict: 'commodity,snapshot_date,event_ticker,strike' })   // supabase.js:82
+```
+
+One row per (commodity, day, event, strike), **updated in place all day**. `snapshot_at` is the
+timestamp of the LAST write. For an hourly contract the last write is, necessarily, just before
+close. So "99.98% of persisted history is the final seconds before close" is not a persistence
+defect — **it is what an upsert-keyed table looks like by construction.** There was never a
+missing time series here; this table was never one.
+
+`fit-btc-calibration.js` already says so in a comment at line 193: *"unlike
+commodity_edge_signals, whose rows are updated in place all day and decay to NO_EDGE."*
+
+## 10.2 So "these are what the backtest sees" is false
+
+§7.2 concludes the T→0 artifacts "are what the backtest sees." They are not.
+`fit-btc-calibration.js` fits on **`tool_picks` + `tool_settles`** — the model probability and the
+market price **frozen at the moment the pick was published**, joined to the settled outcome. Those
+rows are immutable and are nowhere near expiry. No calibration study was fit on the final-minute
+slice.
+
+⚠️ **I repeated this false claim** in commit `f947214`'s message and in §9.3 above ("it is also
+every calibration study fit to date"). It is wrong, it came from this doc, and I did not check it
+before propagating it — I verified §7.2's row counts and accepted its interpretation. The counts
+are right; the conclusion drawn from them is not.
+
+## 10.3 §7.4 #3 — intraday ladders are already persisted, and have been since 2026-09-01
+
+`commodity_edge_intraday` is a separate append-only table, and bitcoin was wired into it
+(`commodities.js:397-399`: `intradayHistory: true`, `intradayBandPct: 0.03`,
+`intradayMinIntervalMs: 5 * 60 * 1000` — throttled to 5 min so BTC's 15s cadence doesn't write
+20× the other commodities' row rate and evict them from the shared prune).
+
+Measured 2026-09-09 — **57,219 bitcoin rows across 378 snapshots, 2026-09-01 → 2026-09-08**, and
+the horizon spread is the *opposite* of §7.2's picture:
+
+| time to close | rows | snapshots |
+|---|---|---|
+| < 1 min | 1,099 | 7 |
+| 1–5 min | 4,197 | 28 |
+| 5–15 min | 10,403 | 69 |
+| 15–30 min | 14,822 | 98 |
+| **> 30 min** | **26,698** | **176** |
+
+Only 1.9% of it is the sub-minute slice. Roughly half sits beyond 30 minutes to close. **This is
+exactly the history §7.4 #3 asks for, at the horizons the tool actually trades.** Item 3 is done;
+it just landed after this doc was written (data begins 2026-09-01, doc is 2026-08-13).
+
+**Query `commodity_edge_intraday` for anything time-series. Query `commodity_edge_signals` only
+for "what does the board show right now."**
+
+## 10.4 The near-expiry guard still stands, but for the display reason only
+
+§9.3 remains correct as an action: at T → 0 the CDF is degenerate and those edges must never be
+shown or traded. What changes is the *justification* — it is not protecting the backtest (10.2),
+it is protecting the board.
+
+⚠️ **Behavioural consequence, not yet observed in production.** `lib/tools/bitcoin-edge.ts:229`
+filters `quality_flag IS NULL`, and because the table is upsert-in-place, the final-120s write
+**overwrites** each strike's clean earlier state. So for roughly the last two minutes of every
+hourly event the board has no unflagged rows for the current event and will fall back or render
+the empty state. That is the intended behaviour — those two minutes were printing −54.9pp and
+−67.6pp artifacts — but it is a visible change and Benny should confirm he wants the board dark
+there rather than showing a "settling" state. **Verify on the first live hour; it has not been
+seen yet** (the engine has not run since deploy — bitcoin writes 13:00–19:00 UTC).

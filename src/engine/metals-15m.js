@@ -37,7 +37,7 @@
 // Spec: prediction-marketspicks/handoffs/GOLD_SILVER_15M_EDGE_2026-08-05.md
 
 import { getPrice, WTI_FRONT_MONTH_SYMBOL } from '../feeds/pyth.js';
-import { getShortHorizonStats } from './short-horizon-vol.js';
+import { getShortHorizonStats, bufferStats } from './short-horizon-vol.js';
 import { normCdf } from './options.js';
 import {
   upsertWidgetPayloads,
@@ -346,11 +346,38 @@ export function buildPayload(cfg, { markets, spot, stats, now = Date.now() }) {
   // consumer read a fair value computed on a CEILING as a measurement. The
   // clamp is a sanity rail, not an estimate; a surface that cannot tell the
   // difference is asserting a confidence it does not have.
-  const sigmaClamped = typeof sigmaSource === 'string' && sigmaSource.startsWith('clamped_');
+  // ⛔ ONLY THE SIGMA RAILS COUNT — NOT THE DRIFT ONE.
+  //
+  // short-horizon-vol reports four clamp sources and they do not mean the same
+  // thing here. `clamped_high`/`clamped_low` pin SIGMA, which is the number
+  // this engine actually prices with. `clamped_mu_high`/`clamped_mu_low` pin
+  // MU, and short-horizon-vol's own comment says MU_CAP is "~30x too tight for
+  // intra-hour momentum" and hands consumers `mu_annual_raw` instead — so a mu
+  // clamp is both EXPECTED and irrelevant to metals-15m, which passes only
+  // sigmaAnnual to fairYes and never reads mu at all.
+  //
+  // Caught in production 2026-09-10 by the very field this commit added: a
+  // first pass matched `clamped_` as a prefix and demoted gold and silver to
+  // 'sigma_clamped' while their sigmas were a healthy 0.146 and 0.184. Flagging
+  // a good estimate is the same class of error as not flagging a bad one.
+  const sigmaClamped = sigmaSource === 'clamped_high' || sigmaSource === 'clamped_low';
+
+  // ⛔ 'warming' MUST MEAN WARMING. The public page told readers the estimate was
+  // "still filling after an engine restart — usually within about five minutes"
+  // while it had been null for ~9.7 HOURS with no restart (2026-09-10). A
+  // warm-up message over a stalled engine is a lie the reader cannot check, and
+  // it is the opposite of what this site sells.
+  //
+  // The engine can tell the two apart and the page cannot: a buffer BELOW
+  // MIN_TICKS_FOR_RV is genuinely filling; a buffer at or above it that still
+  // yields no sigma is stalled — the estimate is being rejected, not awaited.
+  const buf = bufferStats()[cfg.commodity] ?? null;
+  const genuinelyFilling = buf === null || buf.belowMinTicks === true;
+
   let quality = 'ok';
   if (strike === null) quality = 'no_strike';
   else if (spotPrice === null || !spotFresh) quality = 'stale_spot';
-  else if (sigma === null) quality = 'warming';
+  else if (sigma === null) quality = genuinelyFilling ? 'warming' : 'sigma_unavailable';
   else if (sigmaClamped) quality = 'sigma_clamped';
 
   return {
@@ -380,6 +407,10 @@ export function buildPayload(cfg, { markets, spot, stats, now = Date.now() }) {
       // Which rail, if any, the estimate is sitting on — 'pyth_short_horizon'
       // when it is a real measurement. Consumers must be able to tell.
       sigma_source: sigmaSource,
+      // Buffer depth, so a consumer can say WHY there is no estimate rather
+      // than guessing at a duration it cannot see.
+      sigma_ticks: buf?.nTicks ?? null,
+      sigma_ticks_required: buf?.minTicksForRv ?? null,
       fair_yes: fair,
       book: {
         yes_bid: bid,

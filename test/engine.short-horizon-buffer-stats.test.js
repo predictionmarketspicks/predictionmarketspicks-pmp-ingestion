@@ -53,3 +53,29 @@ describe('bufferStats', () => {
     expect(Object.keys(bufferStats(now)).sort()).toEqual(['gold', 'wti']);
   });
 });
+
+/**
+ * The clamp taxonomy. Caught in production on 2026-09-10: a first pass matched
+ * `clamped_` as a prefix, which swept in the DRIFT clamp and demoted gold and
+ * silver while their sigmas were a healthy 0.146 and 0.184.
+ */
+describe('only sigma rails demote quality', () => {
+  const isSigmaClamp = (src) => src === 'clamped_high' || src === 'clamped_low';
+
+  it('the two sigma rails count', () => {
+    expect(isSigmaClamp('clamped_high')).toBe(true);
+    expect(isSigmaClamp('clamped_low')).toBe(true);
+  });
+
+  it('⛔ the DRIFT rails do not — metals-15m never reads mu', () => {
+    // short-horizon-vol documents MU_CAP as ~30x too tight for intra-hour use
+    // and hands consumers mu_annual_raw. A mu clamp here is expected noise.
+    expect(isSigmaClamp('clamped_mu_high')).toBe(false);
+    expect(isSigmaClamp('clamped_mu_low')).toBe(false);
+  });
+
+  it('a real measurement is not a clamp', () => {
+    expect(isSigmaClamp('pyth_short_horizon')).toBe(false);
+    expect(isSigmaClamp(null)).toBe(false);
+  });
+});

@@ -98,6 +98,13 @@ QUEUE_DRAIN_IDLE_SLEEP_S = 0.001
 # Databento from flagging us as a slow client. Tunable via DATABENTO_DECIMATE_MS.
 QUOTE_MIN_INTERVAL_NS = int(os.environ.get("DATABENTO_DECIMATE_MS", "500")) * 1_000_000
 
+# The only record types the drop/decimate filters may touch. Both are a
+# continuous stream where thinning costs nothing but latency. Every other type —
+# StatMsg (open interest), InstrumentDefMsg (strikes), SymbolMappingMsg — is
+# once-per-instrument-per-session data with no retry, and must always pass.
+# Lower-cased to match the worker's own SDK-rename-proof comparison.
+_THROTTLED_RTYPES = frozenset({"cmbp1msg", "trademsg"})
+
 
 # --- logging -----------------------------------------------------------
 
@@ -235,6 +242,32 @@ def on_record(record: Any) -> None:
         # filters and land in the worker for handling.
         _record_queue.put(record)
         return
+
+    # ⛔ THE TWO FILTERS BELOW EXIST TO THROTTLE THE QUOTE FIREHOSE, AND THEY
+    # USED TO BE RECORD-TYPE-BLIND. Everything carrying an instrument_id went
+    # through them — including StatMsg, which is how OPEN INTEREST arrives, and
+    # InstrumentDefMsg, which is how strikes arrive. Both are ONCE PER INSTRUMENT
+    # PER SESSION: there is no retry, so a single drop loses that value for the
+    # whole day.
+    #
+    # The damage was invisible and it was real. Dealer gamma weights every strike
+    # by open interest, so an instrument whose OI print was dropped contributed
+    # nothing; with enough of them the net summed to exactly 0 and the engine
+    # published "NEUTRAL" — a fabricated reading, on four public tool pages,
+    # bitcoin on 77 of 78 days. Measured on the live sidecar 2026-09-10:
+    # stats=17,323 received, oi_updates=0, callback_dropped=1,416,953,
+    # decimated=199,230.
+    #
+    # Whether a given OI print survived came down to whether a quote for the same
+    # instrument happened to land within the preceding DATABENTO_DECIMATE_MS
+    # (500 ms) — which is exactly the coin-flip that produced gamma working on
+    # some sessions and not others.
+    #
+    # Quotes and trades are a stream and may be thinned. Nothing else may.
+    if type(record).__name__.lower() not in _THROTTLED_RTYPES:
+        _record_queue.put(record)
+        return
+
     if iid in _drop_instrument:
         _counters["callback_dropped"] += 1
         return

@@ -33,7 +33,45 @@ const COMMODITIES_TO_CHECK = (process.env.SOAK_COMMODITIES || 'silver,gold,oil,b
   .filter(Boolean);
 
 const IV_HARD_CAP = 3.0;
-const MIN_SNAPSHOTS_PER_DAY = 4;
+
+/**
+ * Minimum distinct `snapshot_at` per UTC day, PER COMMODITY.
+ *
+ * ⛔ THIS USED TO BE A FLAT 4 AND IT WAS UNMEETABLE. It was fitted to bitcoin's
+ * intraday cadence and then applied to all four engines. Measured over 90 days
+ * of `commodity_edge_signals` (2026-09-10, 61-62 days each):
+ *
+ *     commodity  min  mean  max      what the engine actually does
+ *     bitcoin     14  28.8   61      intraday, hourly settles
+ *     oil          1   2.0    3      twice daily (1 on 2 of 90 days)
+ *     gold         1   1.0    1      once, near the 20:00 UTC close
+ *     silver       1   1.0    1      once, near the 20:00 UTC close
+ *
+ * Gold and silver have NEVER written more than once in a day. A floor of 4 meant
+ * they could not pass, ever — which is most of why this workflow failed 84 of 85
+ * scheduled runs.
+ *
+ * ⚠️ OIL IS 1, NOT 2. The handoff proposing this fix suggested 2, from a 7-date
+ * sample. Over 90 days oil writes once on 2 days, so a floor of 2 would keep
+ * failing intermittently — the exact failure mode being removed.
+ *
+ * ⛔ THIS CRITERION ANSWERS "DID THE ENGINE STOP WRITING", WHICH MEANS ZERO. It
+ * deliberately does NOT try to catch a cadence DROP (oil going 2 → 1, bitcoin
+ * 28 → 14). That is a real question and a different one; conflating them is what
+ * produced a threshold nobody could meet. bitcoin's 8 sits well under its
+ * observed floor of 14 for the same reason.
+ */
+const MIN_SNAPSHOTS_PER_DAY_DEFAULT = 1;
+const MIN_SNAPSHOTS_PER_DAY = {
+  bitcoin: 8,
+  oil: 1,
+  gold: 1,
+  silver: 1,
+};
+
+export function minSnapshotsPerDay(commodity) {
+  return MIN_SNAPSHOTS_PER_DAY[commodity] ?? MIN_SNAPSHOTS_PER_DAY_DEFAULT;
+}
 // Smile must show ≥ 0.5% relative spread (STDDEV_POP(iv) / AVG(iv) > 0.005).
 // 14-day data (2026-05-15) showed every commodity's p50 ratio comfortably
 // above this — gold 0.0154, oil 0.0182, silver 0.0345 — while every
@@ -55,13 +93,70 @@ const BOT_LOGS_CHANNEL_ID = '1487857846111567952';
 // sustained means kalshi or the chain is broken — those should fail soak.
 // Anything not in either set falls through to ceiling=0 (any sighting fails);
 // new flag names added to the engine should be added here explicitly.
-const EXPECTED_FLAGS = new Set(['cold_buffer', 'twap_settle_window']);
+/**
+ * ⛔ A HARD-SUPPRESSED FLAG IS THE ENGINE WORKING, NOT FAILING.
+ *
+ * `edge_implausible` and `near_expiry` are in the engine's HARD_SUPPRESS_FLAGS:
+ * the row is forced non-actionable ON PURPOSE and never reaches a public
+ * surface. Soak was reading both as failures because they were in neither set
+ * here, which defaults to ceiling 0. That cost 84 of 85 scheduled runs.
+ *
+ * `near_expiry` additionally has its own dedicated guard in the PMP repo
+ * (.github/workflows/bitcoin-near-expiry-guard.yml), which asserts the far
+ * sharper invariant that such a row must never be WRITTEN. Failing soak on it
+ * too is double-alarming on something already watched better elsewhere.
+ */
+const EXPECTED_FLAGS = new Set([
+  'cold_buffer',
+  'twap_settle_window',
+  'edge_implausible',
+  'near_expiry',
+]);
+
+/**
+ * Per-flag daily ceilings, PER COMMODITY where the engines genuinely differ.
+ *
+ * ⛔ ONE GLOBAL CEILING COULD NOT SERVE BOTH FAMILIES, and that is why 50 was
+ * wrong in two directions at once. Measured over 90 days (2026-09-10):
+ *
+ *     kalshi_no_book/day   mean   p95   max
+ *     bitcoin               201   254   281      <- 50 failed on ~every day
+ *     silver                 10    15    19      <- 50 = a 2.6x rise before it fires
+ *     gold                    7    16    17
+ *     oil                     4    12    15
+ *
+ * bitcoin quotes far-out strikes on an intraday cadence and a few hundred
+ * no-book rows a day is its normal shape; the daily metals quote a handful.
+ *
+ * ⚠️ FITTED ON 90 DAYS, DELIBERATELY NOT ON THE RECENT WINDOW. Oil's
+ * `edge_implausible` hit 21 on 2026-09-10 against a trailing baseline of 0-1 —
+ * that is the Iran war moving the tape, i.e. the guard doing its job in a
+ * violent regime, not evidence it is miscalibrated. Tuning to a fortnight that
+ * contains a war bakes the war into the threshold.
+ *
+ * Ceilings sit above the 90-day MAX rather than at p95: this criterion is meant
+ * to catch a sustained break, and a check that fires on the worst ordinary day
+ * in a quarter is the thing being fixed, not the fix.
+ */
 const UNEXPECTED_FLAG_CEILINGS = {
-  kalshi_no_book:              50,
+  kalshi_no_book:              40,
+  kalshi_stale:                25,
   kalshi_stale_divergence:     25,
   kalshi_thin_book_large_edge: 25,
   smile_kalshi_diverged:       10,
 };
+const CEILING_OVERRIDES = {
+  bitcoin: { kalshi_no_book: 300 },
+};
+
+// Exported for the vocabulary test — it must read the SAME objects the checker
+// uses, not a copy, or the test drifts from the thing it is guarding.
+export const EXPECTED_FLAGS_FOR_TEST = EXPECTED_FLAGS;
+export const CEILINGS_FOR_TEST = UNEXPECTED_FLAG_CEILINGS;
+
+export function ceilingsFor(commodity) {
+  return { ...UNEXPECTED_FLAG_CEILINGS, ...(CEILING_OVERRIDES[commodity] ?? {}) };
+}
 
 export function minSmileRatio(commodity) {
   return MIN_SMILE_RATIO_OVERRIDES[commodity] ?? MIN_SMILE_RATIO_DEFAULT;
@@ -162,8 +257,9 @@ async function checkCommodity(client, commodity, snapshotDate) {
       }
     }
   }
-  if (seenSnaps.size < MIN_SNAPSHOTS_PER_DAY) {
-    failures.push(`snapshots=${seenSnaps.size} < ${MIN_SNAPSHOTS_PER_DAY}`);
+  const minSnaps = minSnapshotsPerDay(commodity);
+  if (seenSnaps.size < minSnaps) {
+    failures.push(`snapshots=${seenSnaps.size} < ${minSnaps}`);
   }
   if (firstSpotSource === 'prev_close_bridge') {
     failures.push(`first_snapshot_used_prev_close_bridge at ${firstSnapAt}`);
@@ -185,7 +281,7 @@ async function checkCommodity(client, commodity, snapshotDate) {
     for (const r of flagRows || []) {
       flagCounts[r.quality_flag] = (flagCounts[r.quality_flag] || 0) + 1;
     }
-    for (const v of classifyFlagCounts(flagCounts)) {
+    for (const v of classifyFlagCounts(flagCounts, { ceilings: ceilingsFor(commodity) })) {
       failures.push(`${v.flag}=${v.count} > ${v.ceiling}`);
     }
   }

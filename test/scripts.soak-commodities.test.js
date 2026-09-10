@@ -110,14 +110,20 @@ describe('classifyFlagCounts', () => {
     expect(classifyFlagCounts({ cold_buffer: 30, twap_settle_window: 800 })).toEqual([]);
   });
 
-  it('fails kalshi_no_book above ceiling 50', () => {
-    const v = classifyFlagCounts({ kalshi_no_book: 51 });
+  // ⚠️ The default kalshi_no_book ceiling moved 50 -> 40 on 2026-09-10, and
+  // bitcoin got its own override of 300. 50 was fitted on 14 days of May data
+  // and was wrong in BOTH directions: measured over 90 days, bitcoin runs a mean
+  // of 201/day (max 281) so it failed on effectively every day, while gold/oil/
+  // silver run 4-10/day so 50 meant a 5x rise before the check could fire.
+  // Per-commodity assertions live in test/soak.flag-vocabulary.test.js.
+  it('fails kalshi_no_book above the default ceiling', () => {
+    const v = classifyFlagCounts({ kalshi_no_book: 41 });
     expect(v).toHaveLength(1);
-    expect(v[0]).toMatchObject({ flag: 'kalshi_no_book', count: 51, ceiling: 50 });
+    expect(v[0]).toMatchObject({ flag: 'kalshi_no_book', count: 41, ceiling: 40 });
   });
 
-  it('passes kalshi_no_book at exactly 50 (ceiling is inclusive of equal counts)', () => {
-    expect(classifyFlagCounts({ kalshi_no_book: 50 })).toEqual([]);
+  it('passes kalshi_no_book at exactly the ceiling (inclusive of equal counts)', () => {
+    expect(classifyFlagCounts({ kalshi_no_book: 40 })).toEqual([]);
   });
 
   it('fails smile_kalshi_diverged at low volume (ceiling 10)', () => {

@@ -73,6 +73,33 @@ import { getActiveSettleContract } from '../feeds/kalshi-series.js';
 import { isOptionsMarketOpen } from '../feeds/massive.js';
 import { recordGuardRejection, recordGuardOk } from '../observability/health.js';
 
+/**
+ * Flags that force a non-actionable row regardless of which guard set them, so
+ * any downstream consumer that doesn't filter quality_flag still sees PASS/skip
+ * rather than a phantom BUY (the tool_picks feed reads engine output directly).
+ * Applied per-row just before push.
+ *
+ * ⛔ EXPORTED BECAUSE THE SOAK MUST NOT KEEP ITS OWN COPY. scripts/soak-commodities.js
+ * classifies every flag it sees, and anything it does not recognise gets
+ * ceiling 0 — any sighting fails. That is how a WORKING guard became a soak
+ * failure twice: `edge_implausible` (added after the soak was written) and
+ * `near_expiry` (2026-09-09, 450 bitcoin rows). The soak had failed 84 of 85
+ * scheduled runs, which is how 84 red runs stopped meaning anything.
+ *
+ * A new flag added here now reaches the soak automatically, and
+ * `tests/soak-flag-vocabulary.test.js` fails if one is ever added here without
+ * a soak classification.
+ */
+export const HARD_SUPPRESS_FLAGS = new Set([
+  'kalshi_no_book',
+  'kalshi_stale',
+  'edge_implausible',
+  'kalshi_stale_divergence',
+  'kalshi_thin_book_large_edge',
+  'twap_settle_window',
+  'near_expiry',
+]);
+
 // Kalshi-side suppression thresholds (2026-05-21 unified bitcoin-edge fix).
 // Stale-print divergence: when classifyKalshiView returns 'stale_print' AND
 // the live options-implied prob disagrees with the Kalshi side by more than
@@ -861,19 +888,8 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     );
   }
 
-  // Flags that force a non-actionable row regardless of which guard set them,
-  // so any downstream consumer that doesn't filter quality_flag still sees
-  // PASS/skip rather than a phantom BUY (the tool_picks feed reads engine
-  // output directly). Applied per-row just before push.
-  const HARD_SUPPRESS_FLAGS = new Set([
-    'kalshi_no_book',
-    'kalshi_stale',
-    'edge_implausible',
-    'kalshi_stale_divergence',
-    'kalshi_thin_book_large_edge',
-    'twap_settle_window',
-    'near_expiry',
-  ]);
+  // Hoisted to module scope (2026-09-10) so the soak can IMPORT this vocabulary
+  // instead of keeping a hand-maintained copy. See HARD_SUPPRESS_FLAGS below.
 
   // Seconds to close is constant across the strikes of an event, so compute it
   // once. Bitcoin-only via config.minSecondsToClose; the daily commodities have

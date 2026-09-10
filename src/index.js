@@ -503,18 +503,49 @@ async function runSnapshotOnceInner(state) {
     // so a gamma write outage cannot block edge upserts or Discord posts.
     if (snap.meta.gamma) {
       const g = snap.meta.gamma;
-      const gammaResult = await upsertGammaSnapshot({
-        commodity: config.commodity,
-        etfSpot: snap.meta.etfPrice,
-        netDealerGamma: g.netDealerGamma,
-        gammaNeutralPrice: g.gammaNeutralPrice,
-        gammaEnvironment: g.gammaEnvironment,
-        signalModifier: g.signalModifier,
-      });
-      if (gammaResult.ok) {
-        console.log(
-          `[${config.commodity}] gamma: ${g.gammaEnvironment} mod=${g.signalModifier} net=${g.netDealerGamma.toExponential(2)} neutral=$${g.gammaNeutralPrice.toFixed(2)} strikes=${g.strikesContributing}`,
+      // ⛔ NO CONTRIBUTING STRIKES MEANS WE CANNOT COMPUTE DEALER GAMMA — SO DO
+      // NOT WRITE A ROW SAYING WE DID.
+      //
+      // computeDealerGamma weights each strike by open interest and skips any
+      // contract with OI null or <= 0. Databento Phase 1 (the cmbp-1 OPRA
+      // schema) carries no OI at all, so every contract is skipped, the net is
+      // 0, and classify() returns NEUTRAL — indistinguishable from a genuine
+      // balanced book. Measured 2026-09-10: 0 rows with OI > 0 across all four
+      // commodities in options_chain_snapshots, and bitcoin NEUTRAL on 77 of 78
+      // days in commodity_gamma_snapshots.
+      //
+      // That fabricated NEUTRAL reached four PUBLIC tool pages through
+      // GammaBadge. lib/tools/gamma-snapshot.ts already documents the intended
+      // contract — "Returns null when no row exists yet (pre-Phase E or
+      // empty-OI day). Tool pages should treat null as no regime data — don't
+      // render the badge" — and this writer was the reason it never held.
+      //
+      // A genuine net-zero across contributing strikes is still NEUTRAL and
+      // still written. Only "nothing contributed" is withheld.
+      //
+      // ⚠️ if/else, NOT an early `return` — Discord and the ISR revalidate run
+      // below in this same block, and skipping the gamma write must never skip
+      // those.
+      if (!(g.strikesContributing > 0)) {
+        console.warn(
+          `[${config.commodity}] gamma: NOT WRITTEN — 0 contributing strikes (no open interest in the chain). ` +
+          'Dealer gamma is uncomputable without OI; a NEUTRAL row here would be fabricated. ' +
+          'Restore OI (Databento daily statistics schema, or OPTIONS_PROVIDER) to bring this back.',
         );
+      } else {
+        const gammaResult = await upsertGammaSnapshot({
+          commodity: config.commodity,
+          etfSpot: snap.meta.etfPrice,
+          netDealerGamma: g.netDealerGamma,
+          gammaNeutralPrice: g.gammaNeutralPrice,
+          gammaEnvironment: g.gammaEnvironment,
+          signalModifier: g.signalModifier,
+        });
+        if (gammaResult.ok) {
+          console.log(
+            `[${config.commodity}] gamma: ${g.gammaEnvironment} mod=${g.signalModifier} net=${g.netDealerGamma.toExponential(2)} neutral=$${g.gammaNeutralPrice.toFixed(2)} strikes=${g.strikesContributing}`,
+          );
+        }
       }
     }
 

@@ -63,11 +63,16 @@ function classify(netGamma) {
 //   { netDealerGamma, gammaNeutralPrice, gammaEnvironment, signalModifier,
 //     strikesContributing }.
 //
-// Failure modes:
+// Failure modes — and ⛔ THE CALLER MUST CHECK `strikesContributing`:
 //   - Empty / zero-OI chain → NEUTRAL with net=0, neutral=etfSpot, contrib=0.
 //   - Missing IVs at every strike → same outcome.
-// Either way the output is safe to upsert; downstream readers already cope
-// with NEUTRAL via fallback paths.
+// This header used to end "either way the output is safe to upsert; downstream
+// readers already cope with NEUTRAL via fallback paths." That was wrong, and it
+// is how a fabricated reading reached four public tool pages. NEUTRAL from an
+// empty chain is INDISTINGUISHABLE from NEUTRAL from a balanced book, and
+// Databento Phase 1 carries no open interest at all — so bitcoin published
+// "NEUTRAL" on 77 of 78 days while nothing had been computed. `contrib === 0`
+// means UNCOMPUTABLE, not neutral; src/index.js now declines to write it.
 export function computeDealerGamma({
   contracts,
   etfSpot,

@@ -129,6 +129,48 @@ export function getShortHorizonStats(commodity, { lookbackMin = 15, now = new Da
   return computeFromSamples(samples, { now: nowMs });
 }
 
+/**
+ * Per-commodity buffer depth, for /health.
+ *
+ * ⛔ THE FIELD WHOSE ABSENCE COSTS A PROBE EVERY TIME. On 2026-09-10 the three
+ * metals sat at quality='warming' with sigma null for ~9.7h and nothing exposed
+ * could separate the only two possible worlds: ticks are not REACHING the
+ * buffer, or the buffer is full and computeFromSamples is REJECTING it (stale
+ * last tick, too few ticks, sample-rate guard). Ruling out the Pyth feed, the
+ * payload writer, the key mapping and the buffer code took a live Pythnet poll
+ * and a local replay. This one field answers it at a glance.
+ *
+ * Deliberately raw counters, not a verdict: a health field that has already
+ * decided what is wrong is a health field that can be wrong.
+ */
+export function bufferStats(now = Date.now()) {
+  const out = {};
+  for (const [commodity, buf] of _buffers.entries()) {
+    const last = buf[buf.length - 1];
+    const first = buf[0];
+    let medianDtS = null;
+    if (buf.length > 1) {
+      const dts = [];
+      for (let i = 1; i < buf.length; i++) dts.push(buf[i].ts - buf[i - 1].ts);
+      dts.sort((a, b) => a - b);
+      medianDtS = dts[Math.floor(dts.length / 2)] / 1000;
+    }
+    out[commodity] = {
+      nTicks: buf.length,
+      capacity: BUFFER_CAPACITY,
+      minTicksForRv: MIN_TICKS_FOR_RV,
+      lastTickAgeS: last ? Math.round((now - last.ts) / 1000) : null,
+      oldestTickAgeS: first ? Math.round((now - first.ts) / 1000) : null,
+      medianDtS,
+      // The two rejections computeFromSamples can make, stated as booleans so
+      // the reader does not have to re-derive them from the numbers above.
+      belowMinTicks: buf.length < MIN_TICKS_FOR_RV,
+      lastTickStale: last ? now - last.ts > MAX_STALE_TICK_MS : null,
+    };
+  }
+  return out;
+}
+
 export function _resetBuffers() {
   _buffers.clear();
 }

@@ -94,6 +94,7 @@ import {
   runWcPayloadsOnce,
 } from './engine/wc-snapshot.js';
 import { runWcMispricingsOnce } from './engine/wc-mispricings.js';
+import { bufferStats } from './engine/short-horizon-vol.js';
 import {
 
   bootstrapPairDiscover,
@@ -1001,6 +1002,10 @@ const server = http.createServer((req, res) => {
     snap.cfBenchmarks = cfHealth();
     snap.engine = {
       env: ENGINE_ENV,
+      // Which commit is actually serving. Cheap, and its absence turned a
+      // 2026-09-10 metals-15m investigation into a probe: uptime had to be
+      // compared against a commit timestamp to guess at the running build.
+      build: process.env.GIT_SHA || 'unknown',
       // Which calibration maps are loaded and whether any GOVERNS decisions.
       // Deployment probe: this value differs between the pre-PR-C build (absent)
       // and this one, so it can actually fail.
@@ -1040,6 +1045,11 @@ const server = http.createServer((req, res) => {
     snap.engine.polymarket_snapshot = getPolymarketSnapshotState();
     snap.engine.polymarket_us_snapshot = getPolymarketUsSnapshotState();
     snap.engine.metals_15m = getMetals15mState();
+    // ⛔ THE FIELD THAT SEPARATES THE TWO WORLDS. When sigma is null, this says
+    // whether ticks are not REACHING the buffer (nTicks ~0) or the buffer is
+    // full and the estimate is being REJECTED (belowMinTicks / lastTickStale).
+    // Without it the two are indistinguishable from outside the process.
+    snap.engine.shortHorizon = bufferStats();
     snap.engine.crypto_15m = getCrypto15mState();
     snap.engine.gas_snapshot = getGasSnapshotState();
     snap.engine.wc_snapshot = getWcSnapshotState();

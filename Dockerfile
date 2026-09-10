@@ -32,6 +32,14 @@ COPY python ./python
 COPY scripts ./scripts
 COPY python/supervisord.conf /etc/supervisor/conf.d/pmp-ingestion.conf
 
+# Build identifier, surfaced at /health as engine.build.
+# ⛔ ITS ABSENCE IS WHY A METALS-15M STALL COST A LIVE PROBE ON 2026-09-10:
+# /health exposed no way to tell WHICH commit was running, so "is prod actually
+# on c1ec14d?" had to be inferred from uptime against a commit timestamp.
+# `fly deploy` passes this automatically when the arg exists.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 ENV NODE_ENV=production
 ENV PORT=8080
 ENV DATABENTO_SIDECAR_HOST=127.0.0.1

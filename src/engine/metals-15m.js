@@ -317,6 +317,10 @@ export function buildPayload(cfg, { markets, spot, stats, now = Date.now() }) {
   const mid = bid !== null && ask !== null ? (bid + ask) / 2 : null;
 
   const sigma = stats?.sigma_annual ?? null;
+  // short-horizon-vol reports which rail the estimate landed on:
+  // 'pyth_short_horizon' for a real measurement, 'clamped_high'/'clamped_low'
+  // when it was pinned into [SIGMA_MIN, SIGMA_MAX].
+  const sigmaSource = stats?.source ?? null;
   const spotPrice = spot?.price ?? null;
   const spotAgeS = spot ? Math.max(0, (now - spot.publishTimeMs) / 1000) : null;
 
@@ -334,10 +338,20 @@ export function buildPayload(cfg, { markets, spot, stats, now = Date.now() }) {
   // `warming` is the cold-buffer contract: short-horizon-vol needs 30 ticks at
   // 10s = ~5 min after a redeploy before sigma is non-null. Surface it rather
   // than silently publishing a strike-only card.
+  //
+  // ⛔ A CLAMPED SIGMA IS NOT AN 'ok' SIGMA. short-horizon-vol pins its estimate
+  // into [SIGMA_MIN, SIGMA_MAX] and records which, but nothing carried that out
+  // of the module — so on 2026-09-10 wti published `sigma_15m: 5` (exactly
+  // SIGMA_MAX, i.e. 500% annualized) alongside `quality: "ok"`, and every
+  // consumer read a fair value computed on a CEILING as a measurement. The
+  // clamp is a sanity rail, not an estimate; a surface that cannot tell the
+  // difference is asserting a confidence it does not have.
+  const sigmaClamped = typeof sigmaSource === 'string' && sigmaSource.startsWith('clamped_');
   let quality = 'ok';
   if (strike === null) quality = 'no_strike';
   else if (spotPrice === null || !spotFresh) quality = 'stale_spot';
   else if (sigma === null) quality = 'warming';
+  else if (sigmaClamped) quality = 'sigma_clamped';
 
   return {
     as_of: nowIso,
@@ -363,6 +377,9 @@ export function buildPayload(cfg, { markets, spot, stats, now = Date.now() }) {
       spot: spotPrice,
       spot_age_s: spotAgeS,
       sigma_15m: sigma,
+      // Which rail, if any, the estimate is sitting on — 'pyth_short_horizon'
+      // when it is a real measurement. Consumers must be able to tell.
+      sigma_source: sigmaSource,
       fair_yes: fair,
       book: {
         yes_bid: bid,

@@ -11,7 +11,7 @@ import {
   evaluateLiveness,
 } from './observability/health.js';
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
-import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts, WTI_FRONT_MONTH_SYMBOL } from './feeds/pyth.js';
+import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts, WTI_FRONT_MONTH_SYMBOL, pythConfidenceRejects } from './feeds/pyth.js';
 import { startBrtiSpot, stopBrtiSpot, BRTI_SOURCE_TAG } from './feeds/brti-spot.js';
 import { startCfBenchmarks, stopCfBenchmarks, isCfArmed, cfHealth, CF_SOURCE_TAG } from './feeds/cfbenchmarks.js';
 // isOptionsMarketOpen still lives in massive.js (pure utility, no provider
@@ -1050,6 +1050,10 @@ const server = http.createServer((req, res) => {
     // full and the estimate is being REJECTED (belowMinTicks / lastTickStale).
     // Without it the two are indistinguishable from outside the process.
     snap.engine.shortHorizon = bufferStats();
+    // Prints dropped for a confidence interval too wide to be a price. WTI's
+    // front-month feed runs ~27% wide; anything appearing here for gold, silver
+    // or bitcoin would be new and worth looking at.
+    snap.engine.pythConfidenceRejects = pythConfidenceRejects();
     // ⛔ RESEARCH — the 10s-vs-60s comparison, on the SAME buffer. Nothing
     // prices off it. This is the evidence for whether the sampling interval is
     // the reason wti's unclamped 10s sigma read 11x its ceiling.

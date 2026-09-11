@@ -194,10 +194,67 @@ async function fetchOnce(symbol) {
   };
 }
 
+/**
+ * ⛔ PYTH PUBLISHES A CONFIDENCE INTERVAL AND WE WERE IGNORING IT.
+ *
+ * Measured on Pythnet 2026-09-10, 60 polls per symbol:
+ *
+ *     symbol    conf/price p50   p90     max     share > 1%
+ *     WTI/USD        0.094%     5.359%  5.436%     27%
+ *     XAU/USD        0.087%     0.142%  0.156%      0%
+ *     XAG/USD        0.264%     0.285%  0.303%      0%
+ *     BTC/USD        0.032%     0.036%  0.038%      0%
+ *
+ * WTI's front-month feed oscillates between a tight print (~102.5, conf ~0.04)
+ * and a wide one (~97.5, conf ~5.05) every few seconds — a 5% price swing whose
+ * confidence is ~125x wider, i.e. Pyth SAYING the print is unreliable. Ingesting
+ * those as prices is what produced an annualized sigma of 110 against a 5.0
+ * ceiling; dropping them takes the same window to 2.16.
+ *
+ * ⚠️ THIS REJECTS THE PRINT ENTIRELY, not just the vol sample. A 97.5 print on a
+ * 102.5 market is a 5% SPOT error, and spot feeds the strike comparison and the
+ * displayed price — publishing that is worse than publishing nothing, and the
+ * existing maxSpotAgeMs gates already handle "no fresh price" correctly.
+ *
+ * The threshold has ~3x headroom over the worst legitimate print observed
+ * (silver 0.303%) and ~5x clearance below the bad ones, so it is not a knife
+ * edge. A feed that goes entirely wide goes STALE, which is the honest outcome.
+ */
+const MAX_CONF_RATIO = 0.01;
+
+/** Rejected-print counters, surfaced on /health so this can never be silent. */
+const confRejects = new Map();
+
+export function pythConfidenceRejects() {
+  return Object.fromEntries(confRejects);
+}
+
+export function isConfidenceUsable(price, confidence) {
+  if (!(price > 0)) return false;
+  // A missing confidence is not a wide one — older parses may omit it, and
+  // refusing those would blind the feed rather than clean it.
+  if (confidence == null || !Number.isFinite(confidence)) return true;
+  return confidence / price <= MAX_CONF_RATIO;
+}
+
 async function pollOnce(symbol) {
   const key = `pyth_${feedKey(symbol)}`;
   try {
     const px = await fetchOnce(symbol);
+    if (!isConfidenceUsable(px.price, px.confidence)) {
+      // Counted and logged, never silent: a feed quietly dropping a quarter of
+      // its prints is its own incident, even when dropping them is correct.
+      const n = (confRejects.get(symbol) ?? 0) + 1;
+      confRejects.set(symbol, n);
+      if (n === 1 || n % 100 === 0) {
+        console.warn(
+          `[pyth] ${symbol} print REJECTED on confidence: price=${px.price} conf=${px.confidence} ` +
+            `(${((px.confidence / px.price) * 100).toFixed(2)}% > ${(MAX_CONF_RATIO * 100).toFixed(2)}%) — ${n} so far`,
+        );
+      }
+      setFeedStatus(key, { connected: true, lastError: `wide confidence (${n} rejected)` });
+      return;
+    }
     priceMap.set(symbol, px);
     recordTick(key);
     const commodity = SHORT_HORIZON_COMMODITY[symbol];

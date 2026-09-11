@@ -94,7 +94,7 @@ import {
   runWcPayloadsOnce,
 } from './engine/wc-snapshot.js';
 import { runWcMispricingsOnce } from './engine/wc-mispricings.js';
-import { bufferStats } from './engine/short-horizon-vol.js';
+import { bufferStats, sigmaAtInterval } from './engine/short-horizon-vol.js';
 import {
 
   bootstrapPairDiscover,
@@ -1050,6 +1050,16 @@ const server = http.createServer((req, res) => {
     // full and the estimate is being REJECTED (belowMinTicks / lastTickStale).
     // Without it the two are indistinguishable from outside the process.
     snap.engine.shortHorizon = bufferStats();
+    // ⛔ RESEARCH — the 10s-vs-60s comparison, on the SAME buffer. Nothing
+    // prices off it. This is the evidence for whether the sampling interval is
+    // the reason wti's unclamped 10s sigma read 11x its ceiling.
+    snap.engine.sigmaByInterval = {};
+    for (const c of Object.keys(snap.engine.shortHorizon)) {
+      snap.engine.sigmaByInterval[c] = {
+        s10: sigmaAtInterval(c, { targetDtS: 10 }),
+        s60: sigmaAtInterval(c, { targetDtS: 60 }),
+      };
+    }
     snap.engine.crypto_15m = getCrypto15mState();
     snap.engine.gas_snapshot = getGasSnapshotState();
     snap.engine.wc_snapshot = getWcSnapshotState();

@@ -161,6 +161,63 @@ export function getShortHorizonStats(commodity, { lookbackMin = 15, now = new Da
  * Deliberately raw counters, not a verdict: a health field that has already
  * decided what is wrong is a health field that can be wrong.
  */
+/**
+ * ⛔ RESEARCH ONLY — NOTHING PRICES OFF THIS.
+ *
+ * The same realized-vol estimate at a DIFFERENT sampling interval, computed
+ * from the SAME tick buffer so the comparison is controlled: identical prices,
+ * identical window, only the spacing changes.
+ *
+ * WHY IT EXISTS. Annualizing from a ~10s interval multiplies by
+ * sqrt(SECONDS_PER_YEAR/10) ~= 1,776, so microstructure dominates: on
+ * 2026-09-10 wti's unclamped 10s estimate read 55.4 (5,540% annualized), 11x
+ * the SIGMA_MAX ceiling, which would require a sustained 3.1% move EVERY TICK.
+ * WTI was not doing that. Either the interval is too fine for this feed or the
+ * feed carries stale-then-jump prints — and a coarser interval distinguishes
+ * them: subsampling averages the jitter away but leaves genuine volatility
+ * intact, so if 60s reads far lower, the 10s number was noise.
+ *
+ * Subsamples by TIME, not by index — taking every Nth tick assumes an even
+ * cadence the feed does not guarantee.
+ */
+export function sigmaAtInterval(commodity, { targetDtS = 60, now = Date.now() } = {}) {
+  const buf = _buffers.get(commodity);
+  if (!buf || buf.length < 2) return null;
+
+  const picked = [buf[0]];
+  for (const tick of buf) {
+    if (tick.ts - picked[picked.length - 1].ts >= targetDtS * 1000) picked.push(tick);
+  }
+  if (picked.length < 3) return null;
+
+  const returns = [];
+  const dts = [];
+  for (let i = 1; i < picked.length; i++) {
+    const a = picked[i - 1];
+    const b = picked[i];
+    if (!(a.price > 0) || !(b.price > 0) || b.ts <= a.ts) continue;
+    returns.push(Math.log(b.price / a.price));
+    dts.push((b.ts - a.ts) / 1000);
+  }
+  if (returns.length < 2) return null;
+
+  const medianDtS = median(dts);
+  if (!medianDtS || medianDtS <= 0) return null;
+  const mean = returns.reduce((acc, r) => acc + r, 0) / returns.length;
+  let varSum = 0;
+  for (const r of returns) varSum += (r - mean) ** 2;
+  const variance = varSum / Math.max(returns.length - 1, 1);
+  if (!Number.isFinite(variance) || variance < 0) return null;
+
+  return {
+    // UNCLAMPED, deliberately — the point is to see what the estimator says.
+    sigmaAnnualRaw: Math.sqrt(variance) * Math.sqrt(SECONDS_PER_YEAR / medianDtS),
+    nSamples: picked.length,
+    medianDtS,
+    spanMin: (picked[picked.length - 1].ts - picked[0].ts) / 60_000,
+  };
+}
+
 export function bufferStats(now = Date.now()) {
   const out = {};
   for (const [commodity, buf] of _buffers.entries()) {

@@ -321,6 +321,8 @@ export function buildPayload(cfg, { markets, spot, stats, now = Date.now() }) {
   // 'pyth_short_horizon' for a real measurement, 'clamped_high'/'clamped_low'
   // when it was pinned into [SIGMA_MIN, SIGMA_MAX].
   const sigmaSource = stats?.source ?? null;
+  // Research only — see short-horizon-vol's note. Never priced off.
+  const sigmaRaw = stats?.sigma_annual_raw ?? null;
   const spotPrice = spot?.price ?? null;
   const spotAgeS = spot ? Math.max(0, (now - spot.publishTimeMs) / 1000) : null;
 
@@ -407,6 +409,8 @@ export function buildPayload(cfg, { markets, spot, stats, now = Date.now() }) {
       // Which rail, if any, the estimate is sitting on — 'pyth_short_horizon'
       // when it is a real measurement. Consumers must be able to tell.
       sigma_source: sigmaSource,
+      /** Unclamped estimate, for calibrating the band. NOT a price input. */
+      sigma_15m_raw: sigmaRaw,
       // Buffer depth, so a consumer can say WHY there is no estimate rather
       // than guessing at a duration it cannot see.
       sigma_ticks: buf?.nTicks ?? null,
@@ -539,7 +543,14 @@ export async function runMetals15mOnce({ now = Date.now() } = {}) {
       // Phase 2: accumulate the shadow record. Only once fair value is real —
       // a `warming` tick has no model number to grade, and writing one would
       // put a null-fair row in the graded table.
-      if (!d.market_closed && d.quality === 'ok' && d.fair_yes != null && d.book?.mid != null) {
+      // ⛔ 'sigma_clamped' ROWS MUST BE RECORDED TOO — excluding them would
+      // blind the very research this record exists for. They carry a real
+      // fair_yes (computed on the rail) so they are gradeable, and they are
+      // precisely the population the band needs calibrating against. Before
+      // quality gained that value these rows read 'ok' and WERE recorded;
+      // narrowing the gate silently would have dropped them.
+      const gradeable = d.quality === 'ok' || d.quality === 'sigma_clamped';
+      if (!d.market_closed && gradeable && d.fair_yes != null && d.book?.mid != null) {
         try {
           await recordFifteenMinObservation({
             commodity: cfg.commodity,
@@ -552,6 +563,7 @@ export async function runMetals15mOnce({ now = Date.now() } = {}) {
             midCents: d.book.mid,
             fair: d.fair_yes,
             sigma: d.sigma_15m,
+            sigmaRaw: d.sigma_15m_raw,
             divergencePp: d.divergence_pp,
             bandPp: d.fee_band_pp,
             tauS: d.window.seconds_remaining,

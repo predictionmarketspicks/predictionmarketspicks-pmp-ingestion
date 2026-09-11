@@ -518,6 +518,11 @@ export async function recordFifteenMinObservation(o) {
     p_tau_s: o.tauS,
     p_volume_fp: o.volumeFp,
     p_oi_fp: o.oiFp,
+    // Research only — the UNCLAMPED sigma, so the [SIGMA_MIN, SIGMA_MAX] band
+    // can be calibrated from its own history instead of only observed to be
+    // hit. Nothing prices off it. Added 2026-09-10 with a DEFAULT NULL on the
+    // RPC side so this deploy and that migration did not have to be atomic.
+    p_sigma_raw: o.sigmaRaw ?? null,
   });
   if (error) throw new Error(`record_fifteen_min_observation: ${error.message}`);
 }

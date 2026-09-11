@@ -99,6 +99,24 @@ function computeFromSamples(samples, { now = Date.now() } = {}) {
 
   return {
     sigma_annual: sigma,
+    /**
+     * The UNCLAMPED estimate.
+     *
+     * ⛔ WITHOUT THIS THE BAND CANNOT BE CALIBRATED. `sigma_annual` is pinned
+     * into [SIGMA_MIN, SIGMA_MAX] and the raw value was discarded, so nobody
+     * could say how often the rails are hit, by how much, or whether the band
+     * is even the right shape — only that something was clamped. Measured
+     * 2026-09-10: gold sat exactly on the floor and wti exactly on the ceiling
+     * while silver measured cleanly, and there was no way to tell whether those
+     * were near-misses or orders of magnitude out.
+     *
+     * ⚠️ THIS IS RESEARCH OUTPUT, NOT A PRICE. Nothing may price off it — the
+     * rails exist because a 15-min realized vol annualized from a ~10s sampling
+     * interval carries a ~1,776x amplification, so one 0.28% tick reaches 500%
+     * annualized and a quiet stretch reaches zero. Mirrors `mu_annual_raw`,
+     * which exists for the same reason.
+     */
+    sigma_annual_raw: sigmaRaw,
     mu_annual: mu,
     // Uncapped drift for consumers with their own horizon-appropriate clamp.
     // The ±MU_CAP band above is sized for 60d-drift sanity — ~30x too tight

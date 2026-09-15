@@ -523,6 +523,13 @@ export async function recordFifteenMinObservation(o) {
     // hit. Nothing prices off it. Added 2026-09-10 with a DEFAULT NULL on the
     // RPC side so this deploy and that migration did not have to be atomic.
     p_sigma_raw: o.sigmaRaw ?? null,
+    // The executable quote at t5 — both sides of the book — so a metals window
+    // can be graded at a price someone could have traded. Until 2026-09-15 v1
+    // had no such params and 7,371 gold/silver/wti windows were graded with no
+    // executable quote. DEFAULT NULL on the RPC side (20260915130400) so this
+    // deploy and that migration did not have to be atomic.
+    p_yes_bid_cents: o.yesBidCents ?? null,
+    p_yes_ask_cents: o.yesAskCents ?? null,
   });
   if (error) throw new Error(`record_fifteen_min_observation: ${error.message}`);
 }

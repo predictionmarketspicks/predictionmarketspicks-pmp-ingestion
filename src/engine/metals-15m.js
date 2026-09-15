@@ -569,6 +569,10 @@ export async function runMetals15mOnce({ now = Date.now() } = {}) {
             tauS: d.window.seconds_remaining,
             volumeFp: d.book.volume_fp,
             oiFp: d.book.oi_fp,
+            // Already in hand (built above, already sent to settlement_spot_captures);
+            // the RPC snapshots them at t5 exactly as it does mid/fair/sigma.
+            yesBidCents: d.book.yes_bid,
+            yesAskCents: d.book.yes_ask,
           });
           state.observations += 1;
         } catch (err) {

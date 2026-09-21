@@ -1,6 +1,6 @@
 # NFL ext-feeds — close the half-capture hole (runner gate + watchdog value-probe)
 
-**Status**: SHIPPED <commit> (items 1, 4, 5 — pmp-ingestion) · item 2 = site repo workflow `ext-feeds-freshness.yml` (Claude Code main session, same day) · item 3 = Benny (task-prompt text below)
+**Status**: SHIPPED ff2a991 (items 1, 4, 5 — pmp-ingestion) · item 2 = site repo workflow `ext-feeds-freshness.yml` (Claude Code main session, same day) · item 3 = Benny (task-prompt text below)
 **Author**: Cowork, Run A 2026-09-21
 
 > **Shipped 2026-09-21 (Claude Code):**

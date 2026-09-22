@@ -195,6 +195,26 @@ export async function filterAlreadyPostedKeys(alertKeys, { hoursWindow = 24 } = 
   return new Set((data ?? []).map((r) => r.alert_key));
 }
 
+// The pick the mint trigger graded for this event (first crossing wins — GATE 3),
+// or null. Served by picks_source_row_prefix_idx. Never throws.
+export async function fetchMintedPickForEvent(toolSlug, commodity, eventTicker) {
+  if (!eventTicker) return null;
+  const sb = getClient();
+  const { data, error } = await sb
+    .from('tool_picks')
+    .select('pick_id, source_row_id, predicted_side, predicted_prob, market_price_at_pick, edge_pp, confidence_tier, regime_tags')
+    .eq('tool_slug', toolSlug)
+    .eq('source_table', 'commodity_edge_signals')
+    .like('source_row_id', `${commodity}:${eventTicker}:%`)
+    .order('picked_at', { ascending: true })
+    .limit(1);
+  if (error) {
+    console.warn('[tool_picks] minted-pick read failed:', error.message);
+    return null;
+  }
+  return data?.[0] ?? null;
+}
+
 // Upsert posted-alert rows. onConflict on alert_key — same key + a fresh
 // posted_at extends the cooldown window, which is the desired behavior.
 export async function recordPostedAlerts(rows) {

@@ -451,6 +451,10 @@ export const COMMODITIES = {
     // would republish outright BUY NO on /tools/bitcoin-edge, where the NO record
     // is still unproven and exactly what this flag was set false to stop.
     noSideEnabled: false,
+    // Discord + edge_alerts post the MINTED tool_picks row and nothing else, so
+    // "what we posted" and "what we graded" are one set (2026-09-22: 23 of 48
+    // graded picks since 09-09 were never alerted). Delivery only — no gate.
+    alertOnPickOnly: true,
     // YES-side favorite floor (TOOL_RECALIBRATION_ROUND2_2026-07-21). YES BUYs at
     // yesAsk >= yesFavoritePrice must clear minEdgePpYesFavorite (10pp) instead of
     // the 5pp mid-band floor — the 85-92c model-saturation artifact (model 89.8%

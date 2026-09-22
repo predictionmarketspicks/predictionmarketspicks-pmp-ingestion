@@ -39,9 +39,18 @@ import {
   filterAlreadyPostedKeys,
   recordPostedAlerts,
   recordFeedPerformance,
+  fetchMintedPickForEvent,
 } from './delivery/supabase.js';
 import { postCommodityAlert, postMoversAlert, postBotLog } from './delivery/discord.js';
 import { publishCommodityEdgeAlert } from './delivery/alert-feed.js';
+import {
+  commodityAlertKey,
+  publishedTierFor,
+  pickAlertKey,
+  findPickRow,
+  topEdgeFromPick,
+  tierFromPick,
+} from './delivery/alert-key.js';
 import { revalidateCommodityEdge } from './delivery/revalidate.js';
 import { findActiveRollover as findOilRollover } from './engine/wti-rollover.js';
 import { fetchKalshiCandidates } from './feeds/movers.js';
@@ -286,10 +295,45 @@ const moversState = {
   scanTimer: null,
 };
 
-function commodityAlertKey(commodity, tier, edge) {
-  // Tier in the key so a tier upgrade re-fires; strike + direction so a
-  // different strike crossing threshold fires independently.
-  return `commodity_edge:${commodity}:${tier}:${edge.direction}:${edge.strike.toFixed(2)}`;
+
+// alertOnPickOnly: post the pick the mint trigger graded for this event-hour.
+// Reads tool_picks AFTER upsertCommodityEdgeRows so this pass's mint is visible.
+// 24h window on a per-pick key — one pick per event, so it only guards retries.
+async function postMintedPick(config, snap) {
+  const c = config.commodity;
+  try {
+    const pick = await fetchMintedPickForEvent(`${c}-edge`, c, snap.meta.eventTicker);
+    if (!pick) return;
+    const key = pickAlertKey(c, pick.pick_id);
+    const already = await filterAlreadyPostedKeys([key], { hoursWindow: 24 });
+    if (already.has(key)) return;
+    const row = findPickRow(snap.rows, pick);
+    const topEdge = row ?? topEdgeFromPick(pick);
+    if (!topEdge) {
+      console.warn(`[${c}] pick ${pick.pick_id} has no strike — alert skipped`);
+      return;
+    }
+    const topTier = row?.fused_confidence && row.fused_confidence !== 'NO_EDGE'
+      ? row.fused_confidence
+      : tierFromPick(pick);
+    const metaForPick = { ...snap.meta, topEdge, topTier };
+    const sent = await postCommodityAlert(metaForPick);
+    if (!sent) return;
+    console.log(`[${c}] discord posted pick ${pick.pick_id} ${topTier} $${topEdge.strike.toFixed(2)}`);
+    await recordPostedAlerts([
+      {
+        alert_key: key,
+        title: `${c} ${topEdge.direction} $${topEdge.strike.toFixed(2)} ${topTier}`.slice(0, 200),
+        alert_type: 'commodity_edge',
+        platform: 'kalshi',
+        posted_at: new Date().toISOString(),
+      },
+    ]);
+    await publishCommodityEdgeAlert(metaForPick, key);
+  } catch (err) {
+    console.error(`[${c}] pick alert failed`, err?.message || err);
+    Sentry.captureException(err);
+  }
 }
 
 function expirationDateFromCloseTime(closeIso) {
@@ -581,8 +625,15 @@ async function runSnapshotOnceInner(state) {
       console.log(
         `[${config.commodity}] discord+revalidate suppressed — rollover ${oilRollover.fromContract}→${oilRollover.toContract} active`,
       );
+    } else if (config.alertOnPickOnly === true) {
+      // The alert IS the graded pick (BITCOIN_EDGE_ALERT_IS_THE_PICK_2026-09-22 §5):
+      // one post per minted tool_picks row, never the snapshot's largest edge.
+      if ((tagOk || bypass) && !snap.meta.nearExpiry) {
+        await postMintedPick(config, snap);
+      }
     } else if (top && snap.meta.topTier !== 'NO_EDGE' && (tagOk || bypass)) {
-      const key = commodityAlertKey(config.commodity, snap.meta.topTier, top);
+      const publishedTier = publishedTierFor(config.commodity, snap.meta.topTier, snap.meta);
+      const key = commodityAlertKey(config.commodity, snap.meta.eventTicker, publishedTier, top);
       const suppressed = await filterAlreadyPostedKeys([key], { hoursWindow: 6 });
       if (suppressed.has(key)) {
         console.log(`[${config.commodity}] discord suppressed (6h cooldown) ${snap.meta.topTier}`);

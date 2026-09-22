@@ -17,6 +17,7 @@
 import { sanitize } from '../lib/sanitize.js';
 import { assertBrandSafe } from '../lib/lint-strings.js';
 import { applyCalibrationTierCeiling } from './tier-ceiling.js';
+import { settleTimeEt } from './alert-key.js';
 
 const KALSHI_REFERRAL_URL =
   'https://kalshi.com/sign-up/?referral=b07a96ab-4b91-4bdc-8285-5ae1927b7000';
@@ -111,7 +112,12 @@ export function buildCommodityEmbed(meta, topEdge) {
         fields,
         footer: {
           text: sanitize(
-            `${meta.eventTicker} • closes in ${meta.hoursToClose.toFixed(1)}h • ${meta.strikeCount} strikes scanned`,
+            [
+              meta.eventTicker,
+              settleTimeEt(meta.eventCloseAt) ? `settles ${settleTimeEt(meta.eventCloseAt)}` : null,
+              `closes in ${meta.hoursToClose.toFixed(1)}h`,
+              `${meta.strikeCount} strikes scanned`,
+            ].filter(Boolean).join(' • '),
             120,
           ),
         },

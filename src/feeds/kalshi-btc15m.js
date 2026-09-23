@@ -551,6 +551,19 @@ async function watchdog() {
 
 // ── public ────────────────────────────────────────────────────────────────────
 
+/**
+ * First touch so far in the LIVE window, per side per limit: { yes: { "15": tauMs, … },
+ * no: {…}, from_open }. The cockpit's "what this price has meant" readout uses it to
+ * tell a FRESH drop (first touch this minute) from a price that has been there
+ * before — the §2.7 distinction. Kalshi book data only; null when not tracked.
+ */
+export function getLiveFirstTouch(market) {
+  const st = touchState.get(market);
+  if (!st) return null;
+  const obj = (m) => Object.fromEntries([...m].map(([l, v]) => [String(l), v.tau]));
+  return { from_open: st.fromOpen, yes: obj(st.ft.yes), no: obj(st.ft.no) };
+}
+
 export function getBook1sHealth() {
   const now = Date.now();
   const recent = stats.insertLog.filter((e) => now - e.at <= 60_000);

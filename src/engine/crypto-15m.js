@@ -58,6 +58,7 @@ import { getShortHorizonStats } from './short-horizon-vol.js';
 import { getBrtiSpot } from '../feeds/brti-spot.js';
 import { getBtcSpot } from '../feeds/btc-spot.js';
 import { getPubSpotBuffer, velocityFromBuffer } from '../feeds/coinbase-ws.js';
+import { getLiveFirstTouch } from '../feeds/kalshi-btc15m.js';
 import {
   upsertWidgetPayloads,
   recordFifteenMinObservationV2,
@@ -147,7 +148,7 @@ export function fairYesTwap({ spot, strike, sigmaAnnual, tauYears }) {
   return Number.isFinite(p) ? Math.min(Math.max(p, 0), 1) : null;
 }
 
-export function buildPayload(cfg, { markets, spot, btcSpot = null, stats, gradedCount, velocity = null, now = Date.now() }) {
+export function buildPayload(cfg, { markets, spot, btcSpot = null, stats, gradedCount, velocity = null, firstTouchFor = () => null, now = Date.now() }) {
   const { active, next } = classifyWindows(markets, now);
   const nowIso = new Date(now).toISOString();
   const modelStatus = (gradedCount ?? 0) >= GRADED_WINDOWS_REQUIRED ? 'graded' : 'shadow';
@@ -267,6 +268,9 @@ export function buildPayload(cfg, { markets, spot, btcSpot = null, stats, graded
       divergence_beyond_band:
         divergence !== null && band !== null ? Math.abs(divergence) > band : null,
       next_window: nextWindow,
+      // Per side, the τ (ms) at which the ask first reached ≤ each limit this window
+      // (capture module, 1s). Null when the window is not tracked from the open.
+      first_touch: firstTouchFor(active.ticker),
     },
   };
 }
@@ -302,6 +306,7 @@ export async function runCrypto15mOnce({ now = Date.now() } = {}) {
         stats,
         gradedCount: state.gradedCount[cfg.commodity] ?? 0,
         velocity: velocityFromBuffer(getPubSpotBuffer(), now),
+        firstTouchFor: getLiveFirstTouch,
         now,
       });
 

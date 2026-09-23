@@ -3,7 +3,7 @@
 // Site-repo spec: handoffs/BITCOIN_15M_TECHNICAL_REBUILD_2026-09-23.md T1.1/T1.3/T1.5.
 // Tables: fifteen_min_book_5s + fifteen_min_trades_10s + fifteen_min_first_touch (migration
 // 20260923180000_fifteen_min_book_capture.sql; nightly rollup = cron job
-// 'fifteen-min-book-rollup', hourly → fifteen_min_book_windows, then culls at 21 days).
+// 'fifteen-min-book-rollup', hourly → fifteen_min_book_windows, then culls detail at 14 days).
 //
 // ROW BUDGET (Benny 2026-09-23: "way too many rows"). The book is SAMPLED every
 // second in memory but STORED every 5s; the tape is stored per 10s bucket per side;

@@ -13,6 +13,8 @@ import {
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
 import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts, WTI_FRONT_MONTH_SYMBOL, pythConfidenceRejects } from './feeds/pyth.js';
 import { startBrtiSpot, stopBrtiSpot, BRTI_SOURCE_TAG } from './feeds/brti-spot.js';
+import { startCoinbaseWs } from './feeds/coinbase-ws.js';
+import { startKalshiBtc15m, getBook1sHealth } from './feeds/kalshi-btc15m.js';
 import { startCfBenchmarks, stopCfBenchmarks, isCfArmed, cfHealth, CF_SOURCE_TAG } from './feeds/cfbenchmarks.js';
 // isOptionsMarketOpen still lives in massive.js (pure utility, no provider
 // coupling). Lifecycle goes through the options-provider abstraction so the
@@ -850,6 +852,10 @@ async function bootstrapAll() {
   // outage. Disarmed unless CF_INDEX_IDS is set (see cfbenchmarks.js header:
   // run scripts/verify-cfbenchmarks.mjs on the machine before arming).
   startCfBenchmarks();
+  // One-second public spot + the KXBTC15M book/tape capture. Research capture only —
+  // nothing prices off it. Neither is a required feed, so neither can 503 /health.
+  startCoinbaseWs();
+  startKalshiBtc15m();
   for (const state of engines.values()) {
     bootstrapEngine(state).catch((err) => {
       console.error(`[${state.config.commodity}] bootstrap failed`, err);
@@ -1051,6 +1057,10 @@ const server = http.createServer((req, res) => {
     // `avg60sWindowSizeLast` is the one that matters operationally — < 55 means CF
     // was sparse and the settlement averages we recorded are suspect.
     snap.cfBenchmarks = cfHealth();
+    // KXBTC15M one-second capture (BITCOIN_15M_TECHNICAL_REBUILD T1.5). `rowsLastMin`
+    // counts rows actually INSERTED, not frames received — a healthy socket is not a
+    // populated table. Aggregates only; no index value.
+    snap.crypto15m = { book1s: getBook1sHealth() };
     snap.engine = {
       env: ENGINE_ENV,
       // Which commit is actually serving. Cheap, and its absence turned a

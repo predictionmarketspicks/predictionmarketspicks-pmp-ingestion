@@ -75,6 +75,27 @@ export async function recordMetalsSpotMark(m) {
   if (error) throw new Error(`metals_spot_marks: ${error.message}`);
 }
 
+/**
+ * KXBTC15M one-second book rows (feeds/kalshi-btc15m.js) — ONE multi-row insert per
+ * 15s flush. PK (market_ticker, observed_at) makes a retried flush idempotent.
+ */
+export async function insertFifteenMinBookRows(rows) {
+  if (!rows?.length) return;
+  const { error } = await getClient()
+    .from('fifteen_min_book_1s')
+    .upsert(rows, { onConflict: 'market_ticker,observed_at', ignoreDuplicates: true });
+  if (error) throw new Error(`fifteen_min_book_1s: ${error.message}`);
+}
+
+/** KXBTC15M trade prints; trade_id PK makes replays idempotent. */
+export async function insertFifteenMinTrades(rows) {
+  if (!rows?.length) return;
+  const { error } = await getClient()
+    .from('fifteen_min_trades')
+    .upsert(rows, { onConflict: 'trade_id', ignoreDuplicates: true });
+  if (error) throw new Error(`fifteen_min_trades: ${error.message}`);
+}
+
 export async function upsertCommodityEdgeRows(rows) {
   if (!rows || rows.length === 0) return { count: 0 };
   const tag = writerTag();

@@ -46,7 +46,9 @@ import { insertFifteenMinBookRows, insertFifteenMinTrades } from '../delivery/su
 import { postBotLog } from '../delivery/discord.js';
 
 export const SERIES = 'KXBTC15M';
-export const COMMODITY = 'bitcoin';
+// 'btc', not 'bitcoin': the key fifteen_min_settles and the shadow ticks already use —
+// every research join (handoff Appendix A) is on commodity + event_ticker.
+export const COMMODITY = 'btc';
 export const FEED_TAG = 'kalshi_btc15m';
 const WINDOW_MS = 15 * 60_000;
 const AVG_WINDOW_MS = 60_000;

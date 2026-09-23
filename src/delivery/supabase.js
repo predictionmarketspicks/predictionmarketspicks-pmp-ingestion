@@ -87,13 +87,16 @@ export async function insertFifteenMinBookRows(rows) {
   if (error) throw new Error(`fifteen_min_book_1s: ${error.message}`);
 }
 
-/** KXBTC15M trade prints; trade_id PK makes replays idempotent. */
+/**
+ * KXBTC15M tape, one row per (market, second, price, taker side) — aggregated by
+ * aggregateTrades(). The PK makes a retried flush idempotent.
+ */
 export async function insertFifteenMinTrades(rows) {
   if (!rows?.length) return;
   const { error } = await getClient()
-    .from('fifteen_min_trades')
-    .upsert(rows, { onConflict: 'trade_id', ignoreDuplicates: true });
-  if (error) throw new Error(`fifteen_min_trades: ${error.message}`);
+    .from('fifteen_min_trades_1s')
+    .upsert(rows, { onConflict: 'market_ticker,ts,yes_price,taker_side', ignoreDuplicates: true });
+  if (error) throw new Error(`fifteen_min_trades_1s: ${error.message}`);
 }
 
 export async function upsertCommodityEdgeRows(rows) {

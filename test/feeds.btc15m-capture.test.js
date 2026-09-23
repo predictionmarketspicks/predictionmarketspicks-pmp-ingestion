@@ -12,6 +12,7 @@ import {
   bookTop,
   tradeRow,
   bookRow,
+  aggregateTrades,
 } from '../src/feeds/kalshi-btc15m.js';
 import { parseCoinbaseTicker } from '../src/feeds/coinbase-ws.js';
 
@@ -94,6 +95,30 @@ describe('rows', () => {
     expect(tradeRow(msg, () => w.event)).toMatchObject({ yes_price: 0.988, count: 0.01, taker_side: 'yes', event_ticker: w.event });
     expect(tradeRow({ ...msg, taker_side: 'up' }, () => w.event)).toBeNull();
     expect(tradeRow({ ...msg, trade_id: undefined }, () => w.event)).toBeNull();
+  });
+});
+
+describe('trade aggregation', () => {
+  const p = (ts, price, side, count, market = 'M') => ({ commodity: 'bitcoin', market_ticker: market, event_ticker: 'E', ts, yes_price: price, taker_side: side, count });
+  const now = Date.parse('2026-09-23T17:30:10.500Z');
+
+  it('one row per (market, second, price, side); contracts summed, prints counted', () => {
+    const { rows, pending } = aggregateTrades([
+      p('2026-09-23T17:30:01.100Z', 0.5, 'yes', 0.01),
+      p('2026-09-23T17:30:01.900Z', 0.5, 'yes', 2.5),
+      p('2026-09-23T17:30:01.500Z', 0.5, 'no', 1),
+      p('2026-09-23T17:30:01.500Z', 0.51, 'yes', 1),
+      p('2026-09-23T17:30:02.000Z', 0.5, 'yes', 1),
+    ], now);
+    expect(pending).toEqual([]);
+    expect(rows).toHaveLength(4);
+    expect(rows.find((r) => r.ts === '2026-09-23T17:30:01.000Z' && r.yes_price === 0.5 && r.taker_side === 'yes')).toMatchObject({ count: 2.51, prints: 2 });
+  });
+
+  it('holds back seconds that may still be receiving prints — a second is flushed once', () => {
+    const { rows, pending } = aggregateTrades([p('2026-09-23T17:30:07.200Z', 0.5, 'yes', 1), p('2026-09-23T17:30:06.999Z', 0.5, 'yes', 1)], now);
+    expect(rows.map((r) => r.ts)).toEqual(['2026-09-23T17:30:06.000Z']);
+    expect(pending).toHaveLength(1);
   });
 });
 

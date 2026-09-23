@@ -1,7 +1,7 @@
 // KXBTC15M one-second capture — the order book and the tape, for research.
 //
 // Site-repo spec: handoffs/BITCOIN_15M_TECHNICAL_REBUILD_2026-09-23.md T1.1/T1.3/T1.5.
-// Tables: fifteen_min_book_1s + fifteen_min_trades (migration
+// Tables: fifteen_min_book_1s + fifteen_min_trades_1s (migration
 // 20260923180000_fifteen_min_book_capture.sql; nightly rollup = cron job
 // 'fifteen-min-book-rollup' → fifteen_min_book_windows + fifteen_min_first_touch).
 //
@@ -17,6 +17,7 @@
 //   orderbook_delta → `orderbook_snapshot` {yes_dollars_fp, no_dollars_fp: [[price, size]]}
 //                     then `orderbook_delta` {price_dollars, delta_fp, side}
 //   trade           → `trade` {trade_id, yes_price_dollars, count_fp, taker_side, ts_ms}
+//                     stored per SECOND in fifteen_min_trades_1s (aggregateTrades)
 //   update_subscription {sids:[one], action:'add_markets'|'delete_markets', market_tickers}
 // Both sides of the book are BID ladders: YES ask = 1 − best NO bid.
 //
@@ -127,14 +128,13 @@ export function bookTop(book) {
   };
 }
 
-/** One `trade` msg → a fifteen_min_trades row; null when unusable. */
+/** One `trade` msg → a raw print (aggregated by aggregateTrades before writing); null when unusable. */
 export function tradeRow(msg, eventOf) {
   const price = num(msg.yes_price_dollars), count = num(msg.count_fp);
   const tsMs = msg.ts_ms ?? (msg.ts != null ? msg.ts * 1000 : null);
   if (!msg.trade_id || !msg.market_ticker || price == null || count == null || tsMs == null) return null;
   if (msg.taker_side !== 'yes' && msg.taker_side !== 'no') return null;
   return {
-    trade_id: msg.trade_id,
     commodity: COMMODITY,
     market_ticker: msg.market_ticker,
     event_ticker: eventOf(msg.market_ticker),
@@ -143,6 +143,45 @@ export function tradeRow(msg, eventOf) {
     count,
     taker_side: msg.taker_side,
   };
+}
+
+/** Prints older than this are complete: a second is flushed once, never split. */
+export const TRADE_SETTLE_MS = 3_000;
+
+/**
+ * Collapse raw prints into fifteen_min_trades_1s rows — one per (market, whole second,
+ * price, taker side), contracts summed, prints counted. Only seconds that ended at
+ * least TRADE_SETTLE_MS before `nowMs` are emitted; the rest come back as `pending`.
+ */
+export function aggregateTrades(prints, nowMs) {
+  const cutoff = Math.floor((nowMs - TRADE_SETTLE_MS) / 1000) * 1000;
+  const rows = new Map();
+  const pending = [];
+  for (const p of prints) {
+    const sec = Math.floor(Date.parse(p.ts) / 1000) * 1000;
+    if (sec >= cutoff) {
+      pending.push(p);
+      continue;
+    }
+    const key = `${p.market_ticker}|${sec}|${p.yes_price}|${p.taker_side}`;
+    const r = rows.get(key);
+    if (r) {
+      r.count = Number((r.count + p.count).toFixed(2));
+      r.prints += 1;
+    } else {
+      rows.set(key, {
+        commodity: p.commodity,
+        market_ticker: p.market_ticker,
+        event_ticker: p.event_ticker,
+        ts: new Date(sec).toISOString(),
+        yes_price: p.yes_price,
+        taker_side: p.taker_side,
+        count: p.count,
+        prints: 1,
+      });
+    }
+  }
+  return { rows: [...rows.values()], pending };
 }
 
 /** One sampled second → a fifteen_min_book_1s row; null when the book has neither side. */
@@ -188,7 +227,8 @@ const sids = new Map(); // channel → sid
 const lastSeq = new Map(); // sid → seq
 
 let bookBuf = [];
-let tradeBuf = [];
+let tradeBuf = []; // raw prints, aggregated at flush
+let tradeRetry = []; // aggregated rows from a failed flush
 let flushing = false;
 
 const stats = {
@@ -370,28 +410,36 @@ function bound(buf) {
 async function flush() {
   if (flushing) return;
   flushing = true;
-  const book = bookBuf, trades = tradeBuf;
+  const book = bookBuf;
+  const { rows: trades, pending } = aggregateTrades(tradeBuf, Date.now());
+  const printsFlushed = tradeBuf.length - pending.length;
   bookBuf = [];
-  tradeBuf = [];
+  tradeBuf = pending;
   try {
     if (book.length) {
       await insertFifteenMinBookRows(book);
       stats.lastInsertedAt = Date.now();
       stats.lastAt = book[book.length - 1].observed_at;
     }
+    if (tradeRetry.length) {
+      await insertFifteenMinTrades(tradeRetry);
+      tradeRetry = [];
+    }
     if (trades.length) {
       await insertFifteenMinTrades(trades);
-      stats.tradesLastAt = trades[trades.length - 1].ts;
+      stats.tradesLastAt = trades.reduce((a, r) => (r.ts > a ? r.ts : a), stats.tradesLastAt ?? "");
     }
-    stats.insertLog.push({ at: Date.now(), book: book.length, trades: trades.length });
+    stats.insertLog.push({ at: Date.now(), book: book.length, trades: trades.length, prints: printsFlushed });
     stats.insertLog = stats.insertLog.filter((e) => Date.now() - e.at <= 60_000);
     stats.lastFlushError = null;
   } catch (err) {
     stats.lastFlushError = { at: new Date().toISOString(), message: String(err?.message || err).slice(0, 240) };
     console.warn('[btc15m] flush failed; retrying next flush', stats.lastFlushError.message);
     // Keep the rows; inserts are idempotent (PK / trade_id), so a retry is safe.
+    // Book rows go back as-is; trade seconds go back as their aggregate rows can't be
+    // re-split, so they are retried from a side buffer.
     bookBuf = bound(book.concat(bookBuf));
-    tradeBuf = bound(trades.concat(tradeBuf));
+    tradeRetry = bound(trades.concat(tradeRetry));
   } finally {
     flushing = false;
   }
@@ -430,10 +478,11 @@ export function getBook1sHealth() {
     rowsLastMin: recent.reduce((a, e) => a + e.book, 0),
     tradesLastAt: stats.tradesLastAt,
     tradesLastMin: recent.reduce((a, e) => a + e.trades, 0),
+    printsLastMin: recent.reduce((a, e) => a + (e.prints || 0), 0),
     markets: [...windows.keys()],
     booksReady: [...books.entries()].filter(([, b]) => b.ready).map(([m]) => m),
     pubSpot: spot ? { source: spot.source, ageMs: Math.round(spot.ageMs) } : null,
-    buffered: { book: bookBuf.length, trades: tradeBuf.length },
+    buffered: { book: bookBuf.length, prints: tradeBuf.length, tradeRetry: tradeRetry.length },
     droppedRows: stats.droppedRows,
     seqGapReconnects: stats.seqGapReconnects,
     lastFlushError: stats.lastFlushError,

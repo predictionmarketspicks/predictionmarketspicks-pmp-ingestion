@@ -147,3 +147,51 @@ export function stopCoinbaseWs() {
     ws = null;
   }
 }
+
+/**
+ * |3-min move| below this reads as FLAT (◆). The first quartile of |ret_3m| over
+ * 109,586 KXBTC15M shadow ticks, 2026-08-29 → 2026-09-23 (median 0.0364%, Q3
+ * 0.0729%) — the Q1 threshold the rebuild spec (T4.1 item 2) names. A fraction.
+ */
+export const VELOCITY_FLAT_BELOW = 0.000154;
+
+function priceAt(buf, targetMs, toleranceMs) {
+  for (let i = buf.length - 1; i >= 0; i--) {
+    if (buf[i].t <= targetMs) return targetMs - buf[i].t <= toleranceMs ? buf[i].price : null;
+  }
+  return null;
+}
+
+/**
+ * The move of the PUBLIC spot: 1-min and 3-min returns and whether the last
+ * minute is running faster or slower than the 3-minute pace. A read of the move,
+ * never a probability and never a call (rebuild spec §3 decision 1). Null until the
+ * buffer holds three minutes.
+ */
+export function velocityFromBuffer(buf, nowMs = Date.now()) {
+  if (!buf?.length) return null;
+  const last = buf[buf.length - 1];
+  if (nowMs - last.t > 5_000) return null;
+  const p1 = priceAt(buf, last.t - 60_000, 5_000);
+  const p3 = priceAt(buf, last.t - 180_000, 5_000);
+  if (!(p1 > 0) || !(p3 > 0)) return null;
+  const ret1 = last.price / p1 - 1;
+  const ret3 = last.price / p3 - 1;
+  const pace1 = ret1; // per minute
+  const pace3 = ret3 / 3; // per minute
+  const direction = Math.abs(ret3) < VELOCITY_FLAT_BELOW ? 'flat' : ret3 > 0 ? 'up' : 'down';
+  let pace = 'steady';
+  if (direction !== 'flat') {
+    if (Math.sign(pace1) !== Math.sign(ret3) || Math.abs(pace1) < Math.abs(pace3) * 0.75) pace = 'fading';
+    else if (Math.abs(pace1) > Math.abs(pace3) * 1.25) pace = 'accelerating';
+  }
+  return {
+    direction,
+    pace,
+    ret_1m_pct: Number((ret1 * 100).toFixed(4)),
+    ret_3m_pct: Number((ret3 * 100).toFixed(4)),
+    flat_below_pct: VELOCITY_FLAT_BELOW * 100,
+    source: last.source,
+    as_of: new Date(last.t).toISOString(),
+  };
+}

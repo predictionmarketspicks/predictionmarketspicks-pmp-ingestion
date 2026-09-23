@@ -4,21 +4,28 @@
     {
       "name": "Example Edge Rusher",
       "position": "ED",
-      "age": 28,
+      "age": 28.4,
       "status": "Signed",
       "team_from": "Cincinnati Bengals",
       "team_to": "Tennessee Titans",
-      "contract_avg_yr": "$22.5M",
-      "contract_guaranteed": "$48M",
-      "contract_total": "$90M",
-      "contract_proj_avg_yr": "$20M",
-      "war": 1.8,
-      "war_rank": 11,
+      "contract_avg_yr": "$22.5m",
+      "contract_guaranteed": "$48.0m",
+      "contract_total": "$90.0m",
+      "contract_proj_avg_yr": "$20.0m",
+      "war": 1.84,
+      "war_rank": "#11 ED",
       "history": [
-        { "season": 2025, "snaps": 880, "grade": 86.4, "pos_rank": "11/119", "war": 1.8 },
-        { "season": 2024, "snaps": 910, "grade": 83.1, "pos_rank": "18/121", "war": 1.4 },
-        { "season": 2023, "snaps": 760, "grade": 79.0, "pos_rank": "27/118", "war": 0.9 }
-      ]
+        { "year": 2025, "snaps": 880, "grade": 86.4, "position_rank": "11th / 119 ED", "war": 1.84, "war_rank": "#11 ED" },
+        { "year": 2024, "snaps": 910, "grade": 83.1, "position_rank": "18th / 121 ED", "war": 1.42, "war_rank": "#18 ED" },
+        { "year": 2023, "snaps": 760, "grade": 79.0, "position_rank": "27th / 118 ED", "war": 0.91, "war_rank": "#27 ED" }
+      ],
+      "extra": {
+        "pff_rank": 14,
+        "contract_years": 4,
+        "contract_proj_years": 4,
+        "contract_proj_guaranteed": "$42.0m",
+        "contract_proj_total": "$80.0m"
+      }
     }
   ]
 }

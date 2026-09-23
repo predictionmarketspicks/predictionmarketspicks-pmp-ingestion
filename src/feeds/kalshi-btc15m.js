@@ -1,9 +1,13 @@
-// KXBTC15M one-second capture — the order book and the tape, for research.
+// KXBTC15M capture — the order book and the tape, for research.
 //
 // Site-repo spec: handoffs/BITCOIN_15M_TECHNICAL_REBUILD_2026-09-23.md T1.1/T1.3/T1.5.
-// Tables: fifteen_min_book_1s + fifteen_min_trades_1s (migration
+// Tables: fifteen_min_book_5s + fifteen_min_trades_10s + fifteen_min_first_touch (migration
 // 20260923180000_fifteen_min_book_capture.sql; nightly rollup = cron job
-// 'fifteen-min-book-rollup' → fifteen_min_book_windows + fifteen_min_first_touch).
+// 'fifteen-min-book-rollup', hourly → fifteen_min_book_windows, then culls at 21 days).
+//
+// ROW BUDGET (Benny 2026-09-23: "way too many rows"). The book is SAMPLED every
+// second in memory but STORED every 5s; the tape is stored per 10s bucket per side;
+// first-touch is tracked in memory at 1s and written once per window. ~34k rows/day.
 //
 // WHY ITS OWN SOCKET (not a line in kalshi.js's PHASE_1_SERIES)
 //   kalshi.js is torn down and rediscovered every hour at HH:00:30 and carries the
@@ -17,7 +21,7 @@
 //   orderbook_delta → `orderbook_snapshot` {yes_dollars_fp, no_dollars_fp: [[price, size]]}
 //                     then `orderbook_delta` {price_dollars, delta_fp, side}
 //   trade           → `trade` {trade_id, yes_price_dollars, count_fp, taker_side, ts_ms}
-//                     stored per SECOND in fifteen_min_trades_1s (aggregateTrades)
+//                     stored per 10s bucket per side in fifteen_min_trades_10s (aggregateTrades)
 //   update_subscription {sids:[one], action:'add_markets'|'delete_markets', market_tickers}
 // Both sides of the book are BID ladders: YES ask = 1 − best NO bid.
 //
@@ -42,7 +46,7 @@ import WebSocket from 'ws';
 import { setFeedStatus, recordTick } from '../observability/health.js';
 import { authHeaders, KALSHI_WS_URL, KALSHI_WS_PATH } from './kalshi-auth.js';
 import { getPubSpot1s } from './coinbase-ws.js';
-import { insertFifteenMinBookRows, insertFifteenMinTrades } from '../delivery/supabase.js';
+import { insertFifteenMinBookRows, insertFifteenMinTrades, insertFifteenMinFirstTouch } from '../delivery/supabase.js';
 import { postBotLog } from '../delivery/discord.js';
 
 export const SERIES = 'KXBTC15M';
@@ -147,46 +151,91 @@ export function tradeRow(msg, eventOf) {
   };
 }
 
-/** Prints older than this are complete: a second is flushed once, never split. */
+/** A bucket is complete this long after it ends: a bucket is flushed once, never split. */
 export const TRADE_SETTLE_MS = 3_000;
+/** Tape bucket. Measured 2026-09-23 over 6.6 min: 1s 1,687 rows · 5s 150 · 10s 76 · 1m 14. */
+export const TRADE_BUCKET_MS = 10_000;
+/** Book cadence stored. Sampled every second in memory (first-touch); written every 5s. */
+export const BOOK_EVERY_MS = 5_000;
+/** Maker-study limits (handoff §2.7), in cents. */
+export const TOUCH_LEVELS = [5, 10, 15, 20, 25, 33, 40, 45];
 
 /**
- * Collapse raw prints into fifteen_min_trades_1s rows — one per (market, whole second,
- * price, taker side), contracts summed, prints counted. Only seconds that ended at
- * least TRADE_SETTLE_MS before `nowMs` are emitted; the rest come back as `pending`.
+ * Collapse raw prints into fifteen_min_trades_10s rows — one per (market, 10s bucket,
+ * taker side): prints, contracts, contract-weighted VWAP, min/max YES price. Only
+ * buckets that ended at least TRADE_SETTLE_MS before `nowMs` are emitted; the rest
+ * come back as `pending`.
  */
 export function aggregateTrades(prints, nowMs) {
-  const cutoff = Math.floor((nowMs - TRADE_SETTLE_MS) / 1000) * 1000;
   const rows = new Map();
   const pending = [];
   for (const p of prints) {
-    const sec = Math.floor(Date.parse(p.ts) / 1000) * 1000;
-    if (sec >= cutoff) {
+    const bucket = Math.floor(Date.parse(p.ts) / TRADE_BUCKET_MS) * TRADE_BUCKET_MS;
+    if (bucket + TRADE_BUCKET_MS > nowMs - TRADE_SETTLE_MS) {
       pending.push(p);
       continue;
     }
-    const key = `${p.market_ticker}|${sec}|${p.yes_price}|${p.taker_side}`;
-    const r = rows.get(key);
-    if (r) {
-      r.count = Number((r.count + p.count).toFixed(2));
-      r.prints += 1;
-    } else {
-      rows.set(key, {
+    const key = `${p.market_ticker}|${bucket}|${p.taker_side}`;
+    let r = rows.get(key);
+    if (!r) {
+      r = {
         commodity: p.commodity,
         market_ticker: p.market_ticker,
         event_ticker: p.event_ticker,
-        ts: new Date(sec).toISOString(),
-        yes_price: p.yes_price,
+        bucket_at: new Date(bucket).toISOString(),
         taker_side: p.taker_side,
-        count: p.count,
-        prints: 1,
-      });
+        prints: 0,
+        contracts: 0,
+        _px: 0,
+        min_price: p.yes_price,
+        max_price: p.yes_price,
+      };
+      rows.set(key, r);
     }
+    r.prints += 1;
+    r.contracts += p.count;
+    r._px += p.yes_price * p.count;
+    if (p.yes_price < r.min_price) r.min_price = p.yes_price;
+    if (p.yes_price > r.max_price) r.max_price = p.yes_price;
   }
-  return { rows: [...rows.values()], pending };
+  const out = [...rows.values()].map(({ _px, ...r }) => ({
+    ...r,
+    contracts: Number(r.contracts.toFixed(2)),
+    vwap: r.contracts > 0 ? Number((_px / r.contracts).toFixed(6)) : r.min_price,
+  }));
+  return { rows: out, pending };
 }
 
-/** One sampled second → a fifteen_min_book_1s row; null when the book has neither side. */
+export function emptyTouches() {
+  return { yes: new Map(), no: new Map() };
+}
+
+/**
+ * Record, per side, the first second the ask reached ≤ L¢. YES ask is the book's
+ * ask; NO ask is 1 − YES bid. Mutates `ft`; returns it.
+ */
+export function updateFirstTouch(ft, top, observedMs, tauMs) {
+  const noAsk = top.yesBid == null ? null : 1 - top.yesBid;
+  for (const l of TOUCH_LEVELS) {
+    const lim = l / 100 + 1e-9;
+    if (top.yesAsk != null && top.yesAsk <= lim && !ft.yes.has(l)) ft.yes.set(l, { at: observedMs, tau: tauMs });
+    if (noAsk != null && noAsk <= lim && !ft.no.has(l)) ft.no.set(l, { at: observedMs, tau: tauMs });
+  }
+  return ft;
+}
+
+/** fifteen_min_first_touch rows for one window. */
+export function firstTouchRows(event, ft) {
+  const out = [];
+  for (const side of ['yes', 'no']) {
+    for (const [l, v] of ft[side]) {
+      out.push({ event_ticker: event, side, level_c: l, first_touch_at: new Date(v.at).toISOString(), tau_ms: v.tau });
+    }
+  }
+  return out;
+}
+
+/** One sampled second → a fifteen_min_book_5s row; null when the book has neither side. */
 export function bookRow({ market, event, closeMs }, book, observedMs, spot) {
   if (!book?.ready) return null;
   const top = bookTop(book);
@@ -231,6 +280,9 @@ const lastSeq = new Map(); // sid → seq
 let bookBuf = [];
 let tradeBuf = []; // raw prints, aggregated at flush
 let tradeRetry = []; // aggregated rows from a failed flush
+let touchBuf = []; // first-touch rows for windows that have rolled off
+/** market_ticker → { event, fromOpen, ft } for the live window's first-touch tracking. */
+const touchState = new Map();
 let flushing = false;
 
 const stats = {
@@ -242,6 +294,7 @@ const stats = {
   lastFlushError: null,
   droppedRows: 0,
   seqGapReconnects: 0,
+  firstTouchWindows: 0,
   alerting: false,
 };
 
@@ -287,6 +340,12 @@ function connect() {
   const pair = currentPair();
   windows = new Map(pair.map((w) => [w.market, w]));
   for (const m of [...books.keys()]) if (!windows.has(m)) books.delete(m);
+  // A reconnect that crosses a boundary drops the old window here, not in roll().
+  for (const [m, st] of [...touchState]) {
+    if (windows.has(m)) continue;
+    if (st.fromOpen) touchBuf.push(...firstTouchRows(st.event, st.ft));
+    touchState.delete(m);
+  }
   for (const w of pair) if (!books.has(w.market)) books.set(w.market, emptyBook());
 
   ws = new WebSocket(KALSHI_WS_URL, { headers: authHeaders('GET', KALSHI_WS_PATH) });
@@ -379,7 +438,12 @@ function roll() {
   const drop = [...windows.keys()].filter((m) => !want.has(m));
   const add = pair.filter((w) => !windows.has(w.market));
   windows = new Map(pair.map((w) => [w.market, w]));
-  for (const m of drop) books.delete(m);
+  for (const m of drop) {
+    books.delete(m);
+    const st = touchState.get(m);
+    if (st?.fromOpen) touchBuf.push(...firstTouchRows(st.event, st.ft));
+    touchState.delete(m);
+  }
   for (const w of add) books.set(w.market, emptyBook());
   if (!ws || sids.size === 0) return; // not connected: connect() subscribes the new pair
   for (const sid of sids.values()) {
@@ -398,7 +462,19 @@ function sampleOnce() {
     // Only the live window: the next one is subscribed to pre-warm its book, but it
     // cannot trade before it opens.
     if (observedMs < w.closeMs - WINDOW_MS || observedMs >= w.closeMs) continue;
-    const row = bookRow(w, books.get(w.market), observedMs, spot);
+    const book = books.get(w.market);
+    if (!book?.ready) continue;
+    const tau = w.closeMs - observedMs;
+    // First-touch at 1-second resolution, in memory. `fromOpen` = we saw this window
+    // within 5s of its open; a window joined mid-way never writes a "first" touch.
+    let st = touchState.get(w.market);
+    if (!st) {
+      st = { event: w.event, fromOpen: tau >= WINDOW_MS - 5_000, ft: emptyTouches() };
+      touchState.set(w.market, st);
+    }
+    updateFirstTouch(st.ft, bookTop(book), observedMs, tau);
+    if (observedMs % BOOK_EVERY_MS !== 0) continue;
+    const row = bookRow(w, book, observedMs, spot);
     if (row) bookBuf.push(row);
   }
 }
@@ -429,7 +505,13 @@ async function flush() {
     }
     if (trades.length) {
       await insertFifteenMinTrades(trades);
-      stats.tradesLastAt = trades.reduce((a, r) => (r.ts > a ? r.ts : a), stats.tradesLastAt ?? "");
+      stats.tradesLastAt = trades.reduce((a, r) => (r.bucket_at > a ? r.bucket_at : a), stats.tradesLastAt ?? '');
+    }
+    if (touchBuf.length) {
+      const rows = touchBuf;
+      await insertFifteenMinFirstTouch(rows);
+      touchBuf = touchBuf.slice(rows.length);
+      stats.firstTouchWindows += new Set(rows.map((r) => r.event_ticker)).size;
     }
     stats.insertLog.push({ at: Date.now(), book: book.length, trades: trades.length, prints: printsFlushed });
     stats.insertLog = stats.insertLog.filter((e) => Date.now() - e.at <= 60_000);
@@ -437,9 +519,9 @@ async function flush() {
   } catch (err) {
     stats.lastFlushError = { at: new Date().toISOString(), message: String(err?.message || err).slice(0, 240) };
     console.warn('[btc15m] flush failed; retrying next flush', stats.lastFlushError.message);
-    // Keep the rows; inserts are idempotent (PK / trade_id), so a retry is safe.
-    // Book rows go back as-is; trade seconds go back as their aggregate rows can't be
-    // re-split, so they are retried from a side buffer.
+    // Keep the rows; every insert is idempotent on its PK, so a retry is safe.
+    // Book rows go back as-is; trade buckets go back as aggregate rows (they can't be
+    // re-split), retried from a side buffer; first-touch rows stay in touchBuf.
     bookBuf = bound(book.concat(bookBuf));
     tradeRetry = bound(trades.concat(tradeRetry));
   } finally {
@@ -457,7 +539,7 @@ async function watchdog() {
   if (stale && !stats.alerting) {
     stats.alerting = true;
     await postBotLog(
-      `🟥 **KXBTC15M capture stalled** — no book rows inserted into fifteen_min_book_1s for ${Math.round((now - last) / 60_000)} min. ` +
+      `🟥 **KXBTC15M capture stalled** — no book rows inserted into fifteen_min_book_5s for ${Math.round((now - last) / 60_000)} min. ` +
         `wsConnected=${stats.wsConnected} · lastFlushError=${stats.lastFlushError?.message ?? 'none'} · ` +
         `check https://pmp-ingestion.fly.dev/health → crypto15m.book1s`,
     ).catch(() => {});
@@ -487,6 +569,8 @@ export function getBook1sHealth() {
     buffered: { book: bookBuf.length, prints: tradeBuf.length, tradeRetry: tradeRetry.length },
     droppedRows: stats.droppedRows,
     seqGapReconnects: stats.seqGapReconnects,
+    firstTouchWindows: stats.firstTouchWindows,
+    pendingFirstTouch: touchBuf.length,
     lastFlushError: stats.lastFlushError,
     alerting: stats.alerting,
   };

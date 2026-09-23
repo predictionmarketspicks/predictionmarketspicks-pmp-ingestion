@@ -76,27 +76,36 @@ export async function recordMetalsSpotMark(m) {
 }
 
 /**
- * KXBTC15M one-second book rows (feeds/kalshi-btc15m.js) — ONE multi-row insert per
+ * KXBTC15M book rows every 5s (feeds/kalshi-btc15m.js) — ONE multi-row insert per
  * 15s flush. PK (market_ticker, observed_at) makes a retried flush idempotent.
  */
 export async function insertFifteenMinBookRows(rows) {
   if (!rows?.length) return;
   const { error } = await getClient()
-    .from('fifteen_min_book_1s')
+    .from('fifteen_min_book_5s')
     .upsert(rows, { onConflict: 'market_ticker,observed_at', ignoreDuplicates: true });
-  if (error) throw new Error(`fifteen_min_book_1s: ${error.message}`);
+  if (error) throw new Error(`fifteen_min_book_5s: ${error.message}`);
+}
+
+/** Per-window first touch per side per level; written once, when the window rolls off. */
+export async function insertFifteenMinFirstTouch(rows) {
+  if (!rows?.length) return;
+  const { error } = await getClient()
+    .from('fifteen_min_first_touch')
+    .upsert(rows, { onConflict: 'event_ticker,side,level_c', ignoreDuplicates: true });
+  if (error) throw new Error(`fifteen_min_first_touch: ${error.message}`);
 }
 
 /**
- * KXBTC15M tape, one row per (market, second, price, taker side) — aggregated by
+ * KXBTC15M tape, one row per (market, 10s bucket, taker side) — aggregated by
  * aggregateTrades(). The PK makes a retried flush idempotent.
  */
 export async function insertFifteenMinTrades(rows) {
   if (!rows?.length) return;
   const { error } = await getClient()
-    .from('fifteen_min_trades_1s')
-    .upsert(rows, { onConflict: 'market_ticker,ts,yes_price,taker_side', ignoreDuplicates: true });
-  if (error) throw new Error(`fifteen_min_trades_1s: ${error.message}`);
+    .from('fifteen_min_trades_10s')
+    .upsert(rows, { onConflict: 'market_ticker,bucket_at,taker_side', ignoreDuplicates: true });
+  if (error) throw new Error(`fifteen_min_trades_10s: ${error.message}`);
 }
 
 export async function upsertCommodityEdgeRows(rows) {

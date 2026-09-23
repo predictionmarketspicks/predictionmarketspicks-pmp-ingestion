@@ -13,8 +13,11 @@ import {
   tradeRow,
   bookRow,
   aggregateTrades,
+  emptyTouches,
+  updateFirstTouch,
+  firstTouchRows,
 } from '../src/feeds/kalshi-btc15m.js';
-import { parseCoinbaseTicker } from '../src/feeds/coinbase-ws.js';
+import { parseCoinbaseTicker, velocityFromBuffer } from '../src/feeds/coinbase-ws.js';
 
 describe('window + ticker', () => {
   it('the live window closes at the next quarter-hour strictly after now', () => {
@@ -98,27 +101,48 @@ describe('rows', () => {
   });
 });
 
-describe('trade aggregation', () => {
-  const p = (ts, price, side, count, market = 'M') => ({ commodity: 'bitcoin', market_ticker: market, event_ticker: 'E', ts, yes_price: price, taker_side: side, count });
-  const now = Date.parse('2026-09-23T17:30:10.500Z');
+describe('trade aggregation (10s buckets per side)', () => {
+  const p = (ts, price, side, count, market = 'M') => ({ commodity: 'btc', market_ticker: market, event_ticker: 'E', ts, yes_price: price, taker_side: side, count });
+  const now = Date.parse('2026-09-23T17:30:25.500Z');
 
-  it('one row per (market, second, price, side); contracts summed, prints counted', () => {
+  it('one row per (market, bucket, side): prints, contracts, VWAP, min/max', () => {
     const { rows, pending } = aggregateTrades([
-      p('2026-09-23T17:30:01.100Z', 0.5, 'yes', 0.01),
-      p('2026-09-23T17:30:01.900Z', 0.5, 'yes', 2.5),
-      p('2026-09-23T17:30:01.500Z', 0.5, 'no', 1),
-      p('2026-09-23T17:30:01.500Z', 0.51, 'yes', 1),
-      p('2026-09-23T17:30:02.000Z', 0.5, 'yes', 1),
+      p('2026-09-23T17:30:01.100Z', 0.5, 'yes', 1),
+      p('2026-09-23T17:30:09.900Z', 0.6, 'yes', 3),
+      p('2026-09-23T17:30:05.000Z', 0.55, 'no', 2),
+      p('2026-09-23T17:30:10.000Z', 0.4, 'yes', 1),
     ], now);
     expect(pending).toEqual([]);
-    expect(rows).toHaveLength(4);
-    expect(rows.find((r) => r.ts === '2026-09-23T17:30:01.000Z' && r.yes_price === 0.5 && r.taker_side === 'yes')).toMatchObject({ count: 2.51, prints: 2 });
+    expect(rows).toHaveLength(3);
+    expect(rows.find((r) => r.bucket_at === '2026-09-23T17:30:00.000Z' && r.taker_side === 'yes')).toEqual({
+      commodity: 'btc', market_ticker: 'M', event_ticker: 'E', bucket_at: '2026-09-23T17:30:00.000Z', taker_side: 'yes',
+      prints: 2, contracts: 4, vwap: 0.575, min_price: 0.5, max_price: 0.6,
+    });
   });
 
-  it('holds back seconds that may still be receiving prints — a second is flushed once', () => {
-    const { rows, pending } = aggregateTrades([p('2026-09-23T17:30:07.200Z', 0.5, 'yes', 1), p('2026-09-23T17:30:06.999Z', 0.5, 'yes', 1)], now);
-    expect(rows.map((r) => r.ts)).toEqual(['2026-09-23T17:30:06.000Z']);
+  it('holds back a bucket until 3s after it ends — a bucket is flushed once', () => {
+    const { rows, pending } = aggregateTrades([p('2026-09-23T17:30:21.000Z', 0.5, 'yes', 1), p('2026-09-23T17:30:09.000Z', 0.5, 'yes', 1)], now);
+    expect(rows.map((r) => r.bucket_at)).toEqual(['2026-09-23T17:30:00.000Z']);
     expect(pending).toHaveLength(1);
+  });
+});
+
+describe('first touch (in memory, 1s)', () => {
+  it('records the FIRST second each side’s ask reaches ≤ L, per level', () => {
+    const ft = emptyTouches();
+    updateFirstTouch(ft, { yesBid: 0.70, yesAsk: 0.72 }, 1000, 800_000); // NO ask 30¢
+    updateFirstTouch(ft, { yesBid: 0.86, yesAsk: 0.87 }, 2000, 799_000); // NO ask 14¢
+    updateFirstTouch(ft, { yesBid: 0.60, yesAsk: 0.62 }, 3000, 798_000); // back up — no rewrite
+    const rows = firstTouchRows('E', ft);
+    const no = Object.fromEntries(rows.filter((r) => r.side === 'no').map((r) => [r.level_c, r.tau_ms]));
+    expect(no).toEqual({ 15: 799_000, 20: 799_000, 25: 799_000, 33: 800_000, 40: 800_000, 45: 800_000 });
+    expect(rows.filter((r) => r.side === 'yes')).toEqual([]);
+  });
+
+  it('an ask exactly at L counts (floating error does not)', () => {
+    const ft = updateFirstTouch(emptyTouches(), { yesBid: null, yesAsk: 0.33 }, 0, 1);
+    expect(ft.yes.has(33)).toBe(true);
+    expect(ft.no.size).toBe(0);
   });
 });
 
@@ -135,5 +159,32 @@ describe('coinbase 1s spot', () => {
     expect(parseCoinbaseTicker({ type: 'ticker', best_bid: '2', best_ask: '1' })).toBeNull();
     expect(parseCoinbaseTicker({ type: 'ticker', best_bid: '0', best_ask: '1' })).toBeNull();
     expect(parseCoinbaseTicker({ type: 'subscriptions' })).toBeNull();
+  });
+});
+
+describe('velocity (public 1s spot)', () => {
+  const T = Date.parse('2026-09-23T17:40:00Z');
+  const buf = (fn) => Array.from({ length: 181 }, (_, i) => ({ t: T - (180 - i) * 1000, price: fn(i), source: 'coinbase_ws' }));
+
+  it('a steady climb reads UP; pace compares the last minute to the 3-minute pace', () => {
+    const v = velocityFromBuffer(buf((i) => 84000 * (1 + 0.0005 * (i / 180))), T);
+    expect(v).toMatchObject({ direction: 'up', pace: 'steady', source: 'coinbase_ws' });
+    expect(v.ret_3m_pct).toBeCloseTo(0.05, 3);
+  });
+
+  it('a move concentrated in the last minute is ACCELERATING', () => {
+    const v = velocityFromBuffer(buf((i) => (i < 120 ? 84000 : 84000 * (1 + 0.0006 * ((i - 120) / 60)))), T);
+    expect(v).toMatchObject({ direction: 'up', pace: 'accelerating' });
+  });
+
+  it('a 3-min move under Q1 (0.0154%) is FLAT; a reversal in the last minute is FADING', () => {
+    expect(velocityFromBuffer(buf(() => 84000), T).direction).toBe('flat');
+    const v = velocityFromBuffer(buf((i) => (i < 120 ? 84000 * (1 - 0.001 * (i / 120)) : 83916 + (i - 120) * 0.3)), T);
+    expect(v).toMatchObject({ direction: 'down', pace: 'fading' });
+  });
+
+  it('null while warming or stale — never a guessed read', () => {
+    expect(velocityFromBuffer(buf(() => 84000).slice(100), T)).toBeNull();
+    expect(velocityFromBuffer(buf(() => 84000), T + 10_000)).toBeNull();
   });
 });

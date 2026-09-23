@@ -58,6 +58,23 @@ function _shouldPersist(row) {
   return { write: false, key };
 }
 
+/** One row per metal per 15-minute boundary: the spot in effect AT the boundary
+ *  (feeds/pyth.js markSettleBoundary). Scored against Kalshi's settlement prints
+ *  by the site repo's scripts/check-metals-spot-proxy.mjs. Idempotent on
+ *  (commodity, mark_at). */
+export async function recordMetalsSpotMark(m) {
+  const sb = getClient();
+  const { error } = await sb.from('metals_spot_marks').upsert({
+    commodity: m.commodity,
+    mark_at: m.markAt,
+    spot: m.spot,
+    source: m.source,
+    tick_at: m.tickAt,
+    half_spread: m.halfSpread,
+  }, { onConflict: 'commodity,mark_at', ignoreDuplicates: true });
+  if (error) throw new Error(`metals_spot_marks: ${error.message}`);
+}
+
 export async function upsertCommodityEdgeRows(rows) {
   if (!rows || rows.length === 0) return { count: 0 };
   const tag = writerTag();

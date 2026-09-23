@@ -10,6 +10,8 @@
 
 import { setFeedStatus, recordTick } from '../observability/health.js';
 import { fetchPythnetPrice } from './pythnet.js';
+import { fetchSwissquoteSpot, hasSwissquoteFeed } from './swissquote.js';
+import { recordMetalsSpotMark } from '../delivery/supabase.js';
 import { recordTick as recordPriceTick } from '../engine/short-horizon-vol.js';
 
 // Pyth feed symbols → commodity tags consumed by the short-horizon vol
@@ -51,8 +53,12 @@ export const FEED_IDS = {
 };
 
 const SOURCE_TAGS = {
-  'XAG/USD': 'pyth_xag_usd',
-  'XAU/USD': 'pyth_xau_usd',
+  // Gold/silver spot is Swissquote since 2026-09-23 — see ./swissquote.js. The
+  // TAG says so (it lands in commodity_edge_signals.spot_source); the health-feed
+  // KEYS stay `pyth_xag_usd` / `pyth_xau_usd` because they are slot names wired
+  // into index.js's readiness gate, not claims about the vendor.
+  'XAG/USD': 'swissquote_xag_usd',
+  'XAU/USD': 'swissquote_xau_usd',
   'BTC/USD': 'pyth_btc_usd',
   'SPY/USD': 'pyth_spy_usd',
   WTI: 'pyth_wti',
@@ -154,10 +160,18 @@ function feedIdFor(symbol) {
  *  rather than `FEED_IDS[symbol]` — the WTI front month is resolved dynamically
  *  and is deliberately absent from that table. */
 export function hasPythFeed(symbol) {
-  return feedIdFor(symbol) != null;
+  return feedIdFor(symbol) != null || hasSwissquoteFeed(symbol);
 }
 
 async function fetchOnce(symbol) {
+  // ── Gold / silver: Swissquote spot, 2026-09-23 ─────────────────────────────
+  // Pythnet XAU/XAG stopped updating 2026-09-22 ~13:18 UTC and every free Pyth
+  // path is closed (see ./swissquote.js for the evidence and the alternatives
+  // measured). Same return shape, so every getPrice() caller is unchanged.
+  if (hasSwissquoteFeed(symbol)) {
+    const px = await fetchSwissquoteSpot(symbol);
+    return { symbol, ...px, feedId: null, source: SOURCE_TAGS[symbol] };
+  }
   const feedId = feedIdFor(symbol);
   if (!feedId) {
     // Phase 2A: WTI / XCU/USD are registered symbols without verified feed IDs.
@@ -255,6 +269,7 @@ async function pollOnce(symbol) {
       setFeedStatus(key, { connected: true, lastError: `wide confidence (${n} rejected)` });
       return;
     }
+    markSettleBoundary(symbol, priceMap.get(symbol), px);
     priceMap.set(symbol, px);
     recordTick(key);
     const commodity = SHORT_HORIZON_COMMODITY[symbol];
@@ -269,6 +284,34 @@ async function pollOnce(symbol) {
   }
 }
 
+// ── Settle-boundary marks (gold/silver) ──────────────────────────────────────
+// Kalshi settles KXGOLD15M / KXSILVER15M on the 1-minute candle CLOSE at every
+// :00 :15 :30 :45 (rules_primary), i.e. the last print at or before the boundary,
+// and the dailies at 17:00 ET — also a :00 boundary. When a poll crosses a
+// boundary, the price in effect AT it is the previous accepted print (published
+// <= boundary). That is recorded to metals_spot_marks, and
+// scripts/check-metals-spot-proxy.mjs (site repo) scores it against Kalshi's
+// expiration_value — the live measurement of how good this proxy is.
+const MARK_EVERY_MS = 15 * 60 * 1000;
+const lastMarked = new Map(); // symbol → boundary ms already recorded
+
+function markSettleBoundary(symbol, prev, next) {
+  if (!hasSwissquoteFeed(symbol) || !prev) return;
+  const boundary = Math.floor(next.publishTimeMs / MARK_EVERY_MS) * MARK_EVERY_MS;
+  if (lastMarked.get(symbol) === boundary) return;
+  if (!(prev.publishTimeMs <= boundary && next.publishTimeMs > boundary)) return;
+  lastMarked.set(symbol, boundary);
+  if (!prev.trading) return; // a closed-market print is not a settle price
+  recordMetalsSpotMark({
+    commodity: symbol === 'XAU/USD' ? 'gold' : 'silver',
+    markAt: new Date(boundary).toISOString(),
+    spot: prev.price,
+    source: prev.source,
+    tickAt: new Date(prev.publishTimeMs).toISOString(),
+    halfSpread: prev.confidence ?? null,
+  }).catch((e) => console.warn(`[pyth] metals spot mark failed: ${e?.message || e}`));
+}
+
 function schedule(symbol) {
   if (stopRequested) return;
   const t = setTimeout(async () => {
@@ -281,7 +324,7 @@ function schedule(symbol) {
 export function startPyth(symbols = ['XAG/USD']) {
   stopRequested = false;
   for (const s of symbols) {
-    if (!feedIdFor(s)) {
+    if (!hasPythFeed(s)) {
       console.warn(`[pyth] ${s} has no verified feed ID — poller skipped (engine will fail open)`);
       setFeedStatus(`pyth_${feedKey(s)}`, {
         connected: false,

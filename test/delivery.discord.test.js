@@ -15,8 +15,9 @@ function makeMeta(commodity, overrides = {}) {
     commodity,
     eventTicker: `KX${commodity.toUpperCase()}-26MAY0817`,
     spotPrice: 35.42,
+    publicPrice: 35.4,
     etfPrice: 32.15,
-    spotLabel: `Pyth ${commodity}`,
+    spotLabel: `Kalshi 15-min reference`,
     generatedAt: '2026-05-02T18:55:00.000Z',
     hoursToClose: 70.5,
     strikeCount: 28,
@@ -84,10 +85,23 @@ describe('buildCommodityEmbed', () => {
 
   it('shows the spot label from meta in the spot field name', () => {
     const payload = buildCommodityEmbed(
-      makeMeta('gold', { spotLabel: 'Pyth XAU/USD' }),
+      makeMeta('gold', { spotLabel: 'Kalshi 15-min reference' }),
       TOP_EDGE,
     );
     const spotField = payload.embeds[0].fields.find((f) => f.name.includes('Spot'));
-    expect(spotField.name).toContain('Pyth XAU/USD');
+    expect(spotField.name).toContain('Kalshi 15-min reference');
+  });
+
+  it('prints the PUBLIC price, never the engine spot (vendor quote / licensed index)', () => {
+    const payload = buildCommodityEmbed(makeMeta('gold', { spotPrice: 4289.08, publicPrice: 4285.46 }), TOP_EDGE);
+    const spotField = payload.embeds[0].fields.find((f) => f.name.includes('Spot'));
+    expect(spotField.value).toBe('$4285.46');
+    expect(JSON.stringify(payload)).not.toContain('4289.08');
+  });
+
+  it('omits the spot field when there is no public price (no open window)', () => {
+    const payload = buildCommodityEmbed(makeMeta('gold', { spotPrice: 4289.08, publicPrice: null }), TOP_EDGE);
+    expect(payload.embeds[0].fields.find((f) => f.name.includes('Spot'))).toBeUndefined();
+    expect(JSON.stringify(payload)).not.toContain('4289.08');
   });
 });

@@ -5,9 +5,16 @@
 // wrapper file in src/engine/. The shared compute fn in commodity-base.js
 // reads the rest from the row passed in.
 //
-// Spot/chain feed source per commodity (May 16 2026):
-//   silver   Pyth XAG/USD  + Databento SLV.OPT   (real-time, default provider)
-//   gold     Pyth XAU/USD  + Databento GLD.OPT   (real-time)
+// Spot/chain feed source per commodity (May 16 2026; metals updated 2026-09-23):
+//   silver   Swissquote XAG/USD + Databento SLV.OPT (real-time, default provider)
+//   gold     Swissquote XAU/USD + Databento GLD.OPT (real-time)
+//            The metals spot is Swissquote's PUBLIC interbank quote since
+//            2026-09-23 (src/feeds/swissquote.js, routed through feeds/pyth.js
+//            getPrice under the unchanged 'XAU/USD' / 'XAG/USD' keys — Pythnet's
+//            accounts went dead 2026-09-22). Kalshi still SETTLES on Pyth (gated
+//            Metal.Index.*), so it is a measured proxy. It is an internal model
+//            input: public surfaces print Kalshi's locked 15-minute reference
+//            (publicPriceSource below), never the quote.
 //   oil      Yahoo CL=F /  + Databento USO.OPT   (hybrid: Yahoo spot for
 //            CLM26.NYM                            contract-aware WTI accuracy,
 //                                                 Databento for real-time IV chain)
@@ -57,7 +64,11 @@ export const COMMODITIES = {
     underlyingEtf: 'SLV',
     pythSymbol: 'XAG/USD',
     spotUnit: '$/oz',
-    spotLabel: 'Pyth XAG/USD',
+    // What public surfaces print (Discord `Spot (…)`, /health) — Kalshi's own locked
+    // 15-minute reference, never the engine's spot quote (Benny 2026-09-23: "use
+    // kalshi instead"). See metals-15m.js getMetals15mReference.
+    spotLabel: 'Kalshi 15-min reference',
+    publicPriceSource: 'kalshi_15m_reference',
     enabled: true,
     // V2 cutover (2026-05-21): physical-measure prob drives direction/
     // confidence/tier/routing. drift.js + vol.js outputs feed
@@ -69,8 +80,9 @@ export const COMMODITIES = {
     // is monthly only). Revisit if a daily series surfaces. See handoffs/
     // BATCH_FRED_P5_AND_TRACKER_P2_2026-05-10.md.
     fredSeriesId: null,
-    // Spot is Pyth (sub-second publishes); 5 min without a tick means the feed
-    // is dead, not quiet. Demotes tier — see commodity-base.js staleness gate.
+    // Spot is a sub-second public quote (Swissquote since 2026-09-23); 5 min without
+    // a tick means the feed is dead, not quiet. Demotes tier — see commodity-base.js
+    // staleness gate.
     maxSpotAgeMs: 5 * 60 * 1000,
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
@@ -140,7 +152,11 @@ export const COMMODITIES = {
     underlyingEtf: 'GLD',
     pythSymbol: 'XAU/USD',
     spotUnit: '$/oz',
-    spotLabel: 'Pyth XAU/USD',
+    // What public surfaces print (Discord `Spot (…)`, /health) — Kalshi's own locked
+    // 15-minute reference, never the engine's spot quote (Benny 2026-09-23: "use
+    // kalshi instead"). See metals-15m.js getMetals15mReference.
+    spotLabel: 'Kalshi 15-min reference',
+    publicPriceSource: 'kalshi_15m_reference',
     enabled: true,
     // V2 cutover — see commodities.silver.useV2Cutover note.
     useV2Cutover: true,
@@ -152,8 +168,9 @@ export const COMMODITIES = {
     // guard while still looking configured. Null opts out honestly, exactly as
     // silver already does. Revisit if a daily gold series surfaces on FRED.
     fredSeriesId: null,
-    // Spot is Pyth (sub-second publishes); 5 min without a tick means the feed
-    // is dead, not quiet. Demotes tier — see commodity-base.js staleness gate.
+    // Spot is a sub-second public quote (Swissquote since 2026-09-23); 5 min without
+    // a tick means the feed is dead, not quiet. Demotes tier — see commodity-base.js
+    // staleness gate.
     maxSpotAgeMs: 5 * 60 * 1000,
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,
@@ -367,8 +384,9 @@ export const COMMODITIES = {
     // cross-check that protects oil from a frozen CL=F print doesn't apply
     // when Pyth itself is the canonical real-time feed.
     fredSeriesId: null,
-    // Spot is Pyth (sub-second publishes); 5 min without a tick means the feed
-    // is dead, not quiet. Demotes tier — see commodity-base.js staleness gate.
+    // Spot is a sub-second public quote (Swissquote since 2026-09-23); 5 min without
+    // a tick means the feed is dead, not quiet. Demotes tier — see commodity-base.js
+    // staleness gate.
     // This is the direct instrument the FRED cross-check above could never be
     // for BTC, since no daily BTC series exists on FRED to compare against.
     maxSpotAgeMs: 5 * 60 * 1000,
@@ -595,8 +613,9 @@ export const COMMODITIES = {
     enabled: false, // flip true once a copper spot feed is wired
     // FRED skip: same constraint as silver — no daily FRED copper series.
     fredSeriesId: null,
-    // Spot is Pyth (sub-second publishes); 5 min without a tick means the feed
-    // is dead, not quiet. Demotes tier — see commodity-base.js staleness gate.
+    // Spot is a sub-second public quote (Swissquote since 2026-09-23); 5 min without
+    // a tick means the feed is dead, not quiet. Demotes tier — see commodity-base.js
+    // staleness gate.
     maxSpotAgeMs: 5 * 60 * 1000,
     snapshotIntervalMarketMs: SNAPSHOT_INTERVAL_MARKET_MS,
     snapshotIntervalOffMs: SNAPSHOT_INTERVAL_OFF_MS,

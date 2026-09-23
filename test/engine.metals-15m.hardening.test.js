@@ -171,3 +171,22 @@ describe('pythnet weekend age gate (diff 5)', () => {
     expect(maxOnchainAgeMs('BTC/USD', sunday)).toBe(24 * 3600 * 1000);
   });
 });
+
+// 2026-09-23 (Benny: "use kalshi instead") — the row written to anon-readable
+// widget_payloads never carries the vendor spot; only the side of Kalshi's reference.
+import { publicEnvelope } from '../src/engine/metals-15m.js';
+describe('publicEnvelope', () => {
+  it('strips spot and keeps only which side of the reference it sits on', () => {
+    const env = { as_of: 'x', stale: false, data: { strike: 4285.46, spot: 4289.08, spot_age_s: 3, fair_yes: 0.6 } };
+    const out = publicEnvelope(env);
+    expect(out.data.spot).toBeUndefined();
+    expect(out.data.above_reference).toBe(true);
+    expect(out.data.strike).toBe(4285.46);
+    expect(out.data.spot_age_s).toBe(3);
+    expect(JSON.stringify(out)).not.toContain('4289.08');
+    expect(publicEnvelope({ data: { strike: 4285.46, spot: 4280 } }).data.above_reference).toBe(false);
+    expect(publicEnvelope({ data: { strike: null, spot: 4280 } }).data.above_reference).toBeNull();
+    expect(env.data.spot).toBe(4289.08); // pure — the internal envelope is untouched
+  });
+});
+

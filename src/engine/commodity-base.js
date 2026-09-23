@@ -54,6 +54,10 @@ import {
 import { getQuote } from '../feeds/kalshi.js';
 import { getChain, fetchPrevClose } from '../feeds/options-provider.js';
 import { getPrice } from '../feeds/pyth.js';
+// Public price for metals alerts/health = Kalshi's locked 15-minute reference, never
+// the engine's spot quote (config.publicPriceSource). No cycle: metals-15m.js does not
+// import this file.
+import { getMetals15mReference } from './metals-15m.js';
 import { getBrtiSpot } from '../feeds/brti-spot.js';
 // Bitcoin's spot ladder is now ref/pub split — see the header of btc-spot.js.
 // ⛔ The engine prices on `.ref` (the CF Benchmarks settlement index, OPRA-class)
@@ -1621,6 +1625,19 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       topTier: finalTopTier,
       topTierInt: confidenceTierInt(finalTopTier),
       spotLabel: config.spotLabel,
+      // What a PUBLIC surface prints next to spotLabel (Discord embed, /health, the
+      // alerts ledger). NEVER spotPrice for these two:
+      //   · metals — spotPrice is the vendor quote; print Kalshi's locked 15-minute
+      //     reference instead (null when no window is open → the field is omitted);
+      //   · bitcoin — spotPrice is btcSpot.REF, the licensed CF Benchmarks index
+      //     whenever the CF feed is armed (it is, 2026-09-23); print btcSpot.pub,
+      //     the public exchange basket — the same number the payload rows carry.
+      publicPrice:
+        config.publicPriceSource === 'kalshi_15m_reference'
+          ? getMetals15mReference(config.commodity)?.price ?? null
+          : btcSpot
+            ? btcSpot.pub.price
+            : spotPrice,
       // Does calibration OWN the decision for this commodity right now? The
       // alert tier ceiling keys on this, not on the presence of a
       // calibrated_prob — shadow rows carry one while decisions still run on

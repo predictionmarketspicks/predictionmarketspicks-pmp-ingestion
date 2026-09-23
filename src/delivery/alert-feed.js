@@ -140,7 +140,9 @@ function commodityMetaToRow(meta, alertKey) {
     resolves_at: meta.eventCloseAt ?? null,
     meta: {
       commodity: feed,
-      spot_price: meta.spotPrice ?? null,
+      // The PUBLIC price only (Kalshi's reference for metals, the exchange basket for
+      // bitcoin) — never the vendor quote or the licensed index (commodity-base.js).
+      spot_price: meta.publicPrice ?? null,
       hours_to_close: meta.hoursToClose != null ? Math.round(meta.hoursToClose) : null,
       quarter_kelly: quarterKelly,
     },

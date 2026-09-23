@@ -1,9 +1,10 @@
 // 15-minute commodity edge engine — KXGOLD15M + KXSILVER15M + KXWTI15M.
 //
 // Writes ONE widget_payloads row per tool (gold-edge-15m / silver-edge-15m) on
-// a short timer while a window is open. The site reads those rows; the browser
-// polls Pyth Hermes itself for live spot and recomputes the gauge between ISR
-// ticks, so this engine only has to be fresh, not real-time.
+// a short timer while a window is open. The site reads those rows and its client
+// island re-polls our own JSON route every 10s, so this engine only has to be
+// fresh, not real-time. (The browser used to poll Pyth Hermes directly; that was
+// CSP-blocked from launch and Hermes went behind a paid key on 2026-08-26.)
 //
 // WHAT THIS IS NOT: a directional pick engine. There is no options chain at a
 // 15-minute horizon, and V2.1 showed the momentum-driven directional model
@@ -11,22 +12,37 @@
 // market's 0.2167 — the book beat the model on its own product). At 15 minutes
 // that gets worse. So fair value here is computed with mu = 0 DELIBERATELY:
 // once the window opens the strike K is locked and fair value is arithmetic,
-// not forecasting. Do not add a drift term without a promotion gate.
+// not forecasting. Do not add a drift term without a promotion gate. Measured
+// 2026-09-23: following the page's ▲/▼ at its first reading lost −1.39¢ (gold) /
+// −2.12¢ (silver) per contract after fees over 2,925 windows each, at the mid
+// (site repo handoffs/METALS_15M_ARROWS_DEMOTE_2026-09-23.md).
 //
-// Settlement is Pyth's 1-minute candle close vs the candle close at window
-// open. Kalshi names index symbols that Pyth does NOT publish
-// (Metal.Index.GOLD/USD etc.), so rather than assume our public feeds match, we
-// measured them against Kalshi's own published settlement prints
-// (`expiration_value` on settled markets) over 200 windows each:
+// SETTLEMENT vs OUR SPOT. Kalshi settles on Pyth's 1-minute candle close vs the
+// candle close at window open, on GATED index symbols (Metal.Index.GOLD/USD,
+// Metal.Index.SILVER/USD) that no free feed can read. So the engine prices on a
+// PROXY and measures it, never assumes it:
 //
-//   KXGOLD15M   Metal.XAU/USD          99.5% verdict agreement
-//   KXSILVER15M Metal.XAG/USD          99.0%
-//   KXWTI15M    front-month WTI future 99.5%
+//   KXGOLD15M / KXSILVER15M — since 2026-09-23 the spot is Swissquote's PUBLIC
+//     interbank quote (src/feeds/swissquote.js, routed via feeds/pyth.js getPrice;
+//     Pythnet's XAU/XAG accounts went dead 2026-09-22). Measured before the switch
+//     (FX spot vs Kalshi's own `expiration_value`, 4 days): gold 100.0% verdict
+//     agreement over 244 windows, silver 98.8% over 256. Every settle since is
+//     scored by the site repo's scripts/check-metals-spot-proxy.mjs (every 3h,
+//     #bot-logs below 95%) from metals_spot_marks.
+//     (Until 2026-09-22 it was Pyth's public Metal.XAU/USD / Metal.XAG/USD —
+//     99.5% / 99.0% over 200 windows each; that feed is gone.)
+//   KXWTI15M — front-month WTI future, 99.5% verdict agreement (Pythnet).
 //
 // "Verdict agreement" = would this feed have called the same up/down result.
 // That is the metric that decides a contract; price error is scale-dependent.
-// Re-run with `scripts/validate-15m-settlement-feed.ts` in the site repo.
 // Crypto 15m series settle on CF Benchmarks and are NOT covered by this engine.
+//
+// ⛔ THE SPOT NEVER LEAVES THE ENGINE (Benny 2026-09-23: "use kalshi instead").
+// widget_payloads is anon-readable, so the row written is publicEnvelope(): the raw
+// quote is stripped and only `above_reference` (which side of Kalshi's locked
+// reference it sits on) goes out. The spot stays an internal input — fair value,
+// the settle/signal captures, metals_spot_marks. The price a reader sees anywhere
+// (page, API, Discord, /health) is Kalshi's own locked reference (`strike`).
 //
 // Why widget_payloads and not commodity_edge_signals: that table is
 // strike-ladder-shaped AND carries the tool_picks mint trigger. Writing 96
@@ -454,10 +470,15 @@ export async function runMetals15mOnce({ now = Date.now() } = {}) {
 
       if (!envelope.data.market_closed) anyActive = true;
 
-      await upsertWidgetPayloads(cfg.slug, envelope, ['hero']);
+      await upsertWidgetPayloads(cfg.slug, publicEnvelope(envelope), ['hero']);
       written += 1;
 
+      // Internal shape (carries the spot) — for the captures below only.
       const d = envelope.data;
+      latestReference[cfg.commodity] =
+        !d.market_closed && d.strike != null
+          ? { price: d.strike, windowOpen: d.window?.open ?? null, at: now }
+          : null;
       // Our own read at the settling instant — the other half of the
       // settlement-fidelity comparison against Kalshi's published
       // `expiration_value`. Deliberately NOT in the settle sweep: that grades
@@ -669,6 +690,38 @@ export function stopMetals15m() {
     clearTimeout(state.sweepTimer);
     state.sweepTimer = null;
   }
+}
+
+/**
+ * The row that is actually WRITTEN (widget_payloads is anon-readable): the raw spot
+ * is removed and replaced by the side of Kalshi's locked reference it sits on.
+ * `spot_age_s` (freshness, not a price) stays. Pure; buildPayload keeps returning
+ * the internal shape the settle/signal captures need.
+ */
+export function publicEnvelope(envelope) {
+  const { spot, ...rest } = envelope.data;
+  return {
+    ...envelope,
+    data: {
+      ...rest,
+      above_reference:
+        spot != null && rest.strike != null && spot > 0 ? spot >= rest.strike : null,
+    },
+  };
+}
+
+/** Kalshi's locked reference per metal, for public alert surfaces (Discord, /health). */
+const latestReference = {};
+
+/**
+ * The open 15-minute window's locked reference (Kalshi floor_strike), or null when no
+ * window is open / the read is older than 20 minutes. This — not the engine's spot — is
+ * the gold/silver price any public surface prints.
+ */
+export function getMetals15mReference(commodity, now = Date.now()) {
+  const r = latestReference[commodity];
+  if (!r || now - r.at > 20 * 60_000) return null;
+  return r;
 }
 
 export function getMetals15mState() {

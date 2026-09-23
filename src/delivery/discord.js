@@ -95,11 +95,15 @@ export function buildCommodityEmbed(meta, topEdge) {
       ),
       inline: true,
     },
-    {
-      name: `Spot (${meta.spotLabel})`,
-      value: sanitize(`$${meta.spotPrice.toFixed(2)}`, 80),
-      inline: true,
-    },
+    // meta.publicPrice, NOT meta.spotPrice: for metals that is Kalshi's locked
+    // reference (the vendor quote never goes public); null → the field is omitted.
+    ...(meta.publicPrice != null && Number.isFinite(meta.publicPrice)
+      ? [{
+          name: `Spot (${meta.spotLabel})`,
+          value: sanitize(`$${meta.publicPrice.toFixed(2)}`, 80),
+          inline: true,
+        }]
+      : []),
   ];
 
   return {

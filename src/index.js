@@ -1082,7 +1082,9 @@ const server = http.createServer((req, res) => {
         lastSnapshot: state.lastSnapshotMeta
           ? {
               generatedAt: state.lastSnapshotMeta.generatedAt,
-              spotPrice: state.lastSnapshotMeta.spotPrice,
+              // Public endpoint: the PUBLIC price (Kalshi's reference for metals),
+              // never the engine's vendor spot.
+              spotPrice: state.lastSnapshotMeta.publicPrice ?? null,
               etfPrice: state.lastSnapshotMeta.etfPrice,
               topTier: state.lastSnapshotMeta.topTier,
               topTierInt: state.lastSnapshotMeta.topTierInt,

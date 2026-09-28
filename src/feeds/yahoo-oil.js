@@ -291,9 +291,25 @@ async function pollChainOnce(expirationDateRef) {
 
 // --- scheduling ---
 
+// ⛔ An off-hours poll must never overshoot the open. With a flat 60-minute
+// off-hours delay, a 09:25 ET tick scheduled the next poll for 10:25, so the
+// oil engine priced the first hour of the session on a spot up to an hour old
+// (and /health 503'd on the 17-minute market-hours gate). Off-hours, the delay
+// is capped so a poll lands one minute BEFORE the open (the tick that carries
+// the gate across 09:30) and the 15-minute cadence starts at the open itself.
+export function nextPollDelayMs(nowMs = Date.now()) {
+  if (isOptionsMarketOpen(new Date(nowMs))) return POLL_INTERVAL_MARKET_MS;
+  for (let m = 1; m * 60 * 1000 <= POLL_INTERVAL_OFF_MS; m++) {
+    if (isOptionsMarketOpen(new Date(nowMs + m * 60 * 1000))) {
+      return Math.max(60 * 1000, (m - 1) * 60 * 1000);
+    }
+  }
+  return POLL_INTERVAL_OFF_MS;
+}
+
 function scheduleSpot() {
   if (stopRequested) return;
-  const delay = isOptionsMarketOpen() ? POLL_INTERVAL_MARKET_MS : POLL_INTERVAL_OFF_MS;
+  const delay = nextPollDelayMs();
   const t = setTimeout(async () => {
     await pollSpotOnce();
     scheduleSpot();
@@ -303,7 +319,7 @@ function scheduleSpot() {
 
 function scheduleChain(expirationDateRef) {
   if (stopRequested) return;
-  const delay = isOptionsMarketOpen() ? POLL_INTERVAL_MARKET_MS : POLL_INTERVAL_OFF_MS;
+  const delay = nextPollDelayMs();
   const t = setTimeout(async () => {
     await pollChainOnce(expirationDateRef);
     scheduleChain(expirationDateRef);

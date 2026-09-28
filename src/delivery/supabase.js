@@ -337,6 +337,22 @@ export async function insertPolymarketSnapshots(rows, { snapshotAt } = {}) {
   const stamp = snapshotAt || new Date().toISOString();
   const stamped = rows.map((r) => ({ ...r, snapshot_at: stamp }));
   const sb = getClient();
+  // ⛔ CHUNKED. The US feed writes ~6,000 rows per tick, and one statement that
+  // size against this table's indexes intermittently hit PostgREST's 8s
+  // statement_timeout (authenticator role) — the batch was lost whole and
+  // /health went red. 1,000-row statements each run well inside the timeout; a
+  // failed chunk throws after the earlier chunks landed, and the next tick
+  // refills (ignoreDuplicates keeps a retry idempotent).
+  let count = 0;
+  for (let i = 0; i < stamped.length; i += SNAPSHOT_CHUNK_ROWS) {
+    count += await upsertSnapshotChunk(sb, stamped.slice(i, i + SNAPSHOT_CHUNK_ROWS), i);
+  }
+  return { count };
+}
+
+const SNAPSHOT_CHUNK_ROWS = 1000;
+
+async function upsertSnapshotChunk(sb, chunk, offset) {
   const { data, error } = await sb
     .from('polymarket_market_snapshots')
     // defaultToNull:false — a bulk upsert sends the UNION of the rows' keys, and
@@ -345,10 +361,10 @@ export async function insertPolymarketSnapshots(rows, { snapshotAt } = {}) {
     // US rows set 'us'. Today each call carries one venue, but a mixed batch would
     // hand the international rows venue=NULL and fail the whole insert. The site
     // repo's 0c0b15f6 is the same fix for the same class.
-    .upsert(stamped, { onConflict: 'condition_id,snapshot_at', ignoreDuplicates: true, defaultToNull: false })
+    .upsert(chunk, { onConflict: 'condition_id,snapshot_at', ignoreDuplicates: true, defaultToNull: false })
     .select('id');
-  if (error) throw new Error(`polymarket_market_snapshots upsert: ${error.message}`);
-  return { count: data?.length ?? 0 };
+  if (error) throw new Error(`polymarket_market_snapshots upsert (rows ${offset}–${offset + chunk.length - 1}): ${error.message}`);
+  return data?.length ?? 0;
 }
 
 // ---------- tail_candidates (Live Longshot Scanner Phase 2) ----------

@@ -235,7 +235,18 @@ for (const config of enabledCommodities) {
   if (config.useYahooSpot) {
     // Oil hybrid: Yahoo spot (CL=F / CLM26.NYM) + provider chain. The 15min
     // Yahoo poll cadence gets a 17min stale window. No Pyth feed for oil.
-    markFeedRequired('yahoo_cl_f_spot', { maxStaleMs: 17 * 60 * 1000 });
+    //
+    // ⛔ Do NOT move the daily/weekly oil engine onto the xyz:CL perp that
+    // feeds KXWTI15M (feeds/wti-proxy.js). KXWTI/KXWTIW settle on the ICE daily
+    // settlement of a NAMED contract month, and the perp rolls on its own
+    // schedule: measured at the 14:30 ET settle, 2026-09-11 → 09-25 (11 settles),
+    // the Yahoo named-contract read missed Kalshi's expiration_value by a mean
+    // 0.07 (max 0.17); the perp by a mean 1.65 (max 5.17 — it sat on November
+    // while Kalshi settled October through 09-16). The 15-min product survives
+    // this only because it re-anchors to its own settlement prints every window.
+    // Off-hours it polls hourly (yahoo-oil.js nextPollDelayMs), so the gate
+    // widens to 62min then — still catches a Yahoo that has died overnight.
+    markFeedRequired('yahoo_cl_f_spot', { maxStaleMs: 17 * 60 * 1000, offHoursMaxStaleMs: 62 * 60 * 1000 });
   } else if (config.useBrtiSpot) {
     // Bitcoin: BRTI constituent basket, 10s poll. 5min stale window matches
     // config.maxSpotAgeMs — the engine's own spot-age gate — so the readiness

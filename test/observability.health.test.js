@@ -165,6 +165,20 @@ describe('evaluateLiveness', () => {
   });
 });
 
+describe('offHoursMaxStaleMs', () => {
+  it('widens the gate off-hours only, and still catches a feed that died overnight', () => {
+    health.markFeedRequired('yahoo_cl_f_spot', { maxStaleMs: 17 * 60 * 1000, offHoursMaxStaleMs: 62 * 60 * 1000 });
+    const off = ET_OFF_HOURS_LATE.getTime();
+    health.setFeedStatus('yahoo_cl_f_spot', { lastTickAt: off - 45 * 60 * 1000 });
+    expect(health.evaluateLiveness(off).healthy).toBe(true);
+    health.setFeedStatus('yahoo_cl_f_spot', { lastTickAt: off - 63 * 60 * 1000 });
+    expect(health.evaluateLiveness(off).stale[0]).toMatchObject({ name: 'yahoo_cl_f_spot', thresholdMs: 62 * 60 * 1000 });
+    const mkt = ET_MARKET_NOON.getTime();
+    health.setFeedStatus('yahoo_cl_f_spot', { lastTickAt: mkt - 20 * 60 * 1000 });
+    expect(health.evaluateLiveness(mkt).stale[0]).toMatchObject({ thresholdMs: 17 * 60 * 1000 });
+  });
+});
+
 describe('snapshot', () => {
   it('marks required feeds with required=true', () => {
     health.markFeedRequired('kalshi');

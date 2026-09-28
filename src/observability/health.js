@@ -92,7 +92,12 @@ export function evaluateLiveness(nowMs = Date.now()) {
       continue;
     }
     const ageMs = nowMs - f.lastTickAt;
-    const effectiveThreshold = override.maxStaleMs ?? thresholdMs;
+    // `offHoursMaxStaleMs` lets a poller that slows down overnight (Yahoo oil:
+    // 15min in session, hourly off-hours) keep a real off-hours gate instead of
+    // either false-paging on its market-hours window or dropping out entirely.
+    const effectiveThreshold = (!inMarketHours && override.offHoursMaxStaleMs != null)
+      ? override.offHoursMaxStaleMs
+      : (override.maxStaleMs ?? thresholdMs);
     if (ageMs > effectiveThreshold) {
       stale.push({ name, reason: 'stale', ageMs, thresholdMs: effectiveThreshold });
     }
@@ -189,6 +194,7 @@ export function snapshot() {
       required: requiredFeeds.has(name),
       maxStaleMs: requiredFeeds.get(name)?.maxStaleMs ?? null,
       requiredOffHours: requiredFeeds.get(name)?.requiredOffHours ?? true,
+      offHoursMaxStaleMs: requiredFeeds.get(name)?.offHoursMaxStaleMs ?? null,
     };
   }
   return {

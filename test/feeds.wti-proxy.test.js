@@ -39,26 +39,28 @@ describe('parseHyperliquidCtx', () => {
 
 describe('computeBasis', () => {
   const obs = (diffs) => diffs.map((d, i) => ({ t: i, settle: 93 + d, raw: 93 }));
-  it('cold below the minimum observation count — raw price, basis 0', () => {
-    expect(computeBasis(obs([0.5, 0.5]))).toMatchObject({ value: 0, status: 'cold' });
+  it('cold with fewer than two readings — raw price, basis 0', () => {
+    expect(computeBasis(obs([0.5]))).toMatchObject({ value: 0, status: 'cold' });
   });
   it('on-contract noise inside the deadband is NOT corrected', () => {
     expect(computeBasis(obs([0.03, -0.02, 0.04, 0.01]))).toMatchObject({ value: 0, status: 'ok' });
   });
-  it('a roll mismatch is measured and applied', () => {
-    const b = computeBasis(obs([3.2, 3.18, 3.25, 3.21, 3.19]));
+  it('a wrong-month proxy is re-anchored to the last two readings', () => {
+    const b = computeBasis(obs([3.0, 3.1, 3.2, 3.24]));
     expect(b.status).toBe('rolled');
-    expect(b.value).toBeCloseTo(3.2, 2);
+    expect(b.value).toBeCloseTo(3.22, 6);
   });
-  it('uses only the last BASIS_WINDOW readings, so a roll heals in a few windows', () => {
-    const b = computeBasis(obs([0, 0, 0, 0, 0, 0, 0, 0, 3.2, 3.2, 3.2, 3.2, 3.2]));
-    expect(b.status).toBe('rolled');
-    expect(b.value).toBeCloseTo(3.2, 6);
+  it('the settle a roll lands on fails CLOSED; the next one re-anchors', () => {
+    const landing = computeBasis(obs([0.01, -0.02, 0.03, 3.2]));
+    expect(landing).toMatchObject({ value: null, status: 'unstable' });
+    const after = computeBasis(obs([0.01, -0.02, 0.03, 3.2, 3.22]));
+    expect(after.status).toBe('rolled');
+    expect(after.value).toBeCloseTo(3.21, 6);
   });
-  it('fails CLOSED when recent readings disagree with each other', () => {
-    const b = computeBasis(obs([0, 1, -1, 0.9, -0.8, 1.2]));
-    expect(b.status).toBe('unstable');
-    expect(b.value).toBeNull();
+  it('a lone bad print blanks the two windows it touches, then the old basis returns', () => {
+    expect(computeBasis(obs([0.01, 0.0, 3.2])).value).toBeNull();
+    expect(computeBasis(obs([0.01, 0.0, 3.2, 0.02])).value).toBeNull();
+    expect(computeBasis(obs([0.01, 0.0, 3.2, 0.02, 0.01]))).toMatchObject({ value: 0, status: 'ok' });
   });
 });
 

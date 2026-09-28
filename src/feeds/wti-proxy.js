@@ -29,13 +29,15 @@
 // ── ROLL HANDLING: RE-ANCHOR TO KALSHI'S OWN PRINTS ─────────────────────────
 // Instead of guessing which contract month Kalshi's index is on, the basis is
 // MEASURED: every settled window gives `expiration_value − ourRawAt(close)`.
-// The median of the last BASIS_WINDOW of those is the basis. Inside the
-// ±BASIS_DEADBAND it is treated as zero (on-contract: correcting sub-deadband
-// noise measured WORSE, 96.6% vs 97.2%); outside it is applied (a roll mismatch
-// on either side — the CLZ26 simulation above goes 52.7% → 93.1%). If the
-// recent basis readings disagree with each other by more than BASIS_MAX_MAD the
-// feed THROWS rather than publish a number it cannot place — fail closed; the
-// engine shows stale_spot.
+// The basis is the mean of the last two of those. Inside ±BASIS_DEADBAND it is
+// treated as zero (on-contract). Outside it is applied — a roll mismatch on
+// either side: replaying 7 days with the NEXT month (CLZ26) standing in for a
+// rolled proxy goes 52.7% raw → 93.3% of the windows it prices
+// re-anchored (17 of 432 blanked). When the two readings
+// disagree by more than BASIS_MAX_MAD (the settle a roll lands on, or a bad
+// print) the feed THROWS — fail closed, the engine shows stale_spot — and the
+// next settle re-anchors. So a roll misprices the window it lands in and
+// blanks one more; it never keeps pricing the wrong month.
 //
 // Kalshi's floor_strike is itself a PYTHOIL print, so this also makes the
 // proxy's LEVEL match the strike it is compared against — which is the only
@@ -56,10 +58,10 @@ export const WTI_PROXY_SYMBOL = 'WTI_PROXY/USD';
 /** Health-feed key (pyth.js pollOnce would otherwise prefix `pyth_`, which this is not). */
 export const WTI_PROXY_HEALTH_KEY = 'wti_15m_proxy';
 
-export const BASIS_WINDOW = 8;
-export const BASIS_MIN_OBS = 3;
+export const BASIS_WINDOW = 2;
+export const BASIS_MIN_OBS = 2;
 export const BASIS_DEADBAND = 0.1; // dollars
-export const BASIS_MAX_MAD = 0.15; // dollars
+export const BASIS_MAX_MAD = 0.15; // dollars — max spread between the two readings
 const SAMPLE_KEEP_MS = 4 * 3600_000;
 const SAMPLE_MAX_GAP_MS = 30_000; // a raw read older than this at a close is not "at" it
 const OBS_KEEP = 16;
@@ -96,20 +98,28 @@ export function parseHyperliquidCtx(payload, coin = HL_COIN) {
 /**
  * Pure: basis from settle observations [{ t, settle, raw }] (oldest first).
  * Returns { value, status: 'cold'|'ok'|'rolled'|'unstable', n, median, mad }.
+ *
+ * The basis is the mean of the LAST TWO readings, not a long median: a wrong-
+ * month proxy's gap drifts with the calendar spread, and replaying the last 7
+ * days (CLZ26 standing in for a rolled proxy, 432 windows) scored 93.3% of
+ * priced windows with two readings vs 88.2% with a median of eight. On-contract it makes no
+ * difference (the deadband zeroes it: 97.2% for xyz:CL at every window size).
+ * If the two readings disagree by more than BASIS_MAX_MAD — a roll landing, or
+ * a bad print — the feed fails closed for that window; the next settle either
+ * confirms the new level (re-anchored) or returns to the old one.
  */
 export function computeBasis(observations, {
-  window = BASIS_WINDOW,
   minObs = BASIS_MIN_OBS,
   deadband = BASIS_DEADBAND,
   maxMad = BASIS_MAX_MAD,
 } = {}) {
   const diffs = observations
     .filter((o) => Number.isFinite(o?.settle) && Number.isFinite(o?.raw))
-    .slice(-window)
-    .map((o) => o.settle - o.raw);
+    .map((o) => o.settle - o.raw)
+    .slice(-BASIS_WINDOW);
   if (diffs.length < minObs) return { value: 0, status: 'cold', n: diffs.length, median: null, mad: null };
-  const med = median(diffs);
-  const mad = median(diffs.map((d) => Math.abs(d - med)));
+  const med = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+  const mad = Math.max(...diffs) - Math.min(...diffs);
   if (mad > maxMad) return { value: null, status: 'unstable', n: diffs.length, median: med, mad };
   if (Math.abs(med) < deadband) return { value: 0, status: 'ok', n: diffs.length, median: med, mad };
   return { value: med, status: 'rolled', n: diffs.length, median: med, mad };
@@ -222,8 +232,11 @@ export async function fetchWtiProxy(now = Date.now()) {
   }
 
   const b = state.basis;
-  if (b.status === 'unstable') {
-    throw new Error(`wti-proxy basis unstable (mad ${b.mad.toFixed(3)} > ${BASIS_MAX_MAD}) — refusing to publish`);
+  if (b.value === null) {
+    throw new Error(
+      `wti-proxy basis unstable: last two settle readings ${b.mad?.toFixed(3)} apart (> ${BASIS_MAX_MAD}; ` +
+        'a roll landing or a bad print) — refusing to publish until the next settle',
+    );
   }
   return {
     price: px.price + b.value,

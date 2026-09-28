@@ -31,7 +31,12 @@
 //     #bot-logs below 95%) from metals_spot_marks.
 //     (Until 2026-09-22 it was Pyth's public Metal.XAU/USD / Metal.XAG/USD —
 //     99.5% / 99.0% over 200 windows each; that feed is gone.)
-//   KXWTI15M — front-month WTI future, 99.5% verdict agreement (Pythnet).
+//   KXWTI15M — since 2026-09-28 a live front-month WTI proxy re-anchored every
+//     window to Kalshi's own settle prints (src/feeds/wti-proxy.js — the evidence,
+//     the vendor and the roll logic live there): 97.2% verdict agreement over 176
+//     windows vs 96.5% for the front-month future itself. (Until 2026-09-15 it was
+//     Pythnet's front-month future, 99.5% over 200; both public Pythnet RPCs are
+//     now closed.)
 //
 // "Verdict agreement" = would this feed have called the same up/down result.
 // That is the metric that decides a contract; price error is scale-dependent.
@@ -52,7 +57,8 @@
 //
 // Spec: prediction-marketspicks/handoffs/GOLD_SILVER_15M_EDGE_2026-08-05.md
 
-import { getPrice, WTI_FRONT_MONTH_SYMBOL } from '../feeds/pyth.js';
+import { getPrice } from '../feeds/pyth.js';
+import { WTI_PROXY_SYMBOL } from '../feeds/wti-proxy.js';
 import { getShortHorizonStats, bufferStats } from './short-horizon-vol.js';
 import { normCdf } from './options.js';
 import {
@@ -118,21 +124,19 @@ export const METALS = {
     pythSymbol: 'XAG/USD',
     label: 'Silver',
   },
-  // WTI asks for the LOGICAL symbol, never a contract id — Pyth serves oil as
-  // per-expiry futures and the front month rolls (WTIU6 -> WTIV6 on 2026-08-20).
-  // feeds/pyth.js resolves it by expiry at call time.
+  // WTI asks for the proxy's LOGICAL symbol, never a contract id or a vendor
+  // symbol: src/feeds/wti-proxy.js owns the source AND the roll (it measures the
+  // basis against Kalshi's own settle prints instead of guessing the month).
   //
-  // Kalshi names `Commodities.Index.PYTHOIL/USD` for this series; that feed is
-  // dead on both public Pyth channels (last publish 2026-03-30, $103 vs a ~$75
-  // market). Measured against Kalshi's own published settlement prints over 200
-  // windows, the front-month future reproduces the settled verdict 99.5% of the
-  // time; `Commodities.USOILSPOT` — the obvious-looking CFD — manages 49.7%,
-  // i.e. a coin flip. Do not "simplify" this to USOILSPOT.
+  // Kalshi names `Commodities.Index.PYTHOIL/USD` for this series; it is not
+  // publicly readable. `Commodities.USOILSPOT` — the obvious-looking CFD —
+  // reproduced 49.7% of verdicts in the 2026-08 study, i.e. a coin flip. Do not
+  // "simplify" this to a spot CFD.
   wti: {
     commodity: 'wti',
     series: 'KXWTI15M',
     slug: 'wti-edge-15m',
-    pythSymbol: WTI_FRONT_MONTH_SYMBOL,
+    pythSymbol: WTI_PROXY_SYMBOL,
     label: 'WTI',
   },
 };

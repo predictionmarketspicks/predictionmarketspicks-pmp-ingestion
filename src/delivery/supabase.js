@@ -339,7 +339,13 @@ export async function insertPolymarketSnapshots(rows, { snapshotAt } = {}) {
   const sb = getClient();
   const { data, error } = await sb
     .from('polymarket_market_snapshots')
-    .upsert(stamped, { onConflict: 'condition_id,snapshot_at', ignoreDuplicates: true })
+    // defaultToNull:false — a bulk upsert sends the UNION of the rows' keys, and
+    // PostgREST fills a key a row lacks with NULL unless told to use the column
+    // default. International rows omit `venue` (NOT NULL DEFAULT 'international');
+    // US rows set 'us'. Today each call carries one venue, but a mixed batch would
+    // hand the international rows venue=NULL and fail the whole insert. The site
+    // repo's 0c0b15f6 is the same fix for the same class.
+    .upsert(stamped, { onConflict: 'condition_id,snapshot_at', ignoreDuplicates: true, defaultToNull: false })
     .select('id');
   if (error) throw new Error(`polymarket_market_snapshots upsert: ${error.message}`);
   return { count: data?.length ?? 0 };

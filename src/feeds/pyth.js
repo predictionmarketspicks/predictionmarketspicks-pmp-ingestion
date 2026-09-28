@@ -11,6 +11,7 @@
 import { setFeedStatus, recordTick } from '../observability/health.js';
 import { fetchPythnetPrice } from './pythnet.js';
 import { fetchSwissquoteSpot, hasSwissquoteFeed } from './swissquote.js';
+import { fetchWtiProxy, hasWtiProxyFeed, WTI_PROXY_SYMBOL, WTI_PROXY_HEALTH_KEY } from './wti-proxy.js';
 import { recordMetalsSpotMark } from '../delivery/supabase.js';
 import { recordTick as recordPriceTick } from '../engine/short-horizon-vol.js';
 
@@ -22,7 +23,11 @@ const SHORT_HORIZON_COMMODITY = {
   'XAG/USD': 'silver',
   'XAU/USD': 'gold',
   'SPY/USD': 'spx',
-  'WTI/USD': 'wti',
+  // 15-minute WTI ticks come from the proxy (./wti-proxy.js) since 2026-09-28.
+  // NOT 'WTI/USD' as well: two different instruments writing one tick buffer
+  // would turn every quote difference into realized vol. The proxy records its
+  // RAW price here (see pollOnce), so a basis step is never a return.
+  [WTI_PROXY_SYMBOL]: 'wti',
 };
 
 const HERMES_BASE = process.env.PYTH_HERMES_BASE || 'https://hermes.pyth.network';
@@ -63,6 +68,7 @@ const SOURCE_TAGS = {
   'SPY/USD': 'pyth_spy_usd',
   WTI: 'pyth_wti',
   'WTI/USD': 'pyth_wti_front_month',
+  [WTI_PROXY_SYMBOL]: 'wti_proxy_front_month',
   'XCU/USD': 'pyth_xcu_usd',
 };
 
@@ -160,7 +166,7 @@ function feedIdFor(symbol) {
  *  rather than `FEED_IDS[symbol]` — the WTI front month is resolved dynamically
  *  and is deliberately absent from that table. */
 export function hasPythFeed(symbol) {
-  return feedIdFor(symbol) != null || hasSwissquoteFeed(symbol);
+  return feedIdFor(symbol) != null || hasSwissquoteFeed(symbol) || hasWtiProxyFeed(symbol);
 }
 
 async function fetchOnce(symbol) {
@@ -170,6 +176,12 @@ async function fetchOnce(symbol) {
   // measured). Same return shape, so every getPrice() caller is unchanged.
   if (hasSwissquoteFeed(symbol)) {
     const px = await fetchSwissquoteSpot(symbol);
+    return { symbol, ...px, feedId: null, source: SOURCE_TAGS[symbol] };
+  }
+  // ── KXWTI15M: live front-month proxy re-anchored to Kalshi's prints, 2026-09-28.
+  // Pythnet's public RPCs are closed (./wti-proxy.js has the evidence).
+  if (hasWtiProxyFeed(symbol)) {
+    const px = await fetchWtiProxy();
     return { symbol, ...px, feedId: null, source: SOURCE_TAGS[symbol] };
   }
   const feedId = feedIdFor(symbol);
@@ -251,8 +263,12 @@ export function isConfidenceUsable(price, confidence) {
   return confidence / price <= MAX_CONF_RATIO;
 }
 
+function healthKey(symbol) {
+  return hasWtiProxyFeed(symbol) ? WTI_PROXY_HEALTH_KEY : `pyth_${feedKey(symbol)}`;
+}
+
 async function pollOnce(symbol) {
-  const key = `pyth_${feedKey(symbol)}`;
+  const key = healthKey(symbol);
   try {
     const px = await fetchOnce(symbol);
     if (!isConfidenceUsable(px.price, px.confidence)) {
@@ -273,7 +289,9 @@ async function pollOnce(symbol) {
     priceMap.set(symbol, px);
     recordTick(key);
     const commodity = SHORT_HORIZON_COMMODITY[symbol];
-    if (commodity) recordPriceTick(commodity, px.price, px.publishTimeMs);
+    // rawPrice when the source carries one (the WTI proxy's pre-basis read), so a
+    // basis step is never recorded as a price move.
+    if (commodity) recordPriceTick(commodity, px.rawPrice ?? px.price, px.publishTimeMs);
     setFeedStatus(key, { connected: true, lastError: null });
   } catch (err) {
     setFeedStatus(key, {
@@ -326,7 +344,7 @@ export function startPyth(symbols = ['XAG/USD']) {
   for (const s of symbols) {
     if (!hasPythFeed(s)) {
       console.warn(`[pyth] ${s} has no verified feed ID — poller skipped (engine will fail open)`);
-      setFeedStatus(`pyth_${feedKey(s)}`, {
+      setFeedStatus(healthKey(s), {
         connected: false,
         lastError: 'feed_id_unverified',
       });

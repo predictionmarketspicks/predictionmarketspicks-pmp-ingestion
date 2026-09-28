@@ -10,6 +10,7 @@ null, the snapshot is skipped (logged warn, no DB write).
 | silver    | `KXSILVERD`   | SLV | `XAG/USD`   | ✅ verified       | `true`    | Kalshi `series.settlement_sources` confirmed |
 | gold      | `KXGOLDD`     | GLD | `XAU/USD`   | ✅ verified       | `true`    | Kalshi `series.settlement_sources` confirmed |
 | oil       | `KXWTI`       | USO | `WTI`       | ❌ unverified     | `false`   | See "Oil spot path" below |
+| oil 15-min | `KXWTI15M`   | —   | `WTI_PROXY/USD` | ✅ measured vs Kalshi prints (97.2%, 176 windows) | `true` | Not Pyth — Pythnet's public RPCs closed 2026-09-15. Live front-month proxy re-anchored to Kalshi's own settle prints; source, evidence and roll logic in `src/feeds/wti-proxy.js`. Health key `wti_15m_proxy` |
 | copper    | `KXCOPPERMON` | CPER | `XCU/USD`  | ❌ unconfigured   | `false`   | See "Copper spot path" below |
 
 ## Oil spot path — known gap

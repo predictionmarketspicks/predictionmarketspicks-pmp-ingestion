@@ -68,9 +68,14 @@ function parseArgs(argv) {
   return opts;
 }
 
-function writeStaging(feed, season, rows) {
+function writeStaging(feed, season, rows, week) {
   const file = path.join(STAGING_DIR, `${feed}.json`);
-  fs.writeFileSync(file, JSON.stringify({ season, rows }, null, 2) + '\n');
+  // `week` = the last FULLY graded regular-season week every aggregate was
+  // scoped to. The ingest's week-progress gate reads it to refuse a capture
+  // that carries nothing newer than what the table already holds — the
+  // 2026-09-28 02:30 ET Run A re-ingested week 2 with fresh mtimes, and no
+  // count-based check could see it.
+  fs.writeFileSync(file, JSON.stringify({ season, ...(week != null ? { week } : {}), rows }, null, 2) + '\n');
   console.log(`  wrote ${file} (${rows.length} rows)`);
 }
 
@@ -99,7 +104,7 @@ async function captureGradesTeam(season, throughWeek) {
     cov: r.grades_coverage_defense ?? null,
     spec: r.grades_misc_st ?? null,
   }));
-  writeStaging('grades-team', season, rows);
+  writeStaging('grades-team', season, rows, throughWeek);
   return rows;
 }
 
@@ -240,7 +245,7 @@ async function captureGradesPlayer(season, week, bioByPlayerId) {
       });
     }
   }
-  writeStaging('grades-player', season, allRows);
+  writeStaging('grades-player', season, allRows, throughWeek);
   return allRows;
 }
 
@@ -305,7 +310,7 @@ async function main() {
       const rows = roster
         .filter((r) => r.pff_player_id && r.name)
         .map((r) => ({ ...r, week }));
-      writeStaging('roster-status', opts.season, rows);
+      writeStaging('roster-status', opts.season, rows, week);
       const byStatus = {};
       for (const r of rows) {
         const k = String(r.status ?? 'unknown').toLowerCase();

@@ -52,5 +52,8 @@ export function normalizeTeamGrades(rawRows, { season, source } = {}) {
 export function fetchOnce({ stagingPath, season, source } = {}) {
   const staged = loadStagingRows(FEED, stagingPath);
   const yr = resolveSeason(FEED, season, staged.season);
-  return normalizeTeamGrades(staged.rows, { season: yr, source });
+  // ext_team_grades has no week column (one REGPO row per team, overwritten
+  // each run), so the through-week rides on the staging header for the
+  // week-progress gate in scripts/ingest-ext-feeds.js.
+  return { ...normalizeTeamGrades(staged.rows, { season: yr, source }), week: staged.week };
 }

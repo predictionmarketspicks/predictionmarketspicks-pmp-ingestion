@@ -101,5 +101,9 @@ export function loadStagingRows(feed, stagingPath) {
     throw new Error(`[${feed}] staging file ${file} must be a JSON array or { rows: [...] }`);
   }
   const season = Array.isArray(parsed) ? undefined : parsed?.season;
-  return { rows, season };
+  // `week` in the header is the graded week the capture was scoped to
+  // (capture-pff-api.js writes it). Rows of the week-keyed feeds carry their
+  // own; grades-team has no week column, so the header is its only carrier.
+  const week = Array.isArray(parsed) ? undefined : parsed?.week;
+  return { rows, season, week };
 }

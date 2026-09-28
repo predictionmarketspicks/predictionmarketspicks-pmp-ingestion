@@ -13,7 +13,8 @@
 //   --allow-stale        ingest even when the staging file is stale
 //   --max-age-hours=N    use a rolling N-hour window instead of the day boundary
 //   --allow-sparse="<reason>"  ingest even when a required column is mostly null
-//   --self-test          prove the null-density gate sees a blank column, no DB
+//   --allow-same-week="<reason>"  ingest a week the table already holds (deliberate re-capture)
+//   --self-test          prove the null-density + week-progress gates, no DB
 //
 // Each feed reads data/ext-staging/<feed>.json (a Claude-in-Chrome capture or a
 // licensed export). Missing staging files are reported and skipped, not fatal,
@@ -40,6 +41,20 @@
 // not zero: FTN's LAST YEAR column is "x" on all 32 rows in week 1 and that is
 // correct, so REQUIRED_COLUMNS names only the columns a paywall blanks.
 // handoffs/NFL_EXT_FEEDS_HALF_CAPTURE_GATE_2026-09-21.md §1.
+//
+// WEEK PROGRESS: the two gates above cannot see a capture that is fresh, dense
+// and STILL WORTHLESS because it carries the week the table already holds. On
+// 2026-09-28 the Monday Run A fired at 02:30 ET; PFF's API scopes every grade
+// aggregate to the last FULLY graded week, MNF was not graded, so it returned
+// week 2 — captured today, 32/32 dense, already in the table since Run B — and
+// the run upserted it in place and reported success. Now the runner compares
+// the capture's week (header `week`, or max row week) with what the table
+// holds for the season: LOWER is a regression and BLOCKS; EQUAL blocks too
+// (nothing new; the mistimed-run signature) unless --allow-same-week="<why>".
+// roster-status is a moving feed (same week re-captures on purpose) and
+// free-agency has no week; both are exempt from the equal rule. Every block
+// posts to #bot-logs so it cannot pass unnoticed.
+// handoffs/NFL_EXT_FEEDS_MISTIMED_RUN_A_2026-09-28.md.
 
 import { fetchOnce as fetchTeamGrades } from '../src/feeds/grades-team.js';
 import { fetchOnce as fetchPlayerGrades } from '../src/feeds/grades-player.js';
@@ -57,6 +72,8 @@ import {
   recordExtCaptureRun,
 } from '../src/delivery/ext-feeds.js';
 import { stagingAgeHours, isCapturedToday, stagingPathFor } from '../src/feeds/ext-shared.js';
+import { getClient } from '../src/delivery/supabase.js';
+import { postBotLog } from '../src/delivery/discord.js';
 
 function formatAge(hours) {
   return hours >= 48 ? `${(hours / 24).toFixed(1)}d` : `${hours.toFixed(1)}h`;
@@ -137,6 +154,83 @@ export function nullDensityViolations(feed, rows, tolerance = NULL_TOLERANCE) {
   return out;
 }
 
+// ── week-progress gate ──────────────────────────────────────────────────────
+
+const WEEK_TABLE = {
+  'grades-player': 'ext_player_grades',
+  'power-ranks': 'ext_power_ranks',
+  'dvoa-team': 'ext_team_dvoa',
+  'roster-status': 'ext_player_status',
+};
+
+// "W-L" or "W-L-T" → games played. NaN on anything else.
+export function gamesFromRecord(record) {
+  const parts = String(record ?? '').split('-').map((x) => Number(x));
+  if (parts.length < 2 || parts.some((n) => !Number.isFinite(n))) return NaN;
+  return parts.reduce((a, b) => a + b, 0);
+}
+
+// The week a capture represents. grades-team rows have no week column, so its
+// carrier is the staging header (written by capture-pff-api.js); the fallback
+// is games played, max over teams, which equals the week until every team has
+// had a bye. Every other week-keyed feed reports the max row week.
+export function fileWeekOf(feed, rows, headerWeek) {
+  if (feed === 'grades-team') {
+    if (headerWeek != null && Number.isFinite(Number(headerWeek))) return Number(headerWeek);
+    const games = rows.map((r) => gamesFromRecord(r.record)).filter(Number.isFinite);
+    return games.length ? Math.max(...games) : null;
+  }
+  const weeks = rows.map((r) => Number(r.week)).filter(Number.isFinite);
+  return weeks.length ? Math.max(...weeks) : null;
+}
+
+// Pure verdict: null = proceed, else { kind, message }.
+export function weekGateVerdict(feed, fileWeek, tableWeek, { allowSameWeek = null } = {}) {
+  if (feed === 'free-agency') return null;                 // no week in the feed
+  if (fileWeek == null || tableWeek == null) return null;  // empty table / no week: nothing to compare
+  if (fileWeek < tableWeek) {
+    return {
+      kind: 'regression',
+      message: `capture is week ${fileWeek} but the table already holds week ${tableWeek} — ingesting it would overwrite newer rows with older ones`,
+    };
+  }
+  if (fileWeek === tableWeek && feed !== 'roster-status' && allowSameWeek == null) {
+    return {
+      kind: 'same-week',
+      message:
+        `capture is week ${fileWeek} and the table already holds week ${fileWeek} — nothing new. ` +
+        `This is the mistimed-run signature: PFF's API scopes grades to the last FULLY graded week (week N only after Monday Night Football is graded, Tuesday morning ET), ` +
+        `and the browser feeds update on the vendor's own clock. Re-run later, or pass --allow-same-week="<why>" for a deliberate re-capture.`,
+    };
+  }
+  return null;
+}
+
+// What the table holds for the season. Real runs only (needs the service key).
+async function tableWeekOf(feed, season) {
+  const sb = getClient();
+  if (feed === 'grades-team') {
+    const { data, error } = await sb.from('ext_team_grades').select('record').eq('season', season).eq('week_scope', 'REGPO');
+    if (error) throw new Error(`ext_team_grades read: ${error.message}`);
+    const games = (data ?? []).map((r) => gamesFromRecord(r.record)).filter(Number.isFinite);
+    return games.length ? Math.max(...games) : null;
+  }
+  const table = WEEK_TABLE[feed];
+  if (!table) return null;
+  const { data, error } = await sb.from(table).select('week').eq('season', season).order('week', { ascending: false }).limit(1);
+  if (error) throw new Error(`${table} read: ${error.message}`);
+  return data?.[0]?.week ?? null;
+}
+
+async function alertBotLogs(text) {
+  try {
+    const ok = await postBotLog(text);
+    if (!ok) console.warn('  (#bot-logs alert not delivered — DISCORD_BOT_TOKEN unset or post failed)');
+  } catch (err) {
+    console.warn(`  (#bot-logs alert failed: ${err.message})`);
+  }
+}
+
 const FEEDS = {
   'grades-team': { fetch: fetchTeamGrades, upsert: upsertTeamGrades },
   'grades-player': { fetch: fetchPlayerGrades, upsert: upsertPlayerGrades },
@@ -154,6 +248,7 @@ function parseArgs(argv) {
     dry: false,
     allowStale: false,
     allowSparse: null, // the reason string; null = gate is armed
+    allowSameWeek: null, // the reason string; null = week-progress gate is armed
     selfTest: false,
     maxAgeHours: undefined, // undefined = day boundary; a number = rolling window
   };
@@ -163,6 +258,8 @@ function parseArgs(argv) {
     else if (a === '--allow-stale') opts.allowStale = true;
     else if (a.startsWith('--allow-sparse=')) opts.allowSparse = a.slice('--allow-sparse='.length).trim();
     else if (a === '--allow-sparse') opts.allowSparse = ''; // rejected in main: the reason is mandatory
+    else if (a.startsWith('--allow-same-week=')) opts.allowSameWeek = a.slice('--allow-same-week='.length).trim();
+    else if (a === '--allow-same-week') opts.allowSameWeek = '';
     else if (a.startsWith('--season=')) opts.season = Number(a.slice('--season='.length));
     else if (a.startsWith('--source=')) opts.source = a.slice('--source='.length);
     else if (a.startsWith('--max-age-hours=')) opts.maxAgeHours = Number(a.slice('--max-age-hours='.length));
@@ -171,7 +268,7 @@ function parseArgs(argv) {
   return opts;
 }
 
-async function runFeed(name, { season, source, dry, allowStale, allowSparse, maxAgeHours }) {
+async function runFeed(name, { season, source, dry, allowStale, allowSparse, allowSameWeek, maxAgeHours }) {
   const { fetch, upsert } = FEEDS[name];
   // Staleness first: a fossil file normalizes cleanly and reports a healthy
   // count, so the count can never be the thing that catches it.
@@ -198,7 +295,7 @@ async function runFeed(name, { season, source, dry, allowStale, allowSparse, max
     console.warn(`  ${name}: SKIP — ${err.message}`);
     return { name, skipped: true };
   }
-  const { rows, dropped } = result;
+  const { rows, dropped, week: headerWeek } = result;
   // Null density AFTER normalization and BEFORE any count is printed: the
   // count is the number that lies (32/32, every column present, every value
   // blank). Same shape as the stale-file refusal — dry runs refuse too.
@@ -215,13 +312,29 @@ async function runFeed(name, { season, source, dry, allowStale, allowSparse, max
     console.warn(`  ${name}: SPARSE (${sparse.join('; ')}) — proceeding anyway (--allow-sparse: ${allowSparse}).`);
   }
   const dropNote = dropped.length ? `, ${dropped.length} dropped (unresolved: ${dropped.slice(0, 5).join(', ')}${dropped.length > 5 ? '…' : ''})` : '';
+  const fileWeek = fileWeekOf(name, rows, headerWeek);
+  const weekNote = fileWeek != null ? `, week ${fileWeek}` : '';
   if (dry) {
-    console.log(`  ${name}: ${rows.length} rows normalized${dropNote} (dry — not written)`);
-    return { name, normalized: rows.length, dropped: dropped.length, written: 0 };
+    console.log(`  ${name}: ${rows.length} rows normalized${weekNote}${dropNote} (dry — not written; week-progress gate runs on the real pass)`);
+    return { name, normalized: rows.length, dropped: dropped.length, written: 0, week: fileWeek };
+  }
+  // Week progress, real runs only: the fresh, dense capture that carries
+  // nothing the table does not already hold. Read what is there and compare.
+  const rowSeason = rows[0]?.season ?? season;
+  const tableWeek = rowSeason != null ? await tableWeekOf(name, rowSeason) : null;
+  const verdict = weekGateVerdict(name, fileWeek, tableWeek, { allowSameWeek });
+  if (verdict) {
+    const line = `${name}: BLOCKED (${verdict.kind}) — ${verdict.message}`;
+    console.warn(`  ${line}`);
+    await alertBotLogs(`⛔ ext-feeds ingest ${line}`);
+    return { name, blocked: true, week: fileWeek, tableWeek };
+  }
+  if (fileWeek != null && tableWeek != null && fileWeek === tableWeek) {
+    console.warn(`  ${name}: SAME WEEK ${fileWeek} — proceeding anyway (--allow-same-week: ${allowSameWeek}).`);
   }
   const { count } = await upsert(rows);
-  console.log(`  ${name}: ${count} rows upserted${dropNote}`);
-  return { name, normalized: rows.length, dropped: dropped.length, written: count };
+  console.log(`  ${name}: ${count} rows upserted${weekNote}${dropNote}`);
+  return { name, normalized: rows.length, dropped: dropped.length, written: count, week: fileWeek };
 }
 
 // --self-test: the gate must see a blank column, must not see a full one, and
@@ -285,12 +398,27 @@ function selfTest() {
   check(nullDensityViolations('grades-team', [{ overall: 80, off: null, def: 70 }]).length === 1, 'grades-team: off blank → one violation');
   check(nullDensityViolations('free-agency', [{ x: null }]).length === 0, 'a feed with no rule is never blocked');
   check(nullDensityViolations('dvoa-team', []).length === 0, 'zero rows is not a density violation (the empty case is the fetcher\'s to report)');
+  // Week progress: the 09-28 shape — fresh, dense, and the week the table already holds.
+  check(fileWeekOf('grades-team', [{ record: '1-1' }, { record: '2-0' }], 2) === 2, 'grades-team: header week wins');
+  check(fileWeekOf('grades-team', [{ record: '1-1' }, { record: '0-2-1' }, { record: 'x' }]) === 3, 'grades-team: no header → games played, max over teams, ties count, junk ignored');
+  check(fileWeekOf('grades-player', [{ week: 1 }, { week: 2 }, { week: '2' }]) === 2, 'week-keyed feeds: max row week');
+  check(fileWeekOf('power-ranks', [{ team: 'BUF' }]) === null, 'no week anywhere → null (gate stands down)');
+  const same = weekGateVerdict('grades-player', 2, 2);
+  check(same?.kind === 'same-week', `same week as the table BLOCKS (got ${same?.kind})`);
+  check(weekGateVerdict('grades-player', 2, 2, { allowSameWeek: 'deliberate re-capture' }) === null, '--allow-same-week="<why>" lets a same-week ingest through');
+  check(weekGateVerdict('grades-team', 1, 2)?.kind === 'regression', 'a LOWER week than the table is a regression and BLOCKS');
+  check(weekGateVerdict('grades-team', 1, 2, { allowSameWeek: 'x' })?.kind === 'regression', '--allow-same-week never unlocks a regression');
+  check(weekGateVerdict('grades-player', 3, 2) === null, 'a newer week proceeds');
+  check(weekGateVerdict('roster-status', 2, 2) === null, 'roster-status is a moving feed: same week proceeds');
+  check(weekGateVerdict('roster-status', 1, 2)?.kind === 'regression', '…but a roster stamped with an older week still BLOCKS');
+  check(weekGateVerdict('free-agency', 2, 2) === null && weekGateVerdict('free-agency', 1, 2) === null, 'free-agency has no week and is exempt');
+  check(weekGateVerdict('dvoa-team', 2, null) === null && weekGateVerdict('dvoa-team', null, 2) === null, 'an empty table or an unknown file week is not a verdict');
   if (failures.length) {
-    console.error(`SELF-TEST FAIL (${failures.length}) — the null-density gate is blind:`);
+    console.error(`SELF-TEST FAIL (${failures.length}) — a gate is blind:`);
     for (const f of failures) console.error(`  - ${f}`);
     process.exit(1);
   }
-  console.log(`SELF-TEST PASS (${18} checks) — blank column blocks, full column passes, anyOf + tolerance boundary pinned.`);
+  console.log(`SELF-TEST PASS (${31} checks) — blank column blocks, full column passes, anyOf + tolerance boundary pinned; same-week and regression captures block, newer weeks and moving feeds pass.`);
   process.exit(0);
 }
 
@@ -299,6 +427,10 @@ async function main() {
   if (opts.selfTest) selfTest();
   if (opts.allowSparse === '') {
     console.error('--allow-sparse needs a reason: --allow-sparse="why this sparse ingest is deliberate".');
+    process.exit(2);
+  }
+  if (opts.allowSameWeek === '') {
+    console.error('--allow-same-week needs a reason: --allow-same-week="why re-ingesting a week the table holds is deliberate".');
     process.exit(2);
   }
   const names = opts.feed === 'all' ? Object.keys(FEEDS) : [opts.feed];
@@ -319,7 +451,7 @@ async function main() {
   console.log(
     `ext-feeds ingest — feed=${opts.feed} season=${opts.season ?? '(from file)'} source=${opts.source}` +
       ` freshness=${opts.maxAgeHours === undefined ? 'captured-today' : `${opts.maxAgeHours}h`}` +
-      `${opts.allowStale ? ' [ALLOW-STALE]' : ''}${opts.allowSparse != null ? ` [ALLOW-SPARSE: ${opts.allowSparse}]` : ''}${opts.dry ? ' [DRY]' : ''}`,
+      `${opts.allowStale ? ' [ALLOW-STALE]' : ''}${opts.allowSparse != null ? ` [ALLOW-SPARSE: ${opts.allowSparse}]` : ''}${opts.allowSameWeek != null ? ` [ALLOW-SAME-WEEK: ${opts.allowSameWeek}]` : ''}${opts.dry ? ' [DRY]' : ''}`,
   );
   const summary = [];
   for (const n of names) {
@@ -346,7 +478,7 @@ async function main() {
   if (blocked.length) {
     // Non-zero so an unattended run can't report success while feeds were
     // refused. A missing staging file stays a soft skip (documented above);
-    // stale-file, season-mismatch and null-density refusals fail the run.
+    // stale-file, season-mismatch, null-density and week-progress refusals fail the run.
     console.error(`BLOCKED: ${blocked.join(', ')} — nothing was written for these. See the lines above.`);
     process.exitCode = 1;
   }

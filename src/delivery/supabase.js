@@ -352,6 +352,40 @@ export async function insertPolymarketSnapshots(rows, { snapshotAt } = {}) {
 
 const SNAPSHOT_CHUNK_ROWS = 1000;
 
+// Seed for the Polymarket US change-only writer: the latest venue='us' row per
+// condition_id written since `sinceIso`. Only rows inside the heartbeat window
+// matter — anything older is due a heartbeat write regardless — so the window
+// bounds the read.
+//
+// ⛔ PostgREST caps every read at 1,000 rows, silently. Paged with .range(),
+// ORDERED on a unique key: (snapshot_at DESC, condition_id ASC) is unique
+// because (condition_id, snapshot_at) is the table's unique index. Newest
+// first, so the first row seen per condition_id is its latest.
+export async function fetchLatestUsSnapshots({ sinceIso, pageSize = 1000, maxRows = 400_000 } = {}) {
+  if (!sinceIso) throw new Error('fetchLatestUsSnapshots: sinceIso required');
+  const sb = getClient();
+  const latest = new Map();
+  let scanned = 0;
+  for (let from = 0; from < maxRows; from += pageSize) {
+    const { data, error } = await sb
+      .from('polymarket_market_snapshots')
+      .select('condition_id, best_bid, best_ask, last_trade_price, snapshot_at')
+      .eq('venue', 'us')
+      .gte('snapshot_at', sinceIso)
+      .order('snapshot_at', { ascending: false })
+      .order('condition_id', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(`polymarket_market_snapshots seed read (from ${from}): ${error.message}`);
+    const page = data ?? [];
+    scanned += page.length;
+    for (const r of page) {
+      if (!latest.has(r.condition_id)) latest.set(r.condition_id, r);
+    }
+    if (page.length < pageSize) break;
+  }
+  return { latest, scanned };
+}
+
 async function upsertSnapshotChunk(sb, chunk, offset) {
   const { data, error } = await sb
     .from('polymarket_market_snapshots')

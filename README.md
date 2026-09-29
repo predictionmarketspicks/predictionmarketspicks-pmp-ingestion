@@ -135,6 +135,16 @@ The `delayed_test` writer-tag branch is kept in `src/index.js` for any future br
 - Discord embeds link to the Kalshi sign-up referral URL, NOT per-market deep-links (CLAUDE.md, locked May 2 2026).
 - Brand word-swap lint runs at `npm test` AND at runtime in `src/delivery/discord.js` — Discord delivery refuses payloads containing bet/wager/sportsbook/etc.
 
+## Polymarket US feed (`venue='us'`)
+
+`src/feeds/polymarket-us.js` → `src/engine/polymarket-us-snapshot.js` → `polymarket_market_snapshots` (`condition_id = pmus:<id>`, `venue = 'us'`). On only with `POLY_US_ENABLED=1`. Source: `gateway.polymarket.us/v1/markets` (public; `User-Agent` REQUIRED or 403).
+
+- **Kept (`keepUsMarket`)**: NFL full-game moneyline / spread / total (`sportsMarketType` `football_team_full_game_{winner,spread,total}` on an `^[a-z]+-nfl-` slug), NFL futures/awards (`tec-`, `aqc-`, `atc-`, team `aachc-`), politics minus `vmc-`/`vtc-`/`cmovc*-` brackets, culture, finance, technology, macro, crypto. Dropped: all other sports, NFL period lines / team totals / props / season stat + fantasy markets, climate, science, geopolitics.
+- **Fetched** with server-side filters (`US_QUERIES`): NFL game markets every 15-min tick (`tagIds=1`), NFL futures + non-sports hourly.
+- **Written change-only**: a row lands when `best_bid`, `best_ask` or `last_trade_price` changed, or on a 6h heartbeat; at most hourly, except NFL game markets within 7 days of kickoff (every tick). Last-written state is in memory, seeded on boot from the last 6h of `venue='us'` rows. Per-tick counters (fetched / kept / dropped-by-rule / written / skipped) are in `/health` → `engine.polymarket_us_snapshot.lastTick`.
+- **Row shapes**: yes/no markets — `best_*` = the YES book, `outcomes` = the raw string array. NFL two-outcome markets — `outcomes = [{outcome, price, team}, …]` with `outcomes[0]` = the `long: true` side and `best_*` = `outcomes[0]`'s book (international convention); `price` = mid, `outcomes[1].price = 1 − outcomes[0].price`. The side is always taken from `marketSides[].long`, never from `outcomes` order.
+- Tests: `test/feeds.polymarket-us*.test.js` (fixtures captured live in `test/fixtures/polymarket-us-markets-2026-09-29.json`), `test/engine.polymarket-us-writes.test.js`.
+
 ## Phase 2A notes
 
 - **Commodity registry**: `src/engine/commodities.js` is the single source of truth. Adding a commodity = one entry there + one thin wrapper in `src/engine/`. The shared compute path lives in `src/engine/commodity-base.js`.

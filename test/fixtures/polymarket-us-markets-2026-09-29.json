@@ -1,0 +1,2296 @@
+{
+ "_captured": "2026-09-29 from https://gateway.polymarket.us/v1/markets (UA pmp/1.0); marketSides[].team trimmed to identity fields, everything else verbatim",
+ "markets": {
+  "nfl_moneyline": {
+   "id": "919543",
+   "question": "Who will win in the upcoming football event Pittsburgh Steelers vs Cleveland Browns scheduled for October 2, 2026 at 12:15 AM UTC?",
+   "slug": "aec-nfl-pit-cle-2026-10-01",
+   "endDate": "2026-10-16T04:15:00Z",
+   "category": "sports",
+   "startDate": "2026-09-17T06:00:07Z",
+   "description": "This market will settle to the winner of the Pittsburgh Steelers vs Cleveland Browns NFL game scheduled for Oct 1, 2026. Overtime is included if played. If the game ends in a tie, the market will settle to $0.50. If the game is delayed, postponed, or suspended and not rescheduled to a date within two weeks of the originally scheduled date, the market will settle to the last fair market price. Outcome sourced from NFL.",
+   "active": true,
+   "marketType": "moneyline",
+   "closed": false,
+   "createdAt": "2026-09-17T06:00:07Z",
+   "updatedAt": "2026-09-29T19:21:52Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.005,
+   "gameStartTime": "2026-10-02T00:15:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_team_full_game_winner",
+   "marketSides": [
+    {
+     "id": "1838570",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aec-nfl-pit-cle-2026-10-01",
+     "createdAt": "2026-09-17T06:00:07Z",
+     "updatedAt": "2026-09-17T06:00:07Z",
+     "description": "Steelers",
+     "price": "0.5800",
+     "marketId": 919543,
+     "long": true,
+     "teamId": 74,
+     "team": {
+      "id": 74,
+      "name": "Pittsburgh Steelers",
+      "abbreviation": "pit",
+      "league": "nfl",
+      "alias": "Steelers",
+      "ordering": "away",
+      "displayAbbreviation": "PIT"
+     },
+     "quote": {
+      "value": "0.5800",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "1838571",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aec-nfl-pit-cle-2026-10-01",
+     "createdAt": "2026-09-17T06:00:07Z",
+     "updatedAt": "2026-09-17T06:00:07Z",
+     "description": "Browns",
+     "price": "0.425",
+     "marketId": 919543,
+     "long": false,
+     "teamId": 55,
+     "team": {
+      "id": 55,
+      "name": "Cleveland Browns",
+      "abbreviation": "cle",
+      "league": "nfl",
+      "alias": "Browns",
+      "ordering": "home",
+      "displayAbbreviation": "CLE"
+     },
+     "quote": {
+      "value": "0.425",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Steelers\",\"Browns\"]",
+   "outcomePrices": "[\"0.5800\",\"0.425\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_MONEYLINE",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.5750",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.5800",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-09-25T11:46:52Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true
+  },
+  "nfl_spread": {
+   "id": "1002223",
+   "question": "Will the Pittsburgh Steelers cover -3.5 vs the Cleveland Browns in PIT Steelers vs. CLE Browns?",
+   "slug": "asc-nfl-pit-cle-2026-10-01-neg-3pt5",
+   "endDate": "2026-10-16T04:15:00Z",
+   "category": "sports",
+   "startDate": "2026-09-22T18:00:33Z",
+   "description": "This market will settle to Yes if Pittsburgh Steelers covers a -3.5 point spread in the Pittsburgh Steelers vs Cleveland Browns professional football game scheduled for Oct 1, 2026. Overtime is included if played. If the game is delayed, postponed, or suspended and not rescheduled to a date within two weeks of the originally scheduled date, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "spreads",
+   "closed": false,
+   "createdAt": "2026-09-22T18:00:33Z",
+   "updatedAt": "2026-09-29T19:22:02Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.005,
+   "gameStartTime": "2026-10-02T00:15:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_team_full_game_spread",
+   "line": -3.5,
+   "marketSides": [
+    {
+     "id": "2003930",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-nfl-pit-cle-2026-10-01-neg-3pt5",
+     "createdAt": "2026-09-22T18:00:33Z",
+     "updatedAt": "2026-09-22T18:00:33Z",
+     "description": "-3.50",
+     "price": "0.4250",
+     "marketId": 1002223,
+     "long": true,
+     "teamId": 74,
+     "team": {
+      "id": 74,
+      "name": "Pittsburgh Steelers",
+      "abbreviation": "pit",
+      "league": "nfl",
+      "alias": "Steelers",
+      "ordering": "away",
+      "displayAbbreviation": "PIT"
+     },
+     "quote": {
+      "value": "0.4250",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "2003931",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-nfl-pit-cle-2026-10-01-neg-3pt5",
+     "createdAt": "2026-09-22T18:00:33Z",
+     "updatedAt": "2026-09-22T18:00:33Z",
+     "description": "+3.50",
+     "price": "0.58",
+     "marketId": 1002223,
+     "long": false,
+     "teamId": 55,
+     "team": {
+      "id": 55,
+      "name": "Cleveland Browns",
+      "abbreviation": "cle",
+      "league": "nfl",
+      "alias": "Browns",
+      "ordering": "home",
+      "displayAbbreviation": "CLE"
+     },
+     "quote": {
+      "value": "0.58",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"-3.50\",\"+3.50\"]",
+   "outcomePrices": "[\"0.4250\",\"0.58\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_SPREAD",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "bestBidQuote": {
+    "value": "0.4200",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.4250",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-09-25T11:51:03Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true
+  },
+  "nfl_total": {
+   "id": "1003109",
+   "question": "Will the total in PIT Steelers vs. CLE Browns be more than 40.5?",
+   "slug": "tsc-nfl-pit-cle-2026-10-01-total-40pt5",
+   "endDate": "2026-10-16T04:15:00Z",
+   "category": "sports",
+   "startDate": "2026-09-22T18:12:18Z",
+   "description": "This market will settle to Yes if Pittsburgh Steelers and Cleveland Browns combine for over 40.5 points in the Pittsburgh Steelers vs Cleveland Browns professional football game scheduled for Oct 1, 2026. Overtime is included if played. If the game is delayed, postponed, or suspended and not rescheduled to a date within two weeks of the originally scheduled date, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "totals",
+   "closed": false,
+   "createdAt": "2026-09-22T18:12:18Z",
+   "updatedAt": "2026-09-29T17:38:02Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.005,
+   "gameStartTime": "2026-10-02T00:15:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_team_full_game_total",
+   "line": 40.5,
+   "marketSides": [
+    {
+     "id": "2005702",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nfl-pit-cle-2026-10-01-total-40pt5",
+     "createdAt": "2026-09-22T18:12:18Z",
+     "updatedAt": "2026-09-22T18:12:18Z",
+     "description": "Over",
+     "price": "0.4250",
+     "marketId": 1003109,
+     "long": true,
+     "quote": {
+      "value": "0.4250",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "2005703",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nfl-pit-cle-2026-10-01-total-40pt5",
+     "createdAt": "2026-09-22T18:12:18Z",
+     "updatedAt": "2026-09-22T18:12:18Z",
+     "description": "Under",
+     "price": "0.58",
+     "marketId": 1003109,
+     "long": false,
+     "quote": {
+      "value": "0.58",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Over\",\"Under\"]",
+   "outcomePrices": "[\"0.4250\",\"0.58\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_TOTAL",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "bestBidQuote": {
+    "value": "0.4200",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.4250",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-09-25T11:51:02Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true
+  },
+  "nfl_total_under_first": {
+   "id": "1131736",
+   "question": "Will the total in BUF Bills vs. LA Rams be more than 64.5?",
+   "slug": "tsc-nfl-buf-lar-2026-10-12-total-64pt5",
+   "endDate": "2026-10-27T04:15:00Z",
+   "category": "sports",
+   "startDate": "2026-09-29T18:19:32Z",
+   "description": "This market will settle to Yes if Buffalo Bills and Los Angeles Rams combine for over 64.5 points in the Buffalo Bills vs Los Angeles Rams professional football game scheduled for Oct 12, 2026. Overtime is included if played. If the game is delayed, postponed, or suspended and not rescheduled to a date within two weeks of the originally scheduled date, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "totals",
+   "closed": false,
+   "createdAt": "2026-09-29T18:19:32Z",
+   "updatedAt": "2026-09-29T18:37:28Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.005,
+   "gameStartTime": "2026-10-13T00:15:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_team_full_game_total",
+   "line": 64.5,
+   "marketSides": [
+    {
+     "id": "2262954",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nfl-buf-lar-2026-10-12-total-64pt5",
+     "createdAt": "2026-09-29T18:19:32Z",
+     "updatedAt": "2026-09-29T18:19:32Z",
+     "description": "Over",
+     "price": "0.5200",
+     "marketId": 1131736,
+     "long": true,
+     "quote": {
+      "value": "0.5200",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "2262955",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nfl-buf-lar-2026-10-12-total-64pt5",
+     "createdAt": "2026-09-29T18:19:32Z",
+     "updatedAt": "2026-09-29T18:19:32Z",
+     "description": "Under",
+     "price": "0.88",
+     "marketId": 1131736,
+     "long": false,
+     "quote": {
+      "value": "0.88",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Under\",\"Over\"]",
+   "outcomePrices": "[\"0.5200\",\"0.88\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_TOTAL",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "bestBidQuote": {
+    "value": "0.1200",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.5200",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-09-29T18:19:32Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true
+  },
+  "nfl_team_total": {
+   "id": "1003887",
+   "question": "Will the total in PIT Steelers vs. CLE Browns be more than 8.5?",
+   "slug": "tsc-nfl-pit-cle-2026-10-01-tt-pit-8pt5",
+   "endDate": "2026-10-16T04:15:00Z",
+   "category": "sports",
+   "startDate": "2026-09-22T18:33:33Z",
+   "description": "Team Point Total settles Over if Pittsburgh Steelers scores more than 8.5 points in the full game of the Pittsburgh Steelers vs Cleveland Browns professional football game scheduled for Oct 1, 2026. Overtime is included if played. If the game is delayed, postponed, or suspended before this market is determined and is not resumed or rescheduled within two weeks of the originally scheduled date, it will be flagged for manual last-fair-market-price settlement. Outcome sourced from the NFL.",
+   "active": true,
+   "marketType": "totals",
+   "closed": false,
+   "createdAt": "2026-09-22T18:33:33Z",
+   "updatedAt": "2026-09-25T11:50:47Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-02T00:15:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_team_points_full_game_total",
+   "line": 8.5,
+   "marketSides": [
+    {
+     "id": "2007258",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nfl-pit-cle-2026-10-01-tt-pit-8pt5",
+     "createdAt": "2026-09-22T18:33:33Z",
+     "updatedAt": "2026-09-22T18:33:33Z",
+     "description": "Over",
+     "price": "0.9300",
+     "marketId": 1003887,
+     "long": true,
+     "quote": {
+      "value": "0.9300",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "2007259",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nfl-pit-cle-2026-10-01-tt-pit-8pt5",
+     "createdAt": "2026-09-22T18:33:33Z",
+     "updatedAt": "2026-09-22T18:33:33Z",
+     "description": "Under",
+     "price": "0.1",
+     "marketId": 1003887,
+     "long": false,
+     "quote": {
+      "value": "0.1",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Over\",\"Under\"]",
+   "outcomePrices": "[\"0.9300\",\"0.1\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_TOTAL",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "bestBidQuote": {
+    "value": "0.9000",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.9300",
+    "currency": "USD"
+   },
+   "metadata": {
+    "teamId": 74
+   },
+   "ep3SyncedAt": "2026-09-25T11:50:47Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true
+  },
+  "nfl_first_half_spread": {
+   "id": "1003731",
+   "question": "Will the Pittsburgh Steelers cover -20.5 vs the Cleveland Browns in PIT Steelers vs. CLE Browns?",
+   "slug": "asc-nfl-pit-cle-2026-10-01-1h-neg-20pt5",
+   "endDate": "2026-10-16T04:15:00Z",
+   "category": "sports",
+   "startDate": "2026-09-22T18:30:46Z",
+   "description": "This market will settle to Yes if Pittsburgh Steelers covers a -20.5 point spread in the first half of the Pittsburgh Steelers vs Cleveland Browns professional football game scheduled for Oct 1, 2026. If the game is delayed, postponed, or suspended before the first half is completed and not rescheduled to a date within two weeks of the originally scheduled date, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "spreads",
+   "closed": false,
+   "createdAt": "2026-09-22T18:30:46Z",
+   "updatedAt": "2026-09-25T11:51:02Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-02T00:15:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_team_first_half_spread",
+   "line": -20.5,
+   "marketSides": [
+    {
+     "id": "2006946",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-nfl-pit-cle-2026-10-01-1h-neg-20pt5",
+     "createdAt": "2026-09-22T18:30:46Z",
+     "updatedAt": "2026-09-22T18:30:46Z",
+     "description": "-20.50",
+     "price": "0.0800",
+     "marketId": 1003731,
+     "long": true,
+     "teamId": 74,
+     "team": {
+      "id": 74,
+      "name": "Pittsburgh Steelers",
+      "abbreviation": "pit",
+      "league": "nfl",
+      "alias": "Steelers",
+      "ordering": "away",
+      "displayAbbreviation": "PIT"
+     },
+     "quote": {
+      "value": "0.0800",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "2006947",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-nfl-pit-cle-2026-10-01-1h-neg-20pt5",
+     "createdAt": "2026-09-22T18:30:46Z",
+     "updatedAt": "2026-09-22T18:30:46Z",
+     "description": "+20.50",
+     "price": "0.95",
+     "marketId": 1003731,
+     "long": false,
+     "teamId": 55,
+     "team": {
+      "id": 55,
+      "name": "Cleveland Browns",
+      "abbreviation": "cle",
+      "league": "nfl",
+      "alias": "Browns",
+      "ordering": "home",
+      "displayAbbreviation": "CLE"
+     },
+     "quote": {
+      "value": "0.95",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"-20.50\",\"+20.50\"]",
+   "outcomePrices": "[\"0.0800\",\"0.95\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_SPREAD",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "bestBidQuote": {
+    "value": "0.0500",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0800",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-09-25T11:51:02Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true
+  },
+  "nfl_first_quarter_total": {
+   "id": "1003835",
+   "question": "Will the total in PIT Steelers vs. CLE Browns be more than 0.5?",
+   "slug": "tsc-nfl-pit-cle-2026-10-01-1q-0pt5",
+   "endDate": "2026-10-16T04:15:00Z",
+   "category": "sports",
+   "startDate": "2026-09-22T18:32:38Z",
+   "description": "This market will settle to Yes if Pittsburgh Steelers and Cleveland Browns combine for over 0.5 points in the first quarter of the Pittsburgh Steelers vs Cleveland Browns professional football game scheduled for Oct 1, 2026. Only points and statistics recorded in regulation during that period count; overtime is not included. If the game is delayed, postponed, or suspended before the first quarter is completed and not rescheduled to a date within two weeks of the originally scheduled date, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "totals",
+   "closed": false,
+   "createdAt": "2026-09-22T18:32:38Z",
+   "updatedAt": "2026-09-28T22:53:55Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-02T00:15:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_game_first_quarter_total",
+   "line": 0.5,
+   "marketSides": [
+    {
+     "id": "2007154",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nfl-pit-cle-2026-10-01-1q-0pt5",
+     "createdAt": "2026-09-22T18:32:38Z",
+     "updatedAt": "2026-09-22T18:32:38Z",
+     "description": "Over",
+     "price": "0.8400",
+     "marketId": 1003835,
+     "long": true,
+     "quote": {
+      "value": "0.8400",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "2007155",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nfl-pit-cle-2026-10-01-1q-0pt5",
+     "createdAt": "2026-09-22T18:32:38Z",
+     "updatedAt": "2026-09-22T18:32:38Z",
+     "description": "Under",
+     "price": "0.17",
+     "marketId": 1003835,
+     "long": false,
+     "quote": {
+      "value": "0.17",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Over\",\"Under\"]",
+   "outcomePrices": "[\"0.8400\",\"0.17\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_TOTAL",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "bestBidQuote": {
+    "value": "0.8300",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.8400",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-09-25T11:50:58Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true
+  },
+  "nfl_future_champ": {
+   "id": "78517",
+   "question": "Pro Football Champion 2027",
+   "slug": "tec-nfl-champ-2027-02-14-w-pitste",
+   "endDate": "2027-03-01T04:00:00Z",
+   "category": "sports",
+   "startDate": "2026-06-09T01:02:30Z",
+   "description": "If the Pittsburgh Steelers win the 2027 Pro Football Championship, scheduled for February 14, 2027, this market will settle to Yes. Outcome sourced from the relevant governing body or event organizer. If the listed championship game is postponed or delayed within two weeks of the original date, the market will remain open and will settle once the game is complete. Cancellation or rescheduling beyond the two-week window results in resolution at the last fair market price. If the Pittsburgh Steelers are eliminated from contention, this market will settle to No.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-06-13T00:12:50Z",
+   "updatedAt": "2026-09-29T17:37:53Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-09-10T00:20:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "156988",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tec-nfl-champ-2027-02-14-w-pitste",
+     "createdAt": "2026-06-13T00:12:50Z",
+     "updatedAt": "2026-06-13T00:12:50Z",
+     "description": "Yes",
+     "price": "0.0200",
+     "marketId": 78517,
+     "long": true,
+     "teamId": 74,
+     "team": {
+      "id": 74,
+      "name": "Pittsburgh Steelers",
+      "abbreviation": "pit",
+      "league": "nfl",
+      "alias": "Steelers",
+      "ordering": "away",
+      "displayAbbreviation": "PIT"
+     },
+     "quote": {
+      "value": "0.0200",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "156989",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tec-nfl-champ-2027-02-14-w-pitste",
+     "createdAt": "2026-06-13T00:12:50Z",
+     "updatedAt": "2026-06-13T00:12:50Z",
+     "description": "No",
+     "price": "0.99",
+     "marketId": 78517,
+     "long": false,
+     "teamId": 74,
+     "team": {
+      "id": 74,
+      "name": "Pittsburgh Steelers",
+      "abbreviation": "pit",
+      "league": "nfl",
+      "alias": "Steelers",
+      "ordering": "home",
+      "displayAbbreviation": "PIT"
+     },
+     "quote": {
+      "value": "0.99",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0200\",\"0.99\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Pittsburgh",
+   "subtitle": "10-7-0",
+   "color": "#ffb612",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.0100",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0200",
+    "currency": "USD"
+   },
+   "titleShort": "Pittsburgh",
+   "ep3SyncedAt": "2026-09-25T11:55:59Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "nfl_future_mvp": {
+   "id": "125193",
+   "question": "Pro Football MVP",
+   "slug": "tec-nfl-mvp-2027-02-11-w-tylsho",
+   "endDate": "2027-02-26T04:00:00Z",
+   "category": "sports",
+   "startDate": "2026-06-22T22:32:16Z",
+   "description": "This market will settle to Yes if Tyler Shough wins the Pro Football AP MVP Award for the 2026-27 regular season. Outcome sourced from the relevant governing body. If Tyler Shough ties with one or more other players for the award Yes contract holders receive $1.00 divided by the number of tied players, rounded down to the nearest cent, per contract.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-06-22T22:32:16Z",
+   "updatedAt": "2026-09-29T18:21:35Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2027-02-12T01:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "250024",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tec-nfl-mvp-2027-02-11-w-tylsho",
+     "createdAt": "2026-06-22T22:32:16Z",
+     "updatedAt": "2026-06-22T22:32:16Z",
+     "description": "Yes",
+     "price": "0.0400",
+     "marketId": 125193,
+     "long": true,
+     "quote": {
+      "value": "0.0400",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "250025",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tec-nfl-mvp-2027-02-11-w-tylsho",
+     "createdAt": "2026-06-22T22:32:16Z",
+     "updatedAt": "2026-06-22T22:32:16Z",
+     "description": "No",
+     "price": "0.97",
+     "marketId": 125193,
+     "long": false,
+     "quote": {
+      "value": "0.97",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0400\",\"0.97\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Tyler Shough",
+   "color": "#D3BC8D",
+   "darkColor": "#D3BC8D",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.0300",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0400",
+    "currency": "USD"
+   },
+   "metadata": {
+    "playerAbbreviation": "tylsho",
+    "playerId": 4833,
+    "playerName": "Tyler Shough",
+    "teamId": 70
+   },
+   "titleShort": "Tyler Shough",
+   "ep3SyncedAt": "2026-09-25T11:56:00Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "nfl_future_playoffq_no_first": {
+   "id": "420498",
+   "question": "Pro Football Playoff Qualifiers",
+   "slug": "aqc-nfl-2027-01-10-playoffq-ari",
+   "endDate": "2027-01-25T04:00:00Z",
+   "category": "sports",
+   "startDate": "2026-08-13T02:00:57Z",
+   "description": "This market will settle to Yes if the Arizona Cardinals qualify for the 2026-27 Pro Football Playoffs. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-08-13T02:00:57Z",
+   "updatedAt": "2026-09-29T19:06:59Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-09-10T00:20:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "840508",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aqc-nfl-2027-01-10-playoffq-ari",
+     "createdAt": "2026-08-13T02:00:57Z",
+     "updatedAt": "2026-08-13T02:00:57Z",
+     "description": "Yes",
+     "price": "0.0400",
+     "marketId": 420498,
+     "long": true,
+     "teamId": 48,
+     "team": {
+      "id": 48,
+      "name": "Arizona Cardinals",
+      "abbreviation": "ari",
+      "league": "nfl",
+      "alias": "Cardinals",
+      "ordering": "away",
+      "displayAbbreviation": "ARI"
+     },
+     "quote": {
+      "value": "0.0400",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "840509",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aqc-nfl-2027-01-10-playoffq-ari",
+     "createdAt": "2026-08-13T02:00:57Z",
+     "updatedAt": "2026-08-13T02:00:57Z",
+     "description": "No",
+     "price": "0.97",
+     "marketId": 420498,
+     "long": false,
+     "teamId": 48,
+     "team": {
+      "id": 48,
+      "name": "Arizona Cardinals",
+      "abbreviation": "ari",
+      "league": "nfl",
+      "alias": "Cardinals",
+      "ordering": "home",
+      "displayAbbreviation": "ARI"
+     },
+     "quote": {
+      "value": "0.97",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"No\",\"Yes\"]",
+   "outcomePrices": "[\"0.0400\",\"0.97\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "ARI Cardinals",
+   "subtitle": "1-2",
+   "color": "#97233F",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.0300",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0400",
+    "currency": "USD"
+   },
+   "titleShort": "ARI Cardinals",
+   "ep3SyncedAt": "2026-09-25T11:48:11Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "nfl_future_win_total": {
+   "id": "272060",
+   "question": "Pro Football Regular Season Win Totals",
+   "slug": "aachc-nfl-wins-ou-2027-01-10-was",
+   "endDate": "2027-01-25T04:00:00Z",
+   "category": "sports",
+   "startDate": "2026-07-21T23:02:28Z",
+   "description": "This market will settle to Yes if Washington finishes the 2026 Pro Football regular season with over 7.5 wins. Statistics are based on official regular season games only. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-07-21T23:02:28Z",
+   "updatedAt": "2026-09-29T18:36:31Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-09-10T00:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "543684",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aachc-nfl-wins-ou-2027-01-10-was",
+     "createdAt": "2026-07-21T23:02:28Z",
+     "updatedAt": "2026-07-21T23:02:28Z",
+     "description": "Yes",
+     "price": "0.4700",
+     "marketId": 272060,
+     "long": true,
+     "teamId": 79,
+     "team": {
+      "id": 79,
+      "name": "Washington Commanders",
+      "abbreviation": "was",
+      "league": "nfl",
+      "alias": "Commanders",
+      "ordering": "away",
+      "displayAbbreviation": "WAS"
+     },
+     "quote": {
+      "value": "0.4700",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "543685",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aachc-nfl-wins-ou-2027-01-10-was",
+     "createdAt": "2026-07-21T23:02:28Z",
+     "updatedAt": "2026-07-21T23:02:28Z",
+     "description": "No",
+     "price": "0.54",
+     "marketId": 272060,
+     "long": false,
+     "teamId": 79,
+     "team": {
+      "id": 79,
+      "name": "Washington Commanders",
+      "abbreviation": "was",
+      "league": "nfl",
+      "alias": "Commanders",
+      "ordering": "home",
+      "displayAbbreviation": "WAS"
+     },
+     "quote": {
+      "value": "0.54",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.4700\",\"0.54\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Washington 7.5+",
+   "subtitle": "1-2",
+   "color": "#5A1414",
+   "feeCoefficient": 0.0695,
+   "sortOrder": 32,
+   "bestBidQuote": {
+    "value": "0.4600",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.4700",
+    "currency": "USD"
+   },
+   "titleShort": "Washington 7.5+",
+   "ep3SyncedAt": "2026-09-25T11:46:29Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "nfl_future_player_stat_leader": {
+   "id": "607622",
+   "question": "James Cook III",
+   "slug": "aachc-nfl-2027-01-10-1000rushyds-jamcoo",
+   "endDate": "2027-01-25T04:00:00Z",
+   "category": "sports",
+   "startDate": "2026-09-01T19:27:35Z",
+   "description": "This market will settle to Yes if James Cook III records 1,000 or more rushing yards in the 2026 Pro Football regular season. Statistics are based on official regular season games only. Playoff games do not count. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-09-01T19:27:35Z",
+   "updatedAt": "2026-09-29T17:37:02Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-09-09T19:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "1214756",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aachc-nfl-2027-01-10-1000rushyds-jamcoo",
+     "createdAt": "2026-09-01T19:27:35Z",
+     "updatedAt": "2026-09-01T19:27:35Z",
+     "description": "Yes",
+     "price": "0.8500",
+     "marketId": 607622,
+     "long": true,
+     "quote": {
+      "value": "0.8500",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "1214757",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aachc-nfl-2027-01-10-1000rushyds-jamcoo",
+     "createdAt": "2026-09-01T19:27:35Z",
+     "updatedAt": "2026-09-01T19:27:35Z",
+     "description": "No",
+     "price": "0.16",
+     "marketId": 607622,
+     "long": false,
+     "quote": {
+      "value": "0.16",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.8500\",\"0.16\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "James Cook III",
+   "color": "#00338D",
+   "darkColor": "#C60C30",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.8400",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.8500",
+    "currency": "USD"
+   },
+   "metadata": {
+    "playerAbbreviation": "jamcoo",
+    "playerId": 4862,
+    "playerName": "James Cook III",
+    "teamId": 51
+   },
+   "titleShort": "James Cook III",
+   "ep3SyncedAt": "2026-09-25T11:46:11Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "nfl_future_season_stat": {
+   "id": "272415",
+   "question": "Regular Season Passing Yards O/U",
+   "slug": "astatc-nfl-passyds-ou-2027-01-10-tylsho",
+   "endDate": "2027-01-25T04:00:00Z",
+   "category": "sports",
+   "startDate": "2026-07-21T23:17:28Z",
+   "description": "This market will settle to Yes if Tyler Shough records over 3649.5 passing yards in the 2026 Pro Football regular season. Statistics are based on official regular season games only. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-07-21T23:17:28Z",
+   "updatedAt": "2026-09-29T08:51:19Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-09-10T00:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "544394",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "astatc-nfl-passyds-ou-2027-01-10-tylsho",
+     "createdAt": "2026-07-21T23:17:28Z",
+     "updatedAt": "2026-07-21T23:17:28Z",
+     "description": "Yes",
+     "price": "0.6400",
+     "marketId": 272415,
+     "long": true,
+     "quote": {
+      "value": "0.6400",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "544395",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "astatc-nfl-passyds-ou-2027-01-10-tylsho",
+     "createdAt": "2026-07-21T23:17:28Z",
+     "updatedAt": "2026-07-21T23:17:28Z",
+     "description": "No",
+     "price": "0.37",
+     "marketId": 272415,
+     "long": false,
+     "quote": {
+      "value": "0.37",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"No\",\"Yes\"]",
+   "outcomePrices": "[\"0.6400\",\"0.37\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Tyler Shough 3649.5+",
+   "color": "#D3BC8D",
+   "darkColor": "#D3BC8D",
+   "feeCoefficient": 0.0695,
+   "sortOrder": 25,
+   "bestBidQuote": {
+    "value": "0.6300",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.6400",
+    "currency": "USD"
+   },
+   "metadata": {
+    "playerAbbreviation": "tylsho",
+    "playerId": 4833,
+    "playerName": "Tyler Shough",
+    "teamId": 70
+   },
+   "titleShort": "Tyler Shough 3649.5+",
+   "ep3SyncedAt": "2026-09-25T11:55:54Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "nfl_future_fantasy": {
+   "id": "315135",
+   "question": "QB Most PPR Fantasy Points Weeks 1-18",
+   "slug": "ftsc-nfl-qbmostfp-2027-01-10-shesan",
+   "endDate": "2027-01-25T04:00:00Z",
+   "category": "sports",
+   "startDate": "2026-07-29T01:09:09Z",
+   "description": "This market will settle to Yes if Shedeur Sanders records the most fantasy points among all quarterbacks (QB) during the 2026 Pro Football regular season. Fantasy points will be calculated using ESPN's Fantasy Football League Points Per Reception (PPR) scoring system and reflect each player's total for the entire 2026 Pro Football regular season. If two or more players tie, each tied player's market will settle at $1.00 divided by the number of tied players. Outcome sourced from ESPN.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-07-29T01:09:09Z",
+   "updatedAt": "2026-09-29T18:21:32Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-09-10T00:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "629832",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "ftsc-nfl-qbmostfp-2027-01-10-shesan",
+     "createdAt": "2026-07-29T01:09:09Z",
+     "updatedAt": "2026-07-29T01:09:09Z",
+     "description": "Yes",
+     "price": "0.0200",
+     "marketId": 315135,
+     "long": true,
+     "quote": {
+      "value": "0.0200",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "629833",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "ftsc-nfl-qbmostfp-2027-01-10-shesan",
+     "createdAt": "2026-07-29T01:09:09Z",
+     "updatedAt": "2026-07-29T01:09:09Z",
+     "description": "No",
+     "price": "0.99",
+     "marketId": 315135,
+     "long": false,
+     "quote": {
+      "value": "0.99",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0200\",\"0.99\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Shedeur Sanders",
+   "color": "#311D00",
+   "darkColor": "#FF3C00",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.0100",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0200",
+    "currency": "USD"
+   },
+   "metadata": {
+    "playerAbbreviation": "shesan",
+    "playerId": 5954,
+    "playerName": "Shedeur Sanders",
+    "teamId": 55
+   },
+   "titleShort": "Shedeur Sanders",
+   "ep3SyncedAt": "2026-09-25T11:55:50Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "politics_vmc_bracket": {
+   "id": "469995",
+   "question": "Alabama Senate Election Margin of Victory",
+   "slug": "vmc-ussemov-al-2026-11-03-r0-5",
+   "endDate": "2026-11-18T04:00:00Z",
+   "category": "politics",
+   "startDate": "2026-08-19T19:34:47Z",
+   "description": "This market will settle to Yes if the Republican Party nominee's margin of victory in the 2026 Alabama Senate election is between 0% and 5%. Outcome sourced from relevant state election authorities.\n\nThe margin of victory is calculated as the absolute difference in vote share percentages between the candidate that receives the most valid votes in the specified election and the candidate that receives the second-most valid votes in the specified election. A candidate's vote share percentage will be calculated by dividing the total number of valid votes received by the candidate by the total number of valid votes cast in the election.\n\nIf the specified candidate does not receive the most valid votes in the specified election, this market will settle to No. If the margin falls exactly on the boundary between two ranges, the Contract will settle in favor of the range for which that value is the inclusive lower boundary. If multiple candidates tie for the most votes in the specified election, Yes contract holders of the lowest bracket contract for each tied candidate receive $1.00 divided by the number of tied candidates, rounded down to the nearest tick, per contract.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-08-19T19:34:47Z",
+   "updatedAt": "2026-09-29T18:37:39Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-08-10T16:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "939502",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "vmc-ussemov-al-2026-11-03-r0-5",
+     "createdAt": "2026-08-19T19:34:47Z",
+     "updatedAt": "2026-08-19T19:34:47Z",
+     "description": "Yes",
+     "price": "0.3900",
+     "marketId": 469995,
+     "long": true,
+     "quote": {
+      "value": "0.3900",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "939503",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "vmc-ussemov-al-2026-11-03-r0-5",
+     "createdAt": "2026-08-19T19:34:47Z",
+     "updatedAt": "2026-08-19T19:34:47Z",
+     "description": "No",
+     "price": "0.99",
+     "marketId": 469995,
+     "long": false,
+     "quote": {
+      "value": "0.99",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.3900\",\"0.99\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Republican 0-5%",
+   "feeCoefficient": 0.0695,
+   "sortOrder": 8,
+   "bestBidQuote": {
+    "value": "0.0100",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.3900",
+    "currency": "USD"
+   },
+   "titleShort": "Republican 0-5%",
+   "ep3SyncedAt": "2026-09-25T11:55:43Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "politics_vtc_turnout": {
+   "id": "234497",
+   "question": "2026 Midterms: House Turnout",
+   "slug": "vtc-hrep-to-2026-11-03-125-130m",
+   "endDate": "2026-11-18T04:00:00Z",
+   "category": "politics",
+   "startDate": "2026-07-16T20:38:52Z",
+   "description": "This market will settle to Yes if the total number of votes cast for candidates for U.S. Representative in the 2026 United States Midterm election is between 125 million and 130 million. Outcome sourced from the Clerk of the House.\n\nOnly votes cast for candidates for U.S. Representative are included in the count. Votes for Delegates and the Resident Commissioner are excluded. If the turnout falls exactly on the boundary between two ranges, the Contract for which that value is the lower boundary will settle to Yes and all other Contracts will settle to No.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-07-16T20:38:52Z",
+   "updatedAt": "2026-09-29T16:08:06Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-11-03T17:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "468558",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "vtc-hrep-to-2026-11-03-125-130m",
+     "createdAt": "2026-07-16T20:38:52Z",
+     "updatedAt": "2026-07-16T20:38:52Z",
+     "description": "Yes",
+     "price": "0.1400",
+     "marketId": 234497,
+     "long": true,
+     "quote": {
+      "value": "0.1400",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "468559",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "vtc-hrep-to-2026-11-03-125-130m",
+     "createdAt": "2026-07-16T20:38:52Z",
+     "updatedAt": "2026-07-16T20:38:52Z",
+     "description": "No",
+     "price": "0.87",
+     "marketId": 234497,
+     "long": false,
+     "quote": {
+      "value": "0.87",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.1400\",\"0.87\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "125-130 Million",
+   "feeCoefficient": 0.0695,
+   "sortOrder": 9,
+   "bestBidQuote": {
+    "value": "0.1300",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.1400",
+    "currency": "USD"
+   },
+   "titleShort": "125-130 Million",
+   "ep3SyncedAt": "2026-09-25T11:55:55Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "politics_cmovc_margin": {
+   "id": "914616",
+   "question": "Closest Senate Race?",
+   "slug": "cmovcuss-usseclose-2026-11-03-ks",
+   "endDate": "2026-11-18T04:00:00Z",
+   "category": "politics",
+   "startDate": "2026-09-16T19:55:02Z",
+   "description": "This market will settle to Yes if the 2026 Kansas US Senate election has the smallest margin of victory of any US Senate election held in 2026. Outcome sourced from relevant state election authorities.\n\nThe margin of victory for each election is the absolute difference in vote share percentages between the candidate that receives the most votes in the election and the candidate that receives the second-most votes in the election. A candidate's vote share percentage will be calculated by dividing the total number of valid votes received by the candidate by the total number of valid votes cast in the election.\n\nWhere an election is tabulated by ranked-choice or instant-runoff voting, the margin of victory is measured in the final round of tabulation that determines the winner. Where an election includes a potential runoff or second round, the margin of victory is measured in the final round that determines the winner.\n\nThis market considers all US Senate elections, including special elections, scheduled as of October 31, 2026 to be held in November 2026, including the results of runoff elections held after November 2026. If two or more of those elections have identical smallest margins of victory, Yes contract holders for each tied election receive $1.00 divided by the number of tied elections, rounded down to the nearest tick, per contract.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-09-16T19:55:02Z",
+   "updatedAt": "2026-09-29T07:23:10Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-11-03T17:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "1828718",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "cmovcuss-usseclose-2026-11-03-ks",
+     "createdAt": "2026-09-16T19:55:02Z",
+     "updatedAt": "2026-09-16T19:55:02Z",
+     "description": "Yes",
+     "price": "0.1400",
+     "marketId": 914616,
+     "long": true,
+     "quote": {
+      "value": "0.1400",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "1828719",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "cmovcuss-usseclose-2026-11-03-ks",
+     "createdAt": "2026-09-16T19:55:02Z",
+     "updatedAt": "2026-09-16T19:55:02Z",
+     "description": "No",
+     "price": "0.9",
+     "marketId": 914616,
+     "long": false,
+     "quote": {
+      "value": "0.9",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.1400\",\"0.9\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Kansas",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.1000",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.1400",
+    "currency": "USD"
+   },
+   "titleShort": "Kansas",
+   "ep3SyncedAt": "2026-09-25T11:52:55Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "politics_winner": {
+   "id": "409789",
+   "question": "MO-04 House Election Winner",
+   "slug": "ushrewc-ushr-mo-04-2026-11-03-dem",
+   "endDate": "2026-11-18T04:00:00Z",
+   "category": "politics",
+   "startDate": "2026-08-11T17:44:36Z",
+   "description": "This market will settle to Yes if the Democratic Party nominee wins the 2026 midterm election for the MO-04 congressional district seat. Outcome sourced from relevant government authorities.\n\nThe determination of the winner includes any runoff, tiebreak, or other relevant procedure under the applicable rules of the relevant jurisdiction.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-08-11T17:44:36Z",
+   "updatedAt": "2026-09-29T17:07:15Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-08-06T16:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "819090",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "ushrewc-ushr-mo-04-2026-11-03-dem",
+     "createdAt": "2026-08-11T17:44:36Z",
+     "updatedAt": "2026-08-11T17:44:36Z",
+     "description": "Yes",
+     "price": "0.0700",
+     "marketId": 409789,
+     "long": true,
+     "quote": {
+      "value": "0.0700",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "819091",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "ushrewc-ushr-mo-04-2026-11-03-dem",
+     "createdAt": "2026-08-11T17:44:36Z",
+     "updatedAt": "2026-08-11T17:44:36Z",
+     "description": "No",
+     "price": "0.94",
+     "marketId": 409789,
+     "long": false,
+     "quote": {
+      "value": "0.94",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0700\",\"0.94\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Jordan Herrera (D)",
+   "color": "#2258F8",
+   "darkColor": "#0073FF",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.0600",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0700",
+    "currency": "USD"
+   },
+   "titleShort": "Jordan Herrera (D)",
+   "ep3SyncedAt": "2026-09-28T21:23:31Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "culture": {
+   "id": "48166",
+   "question": "2026 Nobel Peace Prize Winner",
+   "slug": "tac-nobel-peace-2026-10-09-julass",
+   "endDate": "2026-10-24T03:00:00Z",
+   "category": "culture",
+   "startDate": "2026-06-05T00:13:22Z",
+   "description": "If Julian Assange wins the 2026 Nobel Peace Prize, this market will settle to Yes. Outcome verified by the Norwegian Nobel Committee.\n\nThe specified person or organization will be considered to have won the 2026 Nobel Peace Prize if they are announced by the Norwegian Nobel Committee as the sole or joint recipient of the Prize. Membership or leadership in an organization that receives the 2026 Nobel Peace Prize will not count for settlement.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-06-05T00:15:55Z",
+   "updatedAt": "2026-09-29T18:37:18Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-09T16:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "96296",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tac-nobel-peace-2026-10-09-julass",
+     "createdAt": "2026-06-05T00:15:55Z",
+     "updatedAt": "2026-06-05T00:15:55Z",
+     "description": "Yes",
+     "price": "0.0300",
+     "marketId": 48166,
+     "long": true,
+     "quote": {
+      "value": "0.0300",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "96297",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tac-nobel-peace-2026-10-09-julass",
+     "createdAt": "2026-06-05T00:15:55Z",
+     "updatedAt": "2026-06-05T00:15:55Z",
+     "description": "No",
+     "price": "0.98",
+     "marketId": 48166,
+     "long": false,
+     "quote": {
+      "value": "0.98",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0300\",\"0.98\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Julian Assange",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.0200",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0300",
+    "currency": "USD"
+   },
+   "titleShort": "Julian Assange",
+   "ep3SyncedAt": "2026-09-25T11:55:59Z",
+   "minimumTradeQty": 1,
+   "comboEnabled": false
+  },
+  "crypto": {
+   "id": "208964",
+   "question": "When will Bitcoin hit $150k?",
+   "slug": "cpc-btc-150k-12-31-2026",
+   "endDate": "2027-01-15T04:00:00Z",
+   "category": "crypto",
+   "startDate": "2026-07-10T15:56:07Z",
+   "description": "This market will settle to Yes if the price of Bitcoin is above $149,999.99 at any point before 12:00 AM ET on January 1, 2027.\n\nOutcome sourced from CF Benchmarks' Bitcoin Real-Time Index.\n\nThe market settles based on the CF Bitcoin Real-Time Index (BRTI) using a trimmed mean calculation over any sixty second period, excluding the top 20% and bottom 20% of values. If this trimmed mean crosses the threshold at any point, the market settles to Yes. Otherwise, the market settles to No.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-07-10T15:56:07Z",
+   "updatedAt": "2026-09-29T19:22:25Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-07-08T19:45:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "417562",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "cpc-btc-150k-12-31-2026",
+     "createdAt": "2026-07-10T15:56:07Z",
+     "updatedAt": "2026-07-10T15:56:07Z",
+     "description": "Yes",
+     "price": "0.0600",
+     "marketId": 208964,
+     "long": true,
+     "quote": {
+      "value": "0.0600",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "417563",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "cpc-btc-150k-12-31-2026",
+     "createdAt": "2026-07-10T15:56:07Z",
+     "updatedAt": "2026-07-10T15:56:07Z",
+     "description": "No",
+     "price": "0.95",
+     "marketId": 208964,
+     "long": false,
+     "quote": {
+      "value": "0.95",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0600\",\"0.95\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Before January 2027",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.0500",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0600",
+    "currency": "USD"
+   },
+   "titleShort": "Before January 2027",
+   "ep3SyncedAt": "2026-09-25T11:55:55Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "finance": {
+   "id": "65552",
+   "question": "Which Companies Will Confirm an IPO in 2026",
+   "slug": "ipcc-2026ipos-revolut",
+   "endDate": "2027-01-15T04:00:00Z",
+   "category": "finance",
+   "startDate": "2026-06-11T02:29:12Z",
+   "description": "If Revolut confirms an IPO by December 31, 2026, 11:59 PM ET, this market will settle to Yes. Outcome verified by Revolut, the relevant IPO regulatory authority, and the IPOs primary listing exchange.\n\nAn IPO is confirmed when i) the SEC declares the specified companys Form S-1 or equivalent registration statement effective, or an equivalent filing with an alternative recognized national securities regulator is approved and made public ii) the IPO is priced (e.g., through a final pricing press release or submission of SEC Form 424B4) or iii) a public securities exchange assigns the specified company a ticker symbol and announces that the company has been approved for initial listing pursuant to an IPO. The occurrence of any of these events qualifies, regardless of when the specified companys equity shares begin public trading.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-06-11T02:29:12Z",
+   "updatedAt": "2026-09-28T22:53:38Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2027-01-01T04:59:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "131068",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "ipcc-2026ipos-revolut",
+     "createdAt": "2026-06-11T02:29:12Z",
+     "updatedAt": "2026-06-11T02:29:12Z",
+     "description": "Yes",
+     "price": "0.0800",
+     "marketId": 65552,
+     "long": true,
+     "quote": {
+      "value": "0.0800",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "131069",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "ipcc-2026ipos-revolut",
+     "createdAt": "2026-06-11T02:29:12Z",
+     "updatedAt": "2026-06-11T02:29:12Z",
+     "description": "No",
+     "price": "0.93",
+     "marketId": 65552,
+     "long": false,
+     "quote": {
+      "value": "0.93",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"No\",\"Yes\"]",
+   "outcomePrices": "[\"0.0800\",\"0.93\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Revolut",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.0700",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0800",
+    "currency": "USD"
+   },
+   "titleShort": "Revolut",
+   "ep3SyncedAt": "2026-09-25T11:55:59Z",
+   "minimumTradeQty": 1,
+   "comboEnabled": false
+  },
+  "climate": {
+   "id": "1039045",
+   "question": "Where Will 2026 Rank Among the Hottest Years on Record?",
+   "slug": "trc-yr-httst-rnk-glbl-2026-lte5th",
+   "endDate": "2027-03-16T03:00:00Z",
+   "category": "climate",
+   "startDate": "2026-09-24T22:27:33Z",
+   "description": "This market will settle to Yes if 2026 ranks fifth hottest or lower on the Global Land-Ocean Temperature Index. Outcome sourced from NASA GISS.\n\nThe relevant figure will be found in the table titled \"Land-Ocean Temperature Index (C)\" under the column \"No_Smoothing\" in the row \"2026\" at https://data.giss.nasa.gov/gistemp/graphs/graph_data/Global_Mean_Estimates_based_on_Land_and_Ocean_Data/graph.txt. \n\nYears are ranked in descending order by the Global Land-Ocean Temperature Index, starting with the hottest as number 1, the second hottest as number 2, and so on, across all years for which the index has data.\n\nIf 2026 is tied with another year in the ranking, the tied rank governs. For example, if 2026 is tied for 2nd, it is ranked 2nd (not 3rd).\n\nSettlement will be based on the data as first published by NASA GISS. Subsequent revisions will not be considered.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-09-24T22:27:34Z",
+   "updatedAt": "2026-09-25T11:50:06Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-09-24T18:33:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "2077574",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "trc-yr-httst-rnk-glbl-2026-lte5th",
+     "createdAt": "2026-09-24T22:27:34Z",
+     "updatedAt": "2026-09-24T22:27:34Z",
+     "description": "Yes",
+     "marketId": 1039045,
+     "long": true,
+     "tradable": true
+    },
+    {
+     "id": "2077575",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "trc-yr-httst-rnk-glbl-2026-lte5th",
+     "createdAt": "2026-09-24T22:27:34Z",
+     "updatedAt": "2026-09-24T22:27:34Z",
+     "description": "No",
+     "marketId": 1039045,
+     "long": false,
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0\",\"0\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "5th Or Lower",
+   "feeCoefficient": 0.0695,
+   "sortOrder": 5,
+   "titleShort": "5th Or Lower",
+   "ep3SyncedAt": "2026-09-25T11:50:06Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "mlb_moneyline": {
+   "id": "1061472",
+   "question": "Who will win in the upcoming baseball event Boston Red Sox vs New York Yankees scheduled for September 29, 2026 at 8:00 AM UTC?",
+   "slug": "aec-mlb-bos-nyy-2026-09-29",
+   "endDate": "2026-10-13T12:00:00Z",
+   "category": "sports",
+   "startDate": "2026-09-26T04:00:15Z",
+   "description": "This market will settle to the winner of the Boston Red Sox vs New York Yankees MLB AL Wild Card Game 1 scheduled for 2026-09-29 at 8:00PM ET. Extra innings are included if played. If the game is delayed, postponed, or suspended and not rescheduled to a date within two weeks of the originally scheduled date, the market will settle to the last fair market price. Outcome sourced from MLB.",
+   "active": true,
+   "marketType": "moneyline",
+   "closed": false,
+   "createdAt": "2026-09-26T04:00:15Z",
+   "updatedAt": "2026-09-29T19:21:52Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.005,
+   "gameStartTime": "2026-09-30T00:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "baseball_team_full_game_winner",
+   "marketSides": [
+    {
+     "id": "2122428",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aec-mlb-bos-nyy-2026-09-29",
+     "createdAt": "2026-09-26T04:00:15Z",
+     "updatedAt": "2026-09-26T04:00:15Z",
+     "description": "Boston Red Sox",
+     "price": "0.4500",
+     "marketId": 1061472,
+     "long": true,
+     "teamId": 3004,
+     "team": {
+      "id": 3004,
+      "name": "Boston Red Sox",
+      "abbreviation": "bos",
+      "league": "mlb",
+      "alias": "Boston Red Sox",
+      "ordering": "away",
+      "displayAbbreviation": "BOS"
+     },
+     "quote": {
+      "value": "0.4500",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "2122429",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aec-mlb-bos-nyy-2026-09-29",
+     "createdAt": "2026-09-26T04:00:15Z",
+     "updatedAt": "2026-09-26T04:00:15Z",
+     "description": "New York Yankees",
+     "price": "0.555",
+     "marketId": 1061472,
+     "long": false,
+     "teamId": 3019,
+     "team": {
+      "id": 3019,
+      "name": "New York Yankees",
+      "abbreviation": "nyy",
+      "league": "mlb",
+      "alias": "New York Yankees",
+      "ordering": "home",
+      "displayAbbreviation": "NYY"
+     },
+     "quote": {
+      "value": "0.555",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Boston Red Sox\",\"New York Yankees\"]",
+   "outcomePrices": "[\"0.4500\",\"0.555\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_MONEYLINE",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.4450",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.4500",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-09-28T18:01:44Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true
+  },
+  "football_txs_crossleague": {
+   "id": "272952",
+   "question": "Team from Texas wins the Pro or College Football Championship",
+   "slug": "aachc-football-txs-2026-02-14-w-nflcfb",
+   "endDate": "2027-03-01T04:00:00Z",
+   "category": "sports",
+   "startDate": "2026-07-22T01:17:03Z",
+   "description": "This market will settle to Yes if any team from Texas wins the 2027 Pro Football Championship, scheduled for February 14, 2027, or the 2027 College Football National Championship, scheduled for January 25, 2027. Teams from Texas that qualify for the Pro Football Championship are Dallas and Houston. Teams from Texas that qualify for the College Football National Championship are Baylor University, Texas Christian University, Texas Tech University, University of Houston, University of Texas, Texas A&M University, Rice University, Southern Methodist University, University of Texas at San Antonio, University of North Texas, University of Texas at El Paso, Sam Houston State University, and Texas State University. Outcome sourced from the relevant governing bodies.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-07-22T01:17:03Z",
+   "updatedAt": "2026-09-29T19:06:51Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-08-28T16:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "545468",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aachc-football-txs-2026-02-14-w-nflcfb",
+     "createdAt": "2026-07-22T01:17:03Z",
+     "updatedAt": "2026-07-22T01:17:03Z",
+     "description": "Yes",
+     "price": "0.2000",
+     "marketId": 272952,
+     "long": true,
+     "quote": {
+      "value": "0.2000",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "545469",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aachc-football-txs-2026-02-14-w-nflcfb",
+     "createdAt": "2026-07-22T01:17:03Z",
+     "updatedAt": "2026-07-22T01:17:03Z",
+     "description": "No",
+     "price": "0.81",
+     "marketId": 272952,
+     "long": false,
+     "quote": {
+      "value": "0.81",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.2000\",\"0.81\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Texas Winner?",
+   "subtitle": "nflcfb",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.1900",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.2000",
+    "currency": "USD"
+   },
+   "titleShort": "Texas Winner?",
+   "ep3SyncedAt": "2026-09-25T11:46:19Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false
+  },
+  "cfb_spread": {
+   "id": "1120631",
+   "question": "Will the Texas cover -1.5 vs the Oklahoma in Texas vs. Oklahoma?",
+   "slug": "asc-cfb-tx-okl-2026-10-10-neg-1pt5",
+   "endDate": "2026-10-24T23:30:00Z",
+   "category": "sports",
+   "startDate": "2026-09-28T20:30:47Z",
+   "description": "This market will settle to Yes if Texas covers a -1.5 point spread in the Texas vs Oklahoma College Football game scheduled for Oct 10, 2026. Overtime is included if played. If the game is delayed, postponed, or suspended and not rescheduled to a date within two weeks of the originally scheduled date, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "spreads",
+   "closed": false,
+   "createdAt": "2026-09-28T20:30:47Z",
+   "updatedAt": "2026-09-28T20:54:27Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.005,
+   "gameStartTime": "2026-10-10T19:30:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_team_full_game_spread",
+   "line": -1.5,
+   "marketSides": [
+    {
+     "id": "2240746",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-cfb-tx-okl-2026-10-10-neg-1pt5",
+     "createdAt": "2026-09-28T20:30:47Z",
+     "updatedAt": "2026-09-28T20:30:47Z",
+     "description": "-1.50",
+     "price": "0.9700",
+     "marketId": 1120631,
+     "long": true,
+     "teamId": 1140,
+     "team": {
+      "id": 1140,
+      "name": "Texas",
+      "abbreviation": "tx",
+      "league": "cfb",
+      "alias": "Longhorns",
+      "ordering": "away",
+      "displayAbbreviation": "TEX"
+     },
+     "tradable": true
+    },
+    {
+     "id": "2240747",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-cfb-tx-okl-2026-10-10-neg-1pt5",
+     "createdAt": "2026-09-28T20:30:47Z",
+     "updatedAt": "2026-09-28T20:30:47Z",
+     "description": "+1.50",
+     "price": "0.54",
+     "marketId": 1120631,
+     "long": false,
+     "teamId": 1136,
+     "team": {
+      "id": 1136,
+      "name": "Oklahoma",
+      "abbreviation": "okl",
+      "league": "cfb",
+      "alias": "Sooners",
+      "ordering": "home",
+      "displayAbbreviation": "OKLA"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"-1.50\",\"+1.50\"]",
+   "outcomePrices": "[\"0.9700\",\"0.54\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_SPREAD",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "ep3SyncedAt": "2026-09-28T20:30:47Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true
+  },
+  "nfl_period_winner_prop": {
+   "id": "920046",
+   "question": "Will Pittsburgh Steelers win the first half?",
+   "slug": "atc-nfl-pit-cle-2026-10-01-winner-1h-pit",
+   "endDate": "2026-10-16T04:15:00Z",
+   "category": "sports",
+   "startDate": "2026-09-17T06:30:44Z",
+   "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO",
+   "description": "This market will settle to the team that scores more points in the first half of the Pittsburgh Steelers vs Cleveland Browns professional football game scheduled for Oct 1, 2026. If both teams score the same number of points in the first half, the market will settle to Tie. Only points and statistics recorded in regulation during that period count; overtime is not included. If the game is delayed, postponed, or suspended before this market is determined and is not resumed or rescheduled within two weeks of the originally scheduled date, it will be flagged for manual last-fair-market-price settlement. Outcome sourced from the NFL.",
+   "active": true,
+   "marketType": "props",
+   "closed": false,
+   "createdAt": "2026-09-17T06:30:44Z",
+   "updatedAt": "2026-09-29T19:22:23Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-02T00:15:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_team_first_half_winner",
+   "marketSides": [
+    {
+     "id": "1839576",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "atc-nfl-pit-cle-2026-10-01-winner-1h-pit",
+     "createdAt": "2026-09-17T06:30:44Z",
+     "updatedAt": "2026-09-17T06:30:44Z",
+     "description": "Yes",
+     "price": "0.5000",
+     "marketId": 920046,
+     "long": true,
+     "quote": {
+      "value": "0.5000",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "1839577",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "atc-nfl-pit-cle-2026-10-01-winner-1h-pit",
+     "createdAt": "2026-09-17T06:30:44Z",
+     "updatedAt": "2026-09-17T06:30:44Z",
+     "description": "No",
+     "price": "0.52",
+     "marketId": 920046,
+     "long": false,
+     "quote": {
+      "value": "0.52",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.5000\",\"0.52\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_PROP",
+   "hidden": false,
+   "tags": [],
+   "title": "Pittsburgh Steelers",
+   "color": "#ffb612",
+   "darkColor": "#ffb612",
+   "feeCoefficient": 0.0695,
+   "sortOrder": 1,
+   "bestBidQuote": {
+    "value": "0.4800",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.5000",
+    "currency": "USD"
+   },
+   "metadata": {
+    "teamId": 74
+   },
+   "titleShort": "Pittsburgh Steelers",
+   "ep3SyncedAt": "2026-09-25T11:52:46Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true
+  },
+  "nfl_player_prop": {
+   "id": "1106231",
+   "question": "Will Deshaun Watson record 100+ passing yards?",
+   "slug": "astatc-nfl-pit-cle-2026-10-01-pyd-deswat-gte100",
+   "endDate": "2026-10-16T00:15:00Z",
+   "category": "sports",
+   "startDate": "2026-09-28T06:01:38Z",
+   "description": "This market will settle to Yes if Deshaun Watson records at least 100 passing yards in the Pittsburgh Steelers vs Cleveland Browns professional football game scheduled for Oct 1, 2026. Overtime is included if played. The listed player must participate in the game by taking at least one snap on offense, defense, or special teams, with a snap nullified by penalty counting; otherwise, the market will settle to the last fair market price. The market will settle based on the official box score at the conclusion of the game. For purposes of this market, stat corrections enforced after the game has been completed will not count. If the game is delayed, postponed, or suspended and not rescheduled to a date within two days of the originally scheduled date, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "props",
+   "closed": false,
+   "createdAt": "2026-09-28T06:01:38Z",
+   "updatedAt": "2026-09-28T06:21:59Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-02T00:15:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_player_passing_yards",
+   "line": 100,
+   "marketSides": [
+    {
+     "id": "2211946",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "astatc-nfl-pit-cle-2026-10-01-pyd-deswat-gte100",
+     "createdAt": "2026-09-28T06:01:38Z",
+     "updatedAt": "2026-09-28T06:01:38Z",
+     "description": "Yes",
+     "price": "0.9200",
+     "marketId": 1106231,
+     "long": true,
+     "quote": {
+      "value": "0.9200",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "2211947",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "astatc-nfl-pit-cle-2026-10-01-pyd-deswat-gte100",
+     "createdAt": "2026-09-28T06:01:38Z",
+     "updatedAt": "2026-09-28T06:01:38Z",
+     "description": "No",
+     "price": "0.35",
+     "marketId": 1106231,
+     "long": false,
+     "quote": {
+      "value": "0.35",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.9200\",\"0.35\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_PROP",
+   "hidden": false,
+   "tags": [],
+   "title": "Deshaun Watson 100+ passing yards",
+   "color": "#311D00",
+   "darkColor": "#FF3C00",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.6500",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.9200",
+    "currency": "USD"
+   },
+   "metadata": {
+    "playerAbbreviation": "deswat",
+    "playerId": 4146,
+    "playerName": "Deshaun Watson",
+    "teamId": 55
+   },
+   "titleShort": "Deshaun Watson 100+ passing yards",
+   "ep3SyncedAt": "2026-09-28T06:01:38Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true
+  },
+  "nfl_spread_no_book": {
+   "id": "1130785",
+   "question": "Will the Chicago Bears cover -1.5 vs the Green Bay Packers in CHI Bears vs. GB Packers?",
+   "slug": "asc-nfl-chi-gb-2026-10-11-neg-1pt5",
+   "endDate": "2026-10-25T21:00:00Z",
+   "category": "sports",
+   "startDate": "2026-09-29T18:02:41Z",
+   "description": "This market will settle to Yes if Chicago Bears covers a -1.5 point spread in the Chicago Bears vs Green Bay Packers professional football game scheduled for Oct 11, 2026. Overtime is included if played. If the game is delayed, postponed, or suspended and not rescheduled to a date within two weeks of the originally scheduled date, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "spreads",
+   "closed": false,
+   "createdAt": "2026-09-29T18:02:41Z",
+   "updatedAt": "2026-09-29T18:21:12Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.005,
+   "gameStartTime": "2026-10-11T17:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_team_full_game_spread",
+   "line": -1.5,
+   "marketSides": [
+    {
+     "id": "2261052",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-nfl-chi-gb-2026-10-11-neg-1pt5",
+     "createdAt": "2026-09-29T18:02:41Z",
+     "updatedAt": "2026-09-29T18:02:41Z",
+     "description": "-1.50",
+     "price": "0.6400",
+     "marketId": 1130785,
+     "long": true,
+     "teamId": 53,
+     "team": {
+      "id": 53,
+      "name": "Chicago Bears",
+      "abbreviation": "chi",
+      "league": "nfl",
+      "alias": "Bears",
+      "ordering": "away",
+      "displayAbbreviation": "CHI"
+     },
+     "tradable": true
+    },
+    {
+     "id": "2261053",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-nfl-chi-gb-2026-10-11-neg-1pt5",
+     "createdAt": "2026-09-29T18:02:41Z",
+     "updatedAt": "2026-09-29T18:02:41Z",
+     "description": "+1.50",
+     "price": "0.98",
+     "marketId": 1130785,
+     "long": false,
+     "teamId": 59,
+     "team": {
+      "id": 59,
+      "name": "Green Bay Packers",
+      "abbreviation": "gb",
+      "league": "nfl",
+      "alias": "Packers",
+      "ordering": "home",
+      "displayAbbreviation": "GB"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"-1.50\",\"+1.50\"]",
+   "outcomePrices": "[\"0.6400\",\"0.98\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_SPREAD",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "ep3SyncedAt": "2026-09-29T18:02:41Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true
+  }
+ }
+}

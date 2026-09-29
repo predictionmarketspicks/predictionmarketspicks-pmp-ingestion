@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   normalizeUsMarket,
   parseJsonArray,
-  POLY_US_CATEGORY_ALLOWLIST,
+  keepUsMarket,
 } from '../src/feeds/polymarket-us.js';
 
 // Fixtures are REAL shapes captured from gateway.polymarket.us on 2026-08-04.
@@ -175,8 +175,8 @@ describe('normalizeUsMarket — honesty + shape', () => {
   });
 });
 
-describe('category allowlist', () => {
-  it('excludes sports — 7,382 of 8,500 live markets, the flood case', () => {
-    expect(POLY_US_CATEGORY_ALLOWLIST).not.toContain('sports');
+describe('keep rules replace the category allowlist', () => {
+  it('drops non-NFL sports — the flood case', () => {
+    expect(keepUsMarket({ category: 'sports', slug: 'aec-mlb-bos-nyy-2026-09-29', marketType: 'moneyline' })).toBe(false);
   });
 });

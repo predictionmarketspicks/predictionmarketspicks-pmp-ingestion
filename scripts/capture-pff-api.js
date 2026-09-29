@@ -245,7 +245,7 @@ async function captureGradesPlayer(season, week, bioByPlayerId) {
       });
     }
   }
-  writeStaging('grades-player', season, allRows, throughWeek);
+  writeStaging('grades-player', season, allRows, week);
   return allRows;
 }
 

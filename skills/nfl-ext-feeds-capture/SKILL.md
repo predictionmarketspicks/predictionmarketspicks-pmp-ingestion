@@ -32,12 +32,15 @@ Keep the job narrow: **login check → capture 5 JSONs → dry-count → real in
 
 ## 1. When this runs (cadence + season gate)
 
+⛔ **ONE weekly run, Tuesday 09:30 AM ET (Benny, 2026-09-30 — supersedes the Mon Run A / Wed Run B split).** An NFL week ENDS with Monday Night Football, so the week is only complete once MNF is graded (Tuesday morning ET). Measured: the Tue 2026-09-29 09:40 ET run landed full week 3 on every feed; the Mon 02:34 run could only re-read week 2 and the Wed 03:01 run found nothing new.
+
 | Run | Cron (local ET) | Feeds |
 |---|---|---|
-| **Run A** | Mon 11:00 AM | `grades-team`, `grades-player`, `power-ranks`, `dvoa-team` |
-| **Run B** | Wed 11:00 AM | all four above **+ `free-agency`** |
+| **Weekly (Tue)** | Tue 09:30 AM ET — cloud routine `trig_018rtbTAzm5iQBGUp1NTZ9uT` "NFL ext-feeds weekly capture (Tue 9:30 ET)" (`CRON_TZ=America/New_York 30 9 * * 2`, bound to the "Claude Desktop (macOS)" device — verify: Claude Code `RemoteTrigger get` → `enabled`, `cron_expression`, `next_run_at`) | `grades-team`, `grades-player`, `roster-status`, `power-ranks`, `dvoa-team`, `free-agency` |
+| ~~Cowork task `nfl-ext-feeds-run-b-wed`~~ | **disabled** — exactly one Tuesday run; a second one an hour later would hit `same-week` on four feeds and post false MISS alerts | — |
+| ~~Run A (Mon)~~ | disabled — a Monday capture can only ever be week N−1 | — |
 
-Run A catches the Sunday slate (incl. SNF), graded overnight. Run B catches **Monday Night Football** graded + early-week injury/roster/FA moves. (There is no separate "injuries" feed — injury impact shows up inside the grade/snap drops and the FA/roster moves.)
+On a Tuesday, a `same-week` BLOCK on a grades/DVOA/power-ranks feed is a **miss** (vendor not done with the week) — alert and re-run later that day; it is no longer the expected outcome. (There is no separate "injuries" feed — injury impact shows up inside the grade/snap drops and the FA/roster moves.) Wherever this file still says "Run A" / "Run B", read it as this Tuesday run.
 
 ⛔ **What the API feeds can and cannot return on a Monday (measured 2026-09-28).** `capture-pff-api.js` scopes `grades-team` and `grades-player` to the last **FULLY** graded regular-season week (`lastGradedRegWeek`: every game of the week has `has_stats`). Until Monday Night Football is graded — Tuesday morning ET — that is week **N−1**, at 02:30 AM and at 11:00 AM alike. So Run A's two API feeds re-capture the week Run B already ingested, with fresh mtimes, and the staleness + null-density gates both pass. **The ingest now refuses that** (§6, week-progress gate): a capture whose week equals or trails what the table holds is BLOCKED and posted to `#bot-logs`. When Run A blocks `grades-team`/`grades-player` with `same-week`, that is the expected Monday outcome, not a failure — the browser feeds (`power-ranks`, `dvoa-team`) are what Run A is for, and even those follow the vendor's clock (FTN posts DVOA Monday afternoon/Tuesday; PFF's power rankings Tuesday). **Observed fire times (heartbeat `ext_capture_runs`): Run A 09-14 02:10, 09-21 02:10, 09-28 02:33 ET; Run B 09-23 05:03 + 07:31 ET** — not the 11:00 AM this table says. If the scheduled task is meant to fire at 11:00 AM ET, its timezone is wrong; a Monday fire before ~09:00 ET gets nothing from any vendor.
 

@@ -145,8 +145,28 @@ function fromSettlementSources(sources, refMs) {
   return chosen;
 }
 
-// Returns { contract, yyyymm } or null.
-export async function getActiveSettleContract(seriesTicker, referenceTs) {
+// Strategy 0 — the market's own rules. Every KXWTI market's rules_primary names
+// its settle month: "WTI crude oil(November 2026 contract)". That is per-event and
+// authoritative. Kalshi emptied product_metadata.important_info (the roll-schedule
+// markdown Strategy 2 parses) at some point before 2026-09-14, so without this the
+// resolver returned null and oil ran on continuous CL=F — the wrong month between
+// the KXWTI roll and CL expiry (MODEL_FORENSICS_AND_PIPELINE_REPAIR_2026-09-30).
+function contractFromRules(text) {
+  if (typeof text !== 'string') return null;
+  const m = text.match(
+    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\s+contract\b/i,
+  );
+  if (!m) return null;
+  return `${m[1].slice(0, 3).toUpperCase()}${m[2].slice(2)}`;
+}
+
+// Returns { contract, yyyymm } or null. `rulesText` = one of the event's markets'
+// rules_primary; when it names a contract month, that wins and no series call is made.
+export async function getActiveSettleContract(seriesTicker, referenceTs, rulesText) {
+  const ruled = contractFromRules(rulesText);
+  const ruledYyyymm = ruled ? contractToYyyymm(ruled) : null;
+  if (ruledYyyymm) return { contract: ruled, yyyymm: ruledYyyymm };
+
   const series = await getSeries(seriesTicker);
   if (!series) return null;
 
@@ -173,6 +193,7 @@ export async function getActiveSettleContract(seriesTicker, referenceTs) {
 }
 
 export const __test__ = {
+  contractFromRules,
   parseContractCode,
   contractToYyyymm,
   parseEffectiveDate,

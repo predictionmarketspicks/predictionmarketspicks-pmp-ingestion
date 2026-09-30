@@ -76,6 +76,26 @@ import { fetchEvent, getNextEvent, refetchEventMarkets } from '../feeds/kalshi-e
 import { getActiveSettleContract } from '../feeds/kalshi-series.js';
 import { isOptionsMarketOpen } from '../feeds/massive.js';
 import { recordGuardRejection, recordGuardOk } from '../observability/health.js';
+import { postBotLog } from '../delivery/discord.js';
+
+// Oil's continuous CL=F rung is the wrong month between the KXWTI roll and CL
+// expiry, and oil sat on it for 15 days (2026-09-15 → 09-30) with nothing saying
+// so. One #bot-logs line per episode once it has held the rung > 15 min; cleared
+// when the contract-aware spot answers again.
+const CONTINUOUS_ALERT_MS = 15 * 60 * 1000;
+const continuousSince = new Map(); // commodity → ms the continuous rung was first used
+const continuousAlerted = new Set();
+
+function noteContinuousFallback(commodity, source) {
+  const now = Date.now();
+  if (!continuousSince.has(commodity)) continuousSince.set(commodity, now);
+  const heldMs = now - continuousSince.get(commodity);
+  if (heldMs <= CONTINUOUS_ALERT_MS || continuousAlerted.has(commodity)) return;
+  continuousAlerted.add(commodity);
+  postBotLog(
+    `⚠️ ${commodity} spot has been on the continuous fallback (${source}) for ${Math.round(heldMs / 60000)} min — the contract-aware named-month spot is not answering. Edges near a roll may be priced off the wrong month.`,
+  ).catch((err) => console.warn(`[${commodity}] fallback alert post failed: ${err?.message || err}`));
+}
 
 /**
  * Flags that force a non-actionable row regardless of which guard set them, so
@@ -635,7 +655,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   // Yahoo ticker (CLM26.NYM, CLN26.NYM, ...).
   if (!spot && useYahooSpot && config.useContractAwareSpot === true) {
     try {
-      const settle = await getActiveSettleContract(config.seriesTicker, event.closeTime);
+      const settle = await getActiveSettleContract(config.seriesTicker, event.closeTime, event.rulesPrimary);
       if (settle) {
         const cSpot = await getContractSpot(settle.yyyymm);
         if (cSpot && cSpot.price > 0) {
@@ -644,8 +664,10 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
             publishTimeMs: cSpot.publishTimeMs,
             source: cSpot.source, // e.g. 'yahoo_clm26_nym'
           };
+          continuousSince.delete(config.commodity);
+          continuousAlerted.delete(config.commodity);
           console.log(
-            `[${config.commodity}] FALLBACK contract-aware spot ${settle.contract} (${cSpot.symbol}) = $${cSpot.price.toFixed(2)}`,
+            `[${config.commodity}] contract-aware spot ${settle.contract} (${cSpot.symbol}) = $${cSpot.price.toFixed(2)}`,
           );
         } else {
           console.warn(
@@ -680,6 +702,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     }
     if (spot && useYahooSpot) {
       console.log(`[${config.commodity}] TERTIARY spot ${spot.source} = $${spot.price.toFixed(2)}`);
+      noteContinuousFallback(config.commodity, spot.source);
     }
   }
 

@@ -256,7 +256,15 @@ export const COMMODITIES = {
     // ⚠️ Still a PROXY. KXWTI settles on ICE and we do not have ICE. This is a
     // better proxy, not the settlement source — do not describe it as one.
     // Yahoo stays wired below as fallback; set this false to revert in one line.
-    usePythWtiSpot: true,
+    //
+    // ⛔ OFF since 2026-09-30: free Pythnet is dead (rpcpool 403, api2 fetch failed;
+    // the metals' pyth_* slots are served by Swissquote since 09-23), so this rung
+    // has failed every tick since 2026-09-14 20:01 UTC. The primary is now the
+    // contract-aware Yahoo NAMED month below, which reads the month from the
+    // market's own rules_primary — measured 09-28 at a mean 0.07 miss vs the KXWTI
+    // settle over 11 settles. Continuous CL=F stays as the last rung and alerts
+    // #bot-logs after 15 min (MODEL_FORENSICS_AND_PIPELINE_REPAIR_2026-09-30).
+    usePythWtiSpot: false,
     useYahooSpot: true,
     bypassWriterTag: true,
     // Contract-aware spot (Part B of OIL_EDGE_WTI_ROLLOVER_FIX_2026-05-13).

@@ -124,11 +124,15 @@ export async function fetchEvent(eventTicker, { politeDelayMs = 50 } = {}) {
 
   const markets = [];
   let closeTime = null;
+  // One market's rules_primary — for oil it names the settle contract month
+  // ("…(November 2026 contract)"), which the contract-aware spot needs.
+  let rulesPrimary = null;
   for (const tk of strikeTickers) {
     try {
       const m = await fetchMarket(tk);
       if (!m) continue;
       closeTime = closeTime || m.close_time;
+      rulesPrimary = rulesPrimary || m.rules_primary || null;
       markets.push(shapeMarket(m));
       if (politeDelayMs > 0) await new Promise((r) => setTimeout(r, politeDelayMs));
     } catch (err) {
@@ -143,6 +147,7 @@ export async function fetchEvent(eventTicker, { politeDelayMs = 50 } = {}) {
     subTitle: event.sub_title || '',
     closeTime: closeTime || new Date().toISOString(),
     markets,
+    rulesPrimary,
     // Discovery-time stamp. computeSnapshot uses this as the kalshi_quoted_at
     // fallback when the per-snapshot refetch fails, so the staleness guard can
     // still flag a book that's only as fresh as the last event refresh.

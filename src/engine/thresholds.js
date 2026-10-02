@@ -14,6 +14,18 @@
 // Minimum |edge| (in fraction, not pp) we'll surface as actionable.
 export const MIN_EDGE_PP = 0.05;
 
+// Entry-cost floor (2026-10-02). A commodity row is a play only when the side
+// taken costs >= 40c (YES = kalshi_yes, NO = 1 - kalshi_yes). Every graded pick
+// since the 2026-08-05 mint gate: under 40c 153 picks hit 14.4% vs a ~21% market
+// (-$12.49 net/contract); 40c+ 89 picks hit 73.0% vs ~68% (+$2.80). A sub-floor
+// row is demoted to a non-play WATCH and stamped `entry_floor` so the pick mint
+// grades it OFF the record (commodity_longshot_shadow). Same number as the mint
+// (prediction-marketspicks supabase/migrations/20261002120000_*) and the site
+// readers (lib/tools/commodity-edge-filter.ts ENTRY_COST_FLOOR).
+// ⛔ Deploy ONLY after that migration is applied: it adds the entry_floor column,
+// and an upsert carrying an unknown column fails the whole commodity write.
+export const ENTRY_COST_FLOOR = 0.40;
+
 // NO-side post-spread floor (bitcoin only — BITCOIN_EDGE_NO_SIDE_FIX_2026-06-16).
 // The symmetric MIN_EDGE_PP gate plus sign-only side selection emitted a BUY NO
 // on every negative-edge strike, which on hourly KXBTCD is a ~coin-flip that

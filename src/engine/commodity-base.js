@@ -23,6 +23,7 @@ import { getShortHorizonStats } from './short-horizon-vol.js';
 import { getCalibrationMap, applyCalibration, isCalibrationActive } from './calibration.js';
 import { applyEngineRules } from './engine-rules.js';
 import {
+  ENTRY_COST_FLOOR,
   MIN_EDGE_PP,
   MIN_EDGE_PP_NO,
   BTC_MU_SCALE,
@@ -1601,6 +1602,12 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   firstSnapshotWritten.set(config.commodity, true);
   recordGuardOk(config.commodity).catch(() => {});
 
+  // Entry-cost floor (2026-10-02) — see ENTRY_COST_FLOOR in thresholds.js.
+  // Applied last, after every other gate, so it only ever narrows what would
+  // have been published. The original direction/tiers ride in entry_floor:
+  // demoting alone would erase the side the shadow ledger grades.
+  applyEntryFloor(ivCapped);
+
   const filteredRows = ivCapped;
   // V2 cutover: meta.topEdge reads from fused_edge_pp (= V2 when useV2Cutover
   // is on, = V1 when off or when V2 fell back). Discord routing keys off
@@ -1712,3 +1719,30 @@ export const __test__ = {
   // Test seam: lets unit tests force the first-snapshot flag.
   _firstSnapshotWritten: firstSnapshotWritten,
 };
+
+/**
+ * Demote sub-floor BUY rows to a non-play WATCH, in place. Exported for the test.
+ * Cost is the price of the side taken: YES = kalshi_yes, NO = 1 - kalshi_yes.
+ */
+export function applyEntryFloor(rows, floor = ENTRY_COST_FLOOR) {
+  for (const r of rows) {
+    if (r.direction !== 'BUY YES' && r.direction !== 'BUY NO') continue;
+    if (r.kalshi_yes == null || !Number.isFinite(Number(r.kalshi_yes))) continue;
+    const yes = Number(r.kalshi_yes);
+    const cost = r.direction === 'BUY YES' ? yes : 1 - yes;
+    if (cost >= floor) continue;
+    r.entry_floor = {
+      cost: Math.round(cost * 10000) / 10000,
+      direction: r.direction,
+      confidence: r.confidence ?? null,
+      fused_confidence: r.fused_confidence ?? null,
+    };
+    r.direction = 'PASS';
+    r.confidence = 'watch';
+    r.fused_confidence = 'NO_EDGE';
+    r.rationale =
+      (r.rationale ?? '') +
+      ` (costs ${Math.round(cost * 100)}c - under the ${Math.round(floor * 100)}c entry floor, shown not played)`;
+  }
+  return rows;
+}

@@ -264,7 +264,14 @@ export async function fetchWindows(series, { now = Date.now(), timeoutMs = 15_00
       signal: ctrl.signal,
       headers: { 'User-Agent': 'pmp-ingestion/1.0' },
     });
-    if (!res.ok) throw new Error(`kalshi ${series} HTTP ${res.status}`);
+    if (!res.ok) {
+      // status + Retry-After ride on the error so fifteen-min-board.js can tell a
+      // 404 (series not listed) and a 429 (back off) from an outage.
+      const err = new Error(`kalshi ${series} HTTP ${res.status}`);
+      err.status = res.status;
+      err.retryAfter = res.headers.get('retry-after');
+      throw err;
+    }
     const json = await res.json();
     return Array.isArray(json?.markets) ? json.markets : [];
   } finally {

@@ -84,6 +84,11 @@ import {
   stopMetals15m,
   getMetals15mState, METALS_15M_SYMBOLS } from './engine/metals-15m.js';
 import {
+  bootstrapFifteenMinBoard,
+  stopFifteenMinBoard,
+  getFifteenMinBoardState,
+} from './engine/fifteen-min-board.js';
+import {
   bootstrapCrypto15m,
   stopCrypto15m,
   getCrypto15mState,
@@ -1119,6 +1124,7 @@ const server = http.createServer((req, res) => {
     snap.engine.polymarket_snapshot = getPolymarketSnapshotState();
     snap.engine.polymarket_us_snapshot = getPolymarketUsSnapshotState();
     snap.engine.metals_15m = getMetals15mState();
+    snap.engine.fifteen_min_board = getFifteenMinBoardState();
     // ⛔ THE FIELD THAT SEPARATES THE TWO WORLDS. When sigma is null, this says
     // whether ticks are not REACHING the buffer (nTicks ~0) or the buffer is
     // full and the estimate is being REJECTED (belowMinTicks / lastTickStale).
@@ -1346,6 +1352,11 @@ bootstrapPolymarketUsSnapshot();
 bootstrapMetals15m();
 bootstrapCrypto15m();
 
+// Every Kalshi 15-minute series' live + next window → ONE widget_payloads row
+// (`fifteen-min-open`) every ~15 s; the site's 15-minute board and MCP tool read it
+// first. FIFTEEN_MIN_BOARD_ENABLED=0 to switch off (the site falls back to Kalshi).
+bootstrapFifteenMinBoard();
+
 bootstrapGasSnapshot();
 
 // WC sunset 2026-07-24 — tournament over, all WC feeds dead. The snapshot loop
@@ -1370,6 +1381,7 @@ async function shutdown(signal) {
   stopPolymarketSnapshot();
   stopPolymarketUsSnapshot();
   stopMetals15m();
+  stopFifteenMinBoard();
   stopCrypto15m();
   stopGasSnapshot();
   stopWcSnapshot();

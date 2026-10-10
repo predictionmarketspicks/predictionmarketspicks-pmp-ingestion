@@ -41,6 +41,7 @@
 //
 // Kill switch: BTC15M_CAPTURE_ENABLED=0.
 
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import WebSocket from 'ws';
 
 import { setFeedStatus, recordTick } from '../observability/health.js';
@@ -159,6 +160,21 @@ export const TRADE_BUCKET_MS = 10_000;
 export const BOOK_EVERY_MS = 5_000;
 /** Maker-study limits (handoff §2.7), in cents. */
 export const TOUCH_LEVELS = [5, 10, 15, 20, 25, 33, 40, 45];
+
+/**
+ * Which 5s book bucket to store at `observedMs`, or null. Stores on bucket CROSSING,
+ * not on the exact second: the 1s sampler shares an event loop with the options /
+ * commodity engines, and when a tick slipped past the one second divisible by 5 the
+ * old `observedMs % BOOK_EVERY_MS === 0` test wrote nothing for that bucket. That is
+ * the probable cause of the weekday 10:00–16:00 ET capture gaps (p50 66–157 of 180
+ * rows/window, 0 gaps on weekends) — handoffs/BTC15M_MOMENTUM_LIVE_AND_HOURLY_OPTIONS_
+ * TEST_2026-10-10.md P4. Returns the bucket's boundary ms, which stamps the row.
+ */
+export function bookBucketToStore(lastStoredBucket, observedMs) {
+  const bucket = Math.floor(observedMs / BOOK_EVERY_MS);
+  if (lastStoredBucket != null && bucket <= lastStoredBucket) return null;
+  return bucket;
+}
 
 /**
  * Collapse raw prints into fifteen_min_trades_10s rows — one per (market, 10s bucket,
@@ -283,6 +299,11 @@ let tradeRetry = []; // aggregated rows from a failed flush
 let touchBuf = []; // first-touch rows for windows that have rolled off
 /** market_ticker → { event, fromOpen, ft } for the live window's first-touch tracking. */
 const touchState = new Map();
+/** market → last 5s book bucket stored (bookBucketToStore). */
+const lastBookBucket = new Map();
+/** Event-loop delay histogram (perf_hooks), reset every minute by the watchdog tick. */
+let loopLag = null;
+let loopLagLastMinP99 = null;
 let flushing = false;
 
 const stats = {
@@ -440,6 +461,7 @@ function roll() {
   windows = new Map(pair.map((w) => [w.market, w]));
   for (const m of drop) {
     books.delete(m);
+    lastBookBucket.delete(m);
     const st = touchState.get(m);
     if (st?.fromOpen) touchBuf.push(...firstTouchRows(st.event, st.ft));
     touchState.delete(m);
@@ -473,8 +495,10 @@ function sampleOnce() {
       touchState.set(w.market, st);
     }
     updateFirstTouch(st.ft, bookTop(book), observedMs, tau);
-    if (observedMs % BOOK_EVERY_MS !== 0) continue;
-    const row = bookRow(w, book, observedMs, spot);
+    const bucket = bookBucketToStore(lastBookBucket.get(w.market), observedMs);
+    if (bucket == null) continue;
+    lastBookBucket.set(w.market, bucket);
+    const row = bookRow(w, book, bucket * BOOK_EVERY_MS, spot);
     if (row) bookBuf.push(row);
   }
 }
@@ -586,6 +610,10 @@ export function getBook1sHealth() {
     pendingFirstTouch: touchBuf.length,
     lastFlushError: stats.lastFlushError,
     alerting: stats.alerting,
+    // P4 theory check: if p99 event-loop lag in weekday 10–16 ET is > 1s, the real fix
+    // is moving this feed off the options process. Last full minute + the current one.
+    eventLoopLagMsP99: loopLagLastMinP99,
+    eventLoopLagMsP99Now: loopLag ? Math.round(loopLag.percentile(99) / 1e6) : null,
   };
 }
 
@@ -598,9 +626,13 @@ export function startKalshiBtc15m() {
   setFeedStatus(FEED_TAG, { connected: false, lastError: 'starting' });
   connect();
   scheduleRoll();
+  if (!loopLag) { loopLag = monitorEventLoopDelay({ resolution: 20 }); loopLag.enable(); }
   sampleTimer = setInterval(sampleOnce, 1000);
   flushTimer = setInterval(() => { flush(); }, FLUSH_MS);
-  watchdogTimer = setInterval(() => { watchdog(); }, 60_000);
+  watchdogTimer = setInterval(() => {
+    if (loopLag) { loopLagLastMinP99 = Math.round(loopLag.percentile(99) / 1e6); loopLag.reset(); }
+    watchdog();
+  }, 60_000);
 }
 
 export function stopKalshiBtc15m() {

@@ -10,6 +10,8 @@ import {
   applySnapshot,
   applyDelta,
   bookTop,
+  bookBucketToStore,
+  BOOK_EVERY_MS,
   tradeRow,
   bookRow,
   aggregateTrades,
@@ -186,5 +188,25 @@ describe('velocity (public 1s spot)', () => {
   it('null while warming or stale — never a guessed read', () => {
     expect(velocityFromBuffer(buf(() => 84000).slice(100), T)).toBeNull();
     expect(velocityFromBuffer(buf(() => 84000), T + 10_000)).toBeNull();
+  });
+});
+
+describe('bookBucketToStore — store on bucket crossing (P4, 2026-10-10)', () => {
+  it('a clock that skips seconds 5, 10 and 15 still writes one row per 5s bucket', () => {
+    const base = Date.UTC(2026, 9, 12, 14, 0, 0); // weekday, 10:00 ET
+    let last = 0; // bucket of second 0 already stored
+    last = Math.floor(base / BOOK_EVERY_MS);
+    const stored = [];
+    for (const s of [1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 13, 14, 16]) { // 5, 10, 15 never ticked
+      const b = bookBucketToStore(last, base + s * 1000);
+      if (b != null) { stored.push(b * BOOK_EVERY_MS - base); last = b; }
+    }
+    expect(stored).toEqual([5000, 10000, 15000]); // the old `% 5000 === 0` test wrote none of these
+  });
+  it('never stores the same bucket twice, and stores the first bucket it sees', () => {
+    const t = Date.UTC(2026, 9, 12, 14, 0, 2);
+    const b = bookBucketToStore(undefined, t);
+    expect(b).toBe(Math.floor(t / BOOK_EVERY_MS));
+    expect(bookBucketToStore(b, t + 1000)).toBeNull();
   });
 });

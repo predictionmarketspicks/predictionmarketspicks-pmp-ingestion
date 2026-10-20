@@ -32,6 +32,11 @@ COPY python ./python
 COPY scripts ./scripts
 COPY python/supervisord.conf /etc/supervisor/conf.d/pmp-ingestion.conf
 
+# Run unprivileged. The engine and sidecar only READ files under /app (no
+# runtime writes, no fly.toml mounts); supervisord's pidfile is /tmp and all
+# logs go to stdout/stderr, so root-owned read-only app files are fine.
+USER node
+
 # Build identifier, surfaced at /health as engine.build.
 # ⛔ ITS ABSENCE IS WHY A METALS-15M STALL COST A LIVE PROBE ON 2026-09-10:
 # /health exposed no way to tell WHICH commit was running, so "is prod actually

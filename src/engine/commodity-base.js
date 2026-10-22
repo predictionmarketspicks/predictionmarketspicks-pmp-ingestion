@@ -115,6 +115,36 @@ function noteContinuousFallback(commodity, source) {
  * `tests/soak-flag-vocabulary.test.js` fails if one is ever added here without
  * a soak classification.
  */
+// Why a row is PASS — ONE binding cause per row, stamped as `pass_reason` on
+// commodity_edge_signals + commodity_edge_intraday (null on a BUY). Before this,
+// "why is gold silent" was answered by inference: the intraday table carried no
+// rationale (handoffs/EDGE_ALERTS_DARK_FEEDS_AND_MCP_SWEEP_2026-10-22.md P0).
+// Precedence, first match wins — a row failing several gates is attributed to
+// the one that would still stop it if the others were lifted, last-applied first:
+//   entry_floor        sub-40c BUY demoted to WATCH (applyEntryFloor)
+//   implausible_ceiling quality_flag edge_implausible
+//   hard_suppress      any other quality flag (no book, stale, thin book, TWAP,
+//                      near expiry, smile divergence…) or no Kalshi depth
+//   yes_longshot | yes_net_below_floor | no_net_below_floor | no_side_disabled
+//                      the post-spread side gate
+//   edge_under_5pp     |gross edge| under MIN_EDGE_PP, or no edge computed
+//   fused_no_edge      cleared every gate, then a tier cap / FRED demotion /
+//                      engine rule / smile demotion collapsed it to NO_EDGE
+export const PASS_REASONS = [
+  'edge_under_5pp', 'yes_net_below_floor', 'no_net_below_floor', 'no_side_disabled',
+  'yes_longshot', 'entry_floor', 'implausible_ceiling', 'hard_suppress', 'fused_no_edge',
+];
+
+export function passReasonFor({ direction, qualityFlag, entryFloor, gateReason, edge, noMarket }) {
+  if (direction === 'BUY YES' || direction === 'BUY NO') return null;
+  if (entryFloor) return 'entry_floor';
+  if (qualityFlag === 'edge_implausible') return 'implausible_ceiling';
+  if (qualityFlag != null || noMarket) return 'hard_suppress';
+  if (gateReason) return gateReason;
+  if (edge == null || Math.abs(edge) < MIN_EDGE_PP) return 'edge_under_5pp';
+  return 'fused_no_edge';
+}
+
 export const HARD_SUPPRESS_FLAGS = new Set([
   'kalshi_no_book',
   'kalshi_stale',
@@ -1128,6 +1158,8 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     // post-spread gate (no book, below the gross floor, or a commodity without
     // it enabled), which is honest: we did not compute one.
     let netEdgePp = null;
+    // Which side gate stopped this row, for pass_reason (null when none did).
+    let gateReason = null;
 
     // (The old TWAP hard-guard block was removed 2026-05-22. The graduated
     // tier-ceiling logic further down — `config.tierCeilingByMinutes` —
@@ -1229,6 +1261,13 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
           confidence = 'low';
           const grossPct = Math.abs(chosenEdge * 100).toFixed(1);
           const noFloor = config.minEdgePpNoSide ?? MIN_EDGE_PP_NO;
+          gateReason = yesLongshot
+            ? 'yes_longshot'
+            : chosenEdge > 0
+              ? 'yes_net_below_floor'
+              : g.reason === 'no_side_disabled'
+                ? 'no_side_disabled'
+                : 'no_net_below_floor';
           if (yesLongshot) {
             rationale =
               `YES under ${(YES_LONGSHOT_PRICE_MIN * 100).toFixed(0)}¢ — longshot band ` +
@@ -1484,6 +1523,14 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       fused_confidence: fusedTierStr,
       rationale,
       quality_flag: qualityFlag,
+      pass_reason: passReasonFor({
+        direction,
+        qualityFlag,
+        entryFloor: false,
+        gateReason,
+        edge: chosenEdge,
+        noMarket: kalshiView === 'no_market',
+      }),
       // ⛔ THE PUBLIC COLUMNS CARRY THE PUBLIC BASKET. On bitcoin the model priced
       // on `btcSpot.ref` (the CF Benchmarks index, licensed) while these two
       // columns are read by /api/tools/bitcoin-edge, the widgets and the alerts
@@ -1549,6 +1596,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       if (Number.isFinite(smileKalshiCorr) && smileKalshiCorr < 0.5) {
         for (const r of rows) {
           r.quality_flag = r.quality_flag ?? 'smile_kalshi_diverged';
+          if (r.pass_reason !== 'implausible_ceiling') r.pass_reason = 'hard_suppress';
           r.direction = 'PASS';
           r.confidence = 'skip';
           r.fused_confidence = 'NO_EDGE';
@@ -1562,6 +1610,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
             r.fused_confidence = downgradeFusedTier(r.fused_confidence);
             r.confidence = downgradeLegacyConfidence(r.confidence);
             if (r.fused_confidence === 'NO_EDGE') {
+              if (r.direction !== 'PASS') r.pass_reason = 'fused_no_edge';
               r.direction = 'PASS';
               r.confidence = 'skip';
             }
@@ -1740,6 +1789,7 @@ export function applyEntryFloor(rows, floor = ENTRY_COST_FLOOR) {
     r.direction = 'PASS';
     r.confidence = 'watch';
     r.fused_confidence = 'NO_EDGE';
+    r.pass_reason = 'entry_floor';
     r.rationale =
       (r.rationale ?? '') +
       ` (costs ${Math.round(cost * 100)}c - under the ${Math.round(floor * 100)}c entry floor, shown not played)`;

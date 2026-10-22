@@ -163,6 +163,7 @@ export async function insertCommodityEdgeIntraday(rows) {
     confidence: r.confidence,
     options_iv: r.options_iv,
     quality_flag: r.quality_flag,
+    pass_reason: r.pass_reason ?? null,
   }));
   const sb = getClient();
   const { data, error } = await sb

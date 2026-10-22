@@ -37,6 +37,24 @@ describe('passReasonFor', () => {
   });
 });
 
+describe('every PASS row gets a reason, and only one of the nine', () => {
+  it('PASS_REASONS is exactly the list the site CHECK pins (scripts/test-pass-reason-check.mjs)', () => {
+    expect([...PASS_REASONS].sort()).toEqual([
+      'edge_under_5pp', 'entry_floor', 'fused_no_edge', 'hard_suppress', 'implausible_ceiling',
+      'no_net_below_floor', 'no_side_disabled', 'yes_longshot', 'yes_net_below_floor',
+    ]);
+  });
+  it('across every branch input combination, a PASS is never null and never off-list', () => {
+    const flags = [null, 'edge_implausible', 'kalshi_no_book', 'twap_settle_window', 'smile_kalshi_diverged'];
+    const gates = [null, 'yes_longshot', 'yes_net_below_floor', 'no_net_below_floor', 'no_side_disabled'];
+    for (const qualityFlag of flags) for (const gateReason of gates) for (const edge of [null, 0.02, -0.07, 0.3])
+      for (const entryFloor of [false, true]) for (const noMarket of [false, true]) {
+        const r = passReasonFor({ direction: 'PASS', qualityFlag, gateReason, edge, entryFloor, noMarket });
+        expect(PASS_REASONS).toContain(r);
+      }
+  });
+});
+
 describe('applyEntryFloor stamps pass_reason', () => {
   it('a sub-floor BUY becomes entry_floor; a BUY above it keeps a null reason', () => {
     const [cheap, ok] = applyEntryFloor([

@@ -143,7 +143,8 @@ export async function upsertCommodityEdgeRows(rows) {
 // Append-only intraday history (silver/gold/oil). Slim projection of the same
 // row objects the primary upsert consumes. onConflict + ignoreDuplicates makes
 // re-fires idempotent; a duplicate (commodity,snapshot_at,event_ticker,strike)
-// is a no-op. Rolled up nightly into commodity_edge_daily, pruned at 7 days.
+// is a no-op. Rolled up nightly into commodity_edge_daily, pruned at 45 days
+// (site migration 20261023120000).
 // Never called for bitcoin (15s cadence would bloat) — gated by config in index.js.
 export async function insertCommodityEdgeIntraday(rows) {
   if (!rows || rows.length === 0) return { count: 0 };
@@ -164,6 +165,12 @@ export async function insertCommodityEdgeIntraday(rows) {
     options_iv: r.options_iv,
     quality_flag: r.quality_flag,
     pass_reason: r.pass_reason ?? null,
+    // Horizon calibration (METALS_EDGE_VARIANCE_CLOCK_2026-10-23 PART 4): the book
+    // and the shadow clock probability, so 11 AM / 2 PM studies can score spread-aware
+    // and score prob_clock. prob_clock is null off gold/silver and when no clock exists.
+    kalshi_yes_bid: r.kalshi_yes_bid ?? null,
+    kalshi_yes_ask: r.kalshi_yes_ask ?? null,
+    prob_clock: r.prob_clock ?? null,
   }));
   const sb = getClient();
   const { data, error } = await sb

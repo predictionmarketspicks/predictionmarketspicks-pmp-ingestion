@@ -20,7 +20,8 @@ import { computeDealerGamma } from './gamma.js';
 import { estimateDrift } from './drift.js';
 import { warmVolCache, estimateVol } from './vol.js';
 import { getShortHorizonStats } from './short-horizon-vol.js';
-import { getCalibrationMap, applyCalibration, isCalibrationActive } from './calibration.js';
+import { getCalibrationMap, applyCalibration, isCalibrationActive, getVarianceClock } from './calibration.js';
+import { effectiveYearFraction, resolveVarianceClock } from './variance-clock.js';
 import { applyEngineRules } from './engine-rules.js';
 import {
   ENTRY_COST_FLOOR,
@@ -782,6 +783,16 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 
   const smile = buildIvSmile(chain.contracts, etfPrice);
 
+  // Variance clock — SHADOW (METALS_EDGE_VARIANCE_CLOCK_2026-10-23 PART 2.3).
+  // gold/silver only (config.varianceClock). T_clock prices a second probability,
+  // prob_clock, written beside prob_physical; direction, edge, tier, alerts and
+  // picks keep reading prob_physical exactly as before. No usable clock row
+  // (none fitted, stale > 14 d, bad weights) ⇒ T_clock null ⇒ prob_clock null.
+  const clockProfile = config.varianceClock === true
+    ? resolveVarianceClock(getVarianceClock(config.commodity), { nowMs: now.getTime(), commodity: config.commodity })
+    : null;
+  const Tclock = clockProfile ? effectiveYearFraction(now.getTime(), closeMs, clockProfile) : null;
+
   // V2 physical-measure inputs — drift + realized vol estimated once per
   // snapshot, then applied per-strike alongside the legacy risk-neutral path.
   // Both drift and vol estimators are cached internally; warmVolCache populates
@@ -973,6 +984,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 
     let optProb = null;             // v1 risk-neutral
     let probPhysical = null;        // v2 physical-measure
+    let probClock = null;           // v2 physical-measure on the variance clock (shadow)
     let rowMuUsed = muUsed;         // mu actually driving THIS row's physical prob
     let rowMuSource = muSource;     //   (TWAP warm-buffer path overrides below)
     let volEst = null;
@@ -1070,6 +1082,10 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       } else {
         optProb = probAboveStrike(spotPrice, kSpot, T, RISK_FREE_RATE, q, iv);
         probPhysical = probAboveStrikePhysical(spotPrice, kSpot, T, muForPhysical, sigmaIvBlend);
+        // Same σ level, same μ, same strike and spot — only the clock differs.
+        if (Tclock != null && Tclock > 0) {
+          probClock = probAboveStrikePhysical(spotPrice, kSpot, Tclock, muForPhysical, sigmaIvBlend);
+        }
       }
     }
 
@@ -1559,6 +1575,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       // options_prob — publishable. Non-null on warm v2 rows once a map exists.
       calibrated_prob: calibratedProb,
       calibration_map_id: calibrationMapId,
+      // Shadow variance-clock probability — gold/silver only. The key is ABSENT
+      // on every other commodity so their rows stay byte-identical (golden test).
+      ...(config.varianceClock === true ? { prob_clock: probClock } : {}),
       mu_used: rowMuUsed,
       mu_source: rowMuSource,
       mu_confidence: muConfidence,

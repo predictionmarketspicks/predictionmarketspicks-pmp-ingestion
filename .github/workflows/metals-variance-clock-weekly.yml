@@ -1,0 +1,44 @@
+name: Metals Variance Clock Weekly Refit
+
+# Refits the gold and silver intraday variance clocks (24 ET-hour weights) from
+# metals_spot_marks and writes a NEW SHADOW row per metal to edge_calibration_maps
+# (method variance_clock_v1). Never activates anything: promotion is manual
+# (site repo handoffs/METALS_EDGE_VARIANCE_CLOCK_2026-10-23.md PART 3).
+# The engine fails open to calendar time when the newest clock row is > 14 days
+# old, so two missed runs in a row turn prob_clock off (null), never wrong.
+
+on:
+  schedule:
+    # Mondays 12:30 UTC — after the btc refit, with the full prior week of marks.
+    - cron: '30 12 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Fit and print without writing rows'
+        type: boolean
+        default: false
+
+jobs:
+  refit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        commodity: [gold, silver]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Fit variance clock
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: node scripts/fit-variance-clock.js --commodity ${{ matrix.commodity }} ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}

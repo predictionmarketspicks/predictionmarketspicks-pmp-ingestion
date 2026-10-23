@@ -131,6 +131,9 @@ export const COMMODITIES = {
     driftMuScale: 0,
     minEdgePpNoSide: 0.1,
     noSideEnabled: true,
+    // Variance clock, SHADOW (METALS_EDGE_VARIANCE_CLOCK_2026-10-23): writes prob_clock
+    // beside prob_physical; nothing published reads it until promotion (PART 3).
+    varianceClock: true,
     intradayHistory: true,
     intradayBandPct: 0.10,
   },
@@ -214,6 +217,9 @@ export const COMMODITIES = {
     driftMuScale: 0,
     minEdgePpNoSide: 0.1,
     noSideEnabled: true,
+    // Variance clock, SHADOW (METALS_EDGE_VARIANCE_CLOCK_2026-10-23): writes prob_clock
+    // beside prob_physical; nothing published reads it until promotion (PART 3).
+    varianceClock: true,
     intradayHistory: true,
     intradayBandPct: 0.10,
   },

@@ -13,6 +13,7 @@
 // running on prob_physical exactly as it does today.
 
 import { getClient } from '../delivery/supabase.js';
+import { CLOCK_METHOD } from './variance-clock.js';
 
 // Keep outputs strictly interior. A degenerate 0 or 1 is not a probability the
 // rest of the system can use — the bot's modelProbOf and the alert tier ceiling
@@ -63,6 +64,12 @@ export function applyCalibration(map, p) {
 // layers disagree about which probability is the real one.
 
 let _maps = new Map();
+// Variance clocks (method 'variance_clock_v1', METALS_EDGE_VARIANCE_CLOCK_2026-10-23
+// PART 2.2) live in the same table but are NOT maps on p — they are consumed at
+// the σ√T step. Keyed by (commodity, method) apart from the Platt maps so a shadow
+// clock can never displace an active Platt map, nor the reverse. Same active-first
+// / newest-shadow selection within each.
+let _clocks = new Map();
 let _lastRefreshMs = 0;
 let _lastError = null;
 
@@ -94,27 +101,47 @@ export async function refreshCalibrationMaps() {
     return { ok: false, error: error.message };
   }
 
-  const byCommodity = new Map();
-  for (const row of data ?? []) {
-    if (!byCommodity.has(row.commodity)) byCommodity.set(row.commodity, []);
-    byCommodity.get(row.commodity).push(row);
-  }
-  const next = new Map();
-  for (const [commodity, rows] of byCommodity) {
-    const governing = pickGoverning(rows);
-    if (governing) next.set(commodity, governing);
-  }
-  _maps = next;
+  const { maps, clocks } = groupGoverning(data ?? []);
+  _maps = maps;
+  _clocks = clocks;
   _lastRefreshMs = Date.now();
   _lastError = null;
 
-  const summary = Array.from(_maps.values()).map(
-    (m) => `${m.commodity}#${m.id}${m.active ? ' ACTIVE' : ' shadow'}`,
+  const summary = [..._maps.values(), ..._clocks.values()].map(
+    (m) => `${m.commodity}/${m.method}#${m.id}${m.active ? ' ACTIVE' : ' shadow'}`,
   );
   console.log(
     `[calibration] loaded ${_maps.size} map(s)${summary.length ? `: ${summary.join(', ')}` : ''}`,
   );
   return { ok: true, count: _maps.size };
+}
+
+// Pure: rows (newest-first) → the governing Platt-class map per commodity and the
+// governing variance clock per commodity. Exported for tests.
+export function groupGoverning(rows) {
+  const byKey = new Map();
+  for (const row of rows) {
+    const kind = row.method === CLOCK_METHOD ? 'clock' : 'map';
+    const key = `${kind}|${row.commodity}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(row);
+  }
+  const maps = new Map();
+  const clocks = new Map();
+  for (const [key, list] of byKey) {
+    const [kind, commodity] = key.split('|');
+    const governing = pickGoverning(list);
+    if (governing) (kind === 'clock' ? clocks : maps).set(commodity, governing);
+  }
+  return { maps, clocks };
+}
+
+// The governing variance-clock row for a commodity (shadow or active), or null.
+// Validity (age, shape) is decided by variance-clock.js resolveVarianceClock.
+// ⛔ Never route this row through applyCalibration() — it is not a map on p.
+export function getVarianceClock(commodity) {
+  if (!commodity) return null;
+  return _clocks.get(String(commodity).toLowerCase()) ?? null;
 }
 
 export function getCalibrationMap(commodity) {
@@ -134,6 +161,16 @@ export function isCalibrationActive(commodity) {
 export function calibrationStatus() {
   return {
     count: _maps.size,
+    clocks: Array.from(_clocks.values()).map((m) => ({
+      id: m.id,
+      commodity: m.commodity,
+      method: m.method,
+      active: m.active,
+      shadow: m.shadow,
+      fit_at: m.fit_at,
+      n_samples: m.n_samples,
+      n_events: m.n_events,
+    })),
     lastRefreshMs: _lastRefreshMs,
     lastError: _lastError,
     maps: Array.from(_maps.values()).map((m) => ({
@@ -151,4 +188,8 @@ export function calibrationStatus() {
 // Test seam only — lets unit tests install a map without a database.
 export function __setMapsForTest(entries) {
   _maps = new Map(entries);
+}
+
+export function __setClocksForTest(entries) {
+  _clocks = new Map(entries);
 }

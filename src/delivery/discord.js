@@ -18,6 +18,7 @@ import { sanitize } from '../lib/sanitize.js';
 import { assertBrandSafe } from '../lib/lint-strings.js';
 import { applyCalibrationTierCeiling } from './tier-ceiling.js';
 import { settleTimeEt } from './alert-key.js';
+import { entryRangeText } from '../engine/max-entry.js';
 
 const KALSHI_REFERRAL_URL =
   'https://kalshi.com/sign-up/?referral=b07a96ab-4b91-4bdc-8285-5ae1927b7000';
@@ -95,6 +96,16 @@ export function buildCommodityEmbed(meta, topEdge) {
       ),
       inline: true,
     },
+    // Max entry (2026-10-23): the range this engine's own rule still passes in.
+    ...(() => {
+      const side = direction === 'BUY NO' ? 'NO' : 'YES';
+      const yes = Number(topEdge.kalshi_yes);
+      const cur = Number.isFinite(yes) ? Math.round((side === 'YES' ? yes : 1 - yes) * 100) : null;
+      const text = topEdge.max_entry_cents != null
+        ? entryRangeText(side, { maxCents: topEdge.max_entry_cents, minCents: topEdge.min_entry_cents ?? null }, cur)
+        : null;
+      return text ? [{ name: 'Entry range', value: sanitize(text, 120), inline: false }] : [];
+    })(),
     // meta.publicPrice, NOT meta.spotPrice: for metals that is Kalshi's locked
     // reference (the vendor quote never goes public); null → the field is omitted.
     ...(meta.publicPrice != null && Number.isFinite(meta.publicPrice)

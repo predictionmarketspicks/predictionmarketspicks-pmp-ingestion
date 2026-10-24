@@ -145,6 +145,9 @@ function commodityMetaToRow(meta, alertKey) {
       spot_price: meta.publicPrice ?? null,
       hours_to_close: meta.hoursToClose != null ? Math.round(meta.hoursToClose) : null,
       quarter_kelly: quarterKelly,
+      // Max entry (2026-10-23), in the price of the side taken. null = not stamped.
+      max_entry_cents: top.max_entry_cents ?? null,
+      min_entry_cents: top.min_entry_cents ?? null,
     },
     alert_key: alertKey,
   };

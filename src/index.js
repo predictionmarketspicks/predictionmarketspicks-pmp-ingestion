@@ -326,7 +326,11 @@ async function postMintedPick(config, snap) {
     const already = await filterAlreadyPostedKeys([key], { hoursWindow: 24 });
     if (already.has(key)) return;
     const row = findPickRow(snap.rows, pick);
-    const topEdge = row ?? topEdgeFromPick(pick);
+    let topEdge = row ?? topEdgeFromPick(pick);
+    // The alert carries the PICK's range (stamped at mint), not this tick's.
+    if (topEdge && pick.max_entry_cents != null) {
+      topEdge = { ...topEdge, max_entry_cents: pick.max_entry_cents, min_entry_cents: pick.min_entry_cents ?? null };
+    }
     if (!topEdge) {
       console.warn(`[${c}] pick ${pick.pick_id} has no strike — alert skipped`);
       return;

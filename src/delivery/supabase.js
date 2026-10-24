@@ -108,6 +108,24 @@ export async function insertFifteenMinTrades(rows) {
   if (error) throw new Error(`fifteen_min_trades_10s: ${error.message}`);
 }
 
+// ── max-entry column tolerance (2026-10-23) ──────────────────────────────────
+const ENTRY_COLS = ['max_entry_cents', 'min_entry_cents'];
+const ENTRY_COLS_REPROBE_MS = 10 * 60_000;
+let _entryColsMissingUntil = 0;
+function _entryColsMissing() {
+  return Date.now() < _entryColsMissingUntil;
+}
+export function stripEntryCols(r) {
+  if (!ENTRY_COLS.some((k) => k in r)) return r;
+  const out = { ...r };
+  for (const k of ENTRY_COLS) delete out[k];
+  return out;
+}
+export function isMissingEntryColError(error) {
+  const msg = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`;
+  return ENTRY_COLS.some((k) => msg.includes(k));
+}
+
 export async function upsertCommodityEdgeRows(rows) {
   if (!rows || rows.length === 0) return { count: 0 };
   const tag = writerTag();
@@ -125,12 +143,23 @@ export async function upsertCommodityEdgeRows(rows) {
     return { count: 0, tag, throttled };
   }
   // Strip the internal throttle key from the rows before upsert.
-  const stamped = toWrite.map(({ _throttleKey, ...r }) => r);
+  const stamped = toWrite.map(({ _throttleKey, ...r }) => (_entryColsMissing() ? stripEntryCols(r) : r));
   const sb = getClient();
-  const { data, error } = await sb
+  let { data, error } = await sb
     .from('commodity_edge_signals')
     .upsert(stamped, { onConflict: 'commodity,snapshot_date,event_ticker,strike' })
     .select('id');
+  // max_entry_cents / min_entry_cents ship before their DDL is guaranteed applied.
+  // An upsert naming an unknown column fails the WHOLE write, so on that one error
+  // retry without them and stop sending them for a while (re-probe every 10 min).
+  if (error && isMissingEntryColError(error)) {
+    _entryColsMissingUntil = Date.now() + ENTRY_COLS_REPROBE_MS;
+    console.warn('[supabase] max_entry columns not on commodity_edge_signals yet — writing without them');
+    ({ data, error } = await sb
+      .from('commodity_edge_signals')
+      .upsert(stamped.map(stripEntryCols), { onConflict: 'commodity,snapshot_date,event_ticker,strike' })
+      .select('id'));
+  }
   if (error) throw new Error(`commodity_edge_signals upsert: ${error.message}`);
   // Record successful writes for the throttle window.
   const writeTs = Date.now();
@@ -258,14 +287,17 @@ export async function filterAlreadyPostedKeys(alertKeys, { hoursWindow = 24 } = 
 export async function fetchMintedPickForEvent(toolSlug, commodity, eventTicker) {
   if (!eventTicker) return null;
   const sb = getClient();
-  const { data, error } = await sb
+  const base = 'pick_id, source_row_id, predicted_side, predicted_prob, market_price_at_pick, edge_pp, confidence_tier, regime_tags';
+  const q = (cols) => sb
     .from('tool_picks')
-    .select('pick_id, source_row_id, predicted_side, predicted_prob, market_price_at_pick, edge_pp, confidence_tier, regime_tags')
+    .select(cols)
     .eq('tool_slug', toolSlug)
     .eq('source_table', 'commodity_edge_signals')
     .like('source_row_id', `${commodity}:${eventTicker}:%`)
     .order('picked_at', { ascending: true })
     .limit(1);
+  let { data, error } = await q(`${base}, max_entry_cents, min_entry_cents`);
+  if (error && isMissingEntryColError(error)) ({ data, error } = await q(base));
   if (error) {
     console.warn('[tool_picks] minted-pick read failed:', error.message);
     return null;

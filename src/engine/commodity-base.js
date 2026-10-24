@@ -23,6 +23,7 @@ import { getShortHorizonStats } from './short-horizon-vol.js';
 import { getCalibrationMap, applyCalibration, isCalibrationActive, getVarianceClock } from './calibration.js';
 import { effectiveYearFraction, resolveVarianceClock } from './variance-clock.js';
 import { applyEngineRules } from './engine-rules.js';
+import { commodityEntryRange } from './max-entry.js';
 import {
   ENTRY_COST_FLOOR,
   MIN_EDGE_PP,
@@ -1676,6 +1677,11 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   // demoting alone would erase the side the shadow ledger grades.
   applyEntryFloor(ivCapped);
 
+  // Max entry (2026-10-23): the price range this engine's own BUY rule still
+  // passes in, stamped on every BUY row so the pick mint, the alert and the
+  // board all carry it. Last, so it only ever describes a row that is a play.
+  stampEntryRange(ivCapped, config);
+
   const filteredRows = ivCapped;
   // V2 cutover: meta.topEdge reads from fused_edge_pp (= V2 when useV2Cutover
   // is on, = V1 when off or when V2 fell back). Discord routing keys off
@@ -1787,6 +1793,34 @@ export const __test__ = {
   // Test seam: lets unit tests force the first-snapshot flag.
   _firstSnapshotWritten: firstSnapshotWritten,
 };
+
+/**
+ * Stamp max_entry_cents / min_entry_cents on BUY rows, in place (max-entry.js).
+ * The probability is the one that drove the row's direction: calibrated when the
+ * map governs, physical under V2, risk-neutral otherwise — the chosenProb rule.
+ * Keys are ADDED only on BUY rows, so a PASS row's shape is unchanged.
+ */
+export function stampEntryRange(rows, config) {
+  const calActive = isCalibrationActive(config.commodity);
+  for (const r of rows) {
+    if (r.direction !== 'BUY YES' && r.direction !== 'BUY NO') continue;
+    const probYes =
+      calActive && r.calibrated_prob != null
+        ? r.calibrated_prob
+        : r.model_version === 'v2_physical' && r.prob_physical != null
+          ? r.prob_physical
+          : r.options_prob;
+    const range = commodityEntryRange(config, {
+      side: r.direction === 'BUY YES' ? 'YES' : 'NO',
+      probYes,
+      feeFraction,
+    });
+    if (!range) continue;
+    r.max_entry_cents = range.maxCents;
+    r.min_entry_cents = range.minCents;
+  }
+  return rows;
+}
 
 /**
  * Demote sub-floor BUY rows to a non-play WATCH, in place. Exported for the test.

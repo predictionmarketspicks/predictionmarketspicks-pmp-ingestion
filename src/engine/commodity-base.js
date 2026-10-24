@@ -974,6 +974,10 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   }
 
   const rows = [];
+  // NO-side evaluations the kill switch (config.noSideEnabled=false) stops, kept
+  // for the off-record shadow ledger only (selectNoSideShadow, below). Never a
+  // pick, never an alert, never copied: see config.noSideShadow in commodities.js.
+  const noSideCandidates = [];
   for (const rawMarket of snapshotMarkets) {
     if (rawMarket.floorStrike == null) continue;
     const market = mergeLiveQuote(rawMarket);
@@ -1267,6 +1271,23 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 
         // Longshot suppression: no YES BUYs under 15c, full stop.
         const yesLongshot = g.pass && g.dirYes && yesPriceLongshot;
+
+        // Off-record NO evidence (2026-10-24, TOOL_RULES_AUDIT §1.2). The NO side
+        // has been off since 07-27 on a retired model, so nothing on the current
+        // model can ever re-test it — a self-sealing ban. Record what the NO side
+        // would have cleared; selectNoSideShadow() keeps only rows that end the
+        // snapshot as PASS, so this can never change a published row.
+        if (config.noSideShadow === true && chosenEdge < 0 && g.noNet != null && !g.pass) {
+          noSideCandidates.push({
+            strike: kSpot,
+            noNet: g.noNet,
+            gross: chosenEdge,
+            chosenProb,
+            yesBid: market.yesBid ?? null,
+            minutesToClose,
+            calibrationGoverns: calGoverns,
+          });
+        }
 
         if (g.pass && !yesLongshot) {
           dirYes = g.dirYes;
@@ -1676,6 +1697,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   // have been published. The original direction/tiers ride in entry_floor:
   // demoting alone would erase the side the shadow ledger grades.
   applyEntryFloor(ivCapped);
+  const noSideShadow = config.noSideShadow === true
+    ? selectNoSideShadow(noSideCandidates, ivCapped)
+    : [];
 
   // Max entry (2026-10-23): the price range this engine's own BUY rule still
   // passes in, stamped on every BUY row so the pick mint, the alert and the
@@ -1774,6 +1798,10 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
           },
     },
     rows: filteredRows,
+    // Off-record NO-side shadow rows for commodity_longshot_shadow (reason
+    // 'no_side'); [] unless config.noSideShadow. Written by index.js, never
+    // upserted into commodity_edge_signals, so the mint can't see them.
+    noSideShadow,
   };
 }
 
@@ -1793,6 +1821,69 @@ export const __test__ = {
   // Test seam: lets unit tests force the first-snapshot flag.
   _firstSnapshotWritten: firstSnapshotWritten,
 };
+
+// Off-record NO-side shadow (2026-10-24). The gates a NO pick would have had to
+// clear if the side were on, each mirroring the published path: the NO net-of-
+// spread-and-fee edge (logged from 5pp so the 5pp and the coded 10pp cut can be
+// read side by side; `clears_no_floor` marks the 10pp rows), the fused-tier
+// MODERATE gross edge (7pp), the MODERATE minutes-to-close ceiling (10 min), the
+// 40c entry floor on the side's cost at the published YES price, a clean
+// quality_flag, and a row that ended the snapshot as PASS for a NO-side reason.
+export const NO_SIDE_SHADOW = Object.freeze({
+  minNetEdge: 0.05,
+  minGrossEdge: 0.07,
+  minMinutesToClose: 10,
+  minCost: ENTRY_COST_FLOOR,
+  noFloor: MIN_EDGE_PP_NO,
+});
+
+/** Pure. Candidates from the side gate + the final rows → shadow rows, best NO net first. */
+export function selectNoSideShadow(candidates, rows, o = NO_SIDE_SHADOW) {
+  const byStrike = new Map(rows.map((r) => [r.strike, r]));
+  const out = [];
+  for (const c of candidates) {
+    const r = byStrike.get(c.strike);
+    if (!r || r.direction !== 'PASS' || r.quality_flag != null) continue;
+    if (r.pass_reason !== 'no_side_disabled' && r.pass_reason !== 'no_net_below_floor') continue;
+    const yes = Number(r.kalshi_yes);
+    if (!Number.isFinite(yes) || yes <= 0 || yes >= 1) continue;
+    const cost = 1 - yes;
+    if (cost < o.minCost) continue;
+    if (!(c.noNet >= o.minNetEdge) || !(-c.gross >= o.minGrossEdge)) continue;
+    if (!(c.minutesToClose >= o.minMinutesToClose)) continue;
+    const day = String(r.snapshot_at).slice(0, 10);
+    out.push({
+      tool_slug: 'bitcoin-edge',
+      reason: 'no_side',
+      picked_at: r.snapshot_at,
+      commodity: r.commodity,
+      event_ticker: r.event_ticker,
+      strike: r.strike,
+      resolves_at: r.event_close_at,
+      predicted_side: 'NO',
+      predicted_prob: c.chosenProb != null ? Math.min(0.999, Math.max(0.001, c.chosenProb)) : null,
+      market_price_at_pick: yes,                 // the YES price, as tool_picks stores it
+      cost: Math.round(cost * 10000) / 10000,    // same basis as the mint: 1 − kalshi_yes
+      confidence: 'watch',
+      regime_tags: {
+        no_net_pp: Math.round(c.noNet * 10000) / 10000,
+        gross_edge_pp: Math.round(c.gross * 10000) / 10000,
+        clears_no_floor: c.noNet >= o.noFloor,
+        no_ask: c.yesBid != null ? Math.round((1 - c.yesBid) * 10000) / 10000 : null,
+        minutes_to_close: Math.round(c.minutesToClose * 10) / 10,
+        model_version: r.model_version ?? null,
+        calibration_governs: c.calibrationGoverns === true,
+        pass_reason: r.pass_reason,
+        hour_utc: new Date(r.snapshot_at).getUTCHours(),
+      },
+      // Suffixed so it can never collide with an entry_floor / metals_pair row
+      // on the same event-day under unique (tool_slug, event_day_key).
+      event_day_key: `${String(r.commodity).toLowerCase()}:${r.event_ticker}:${day}:no_side`,
+    });
+  }
+  out.sort((a, b) => b.regime_tags.no_net_pp - a.regime_tags.no_net_pp);
+  return out;
+}
 
 /**
  * Stamp max_entry_cents / min_entry_cents on BUY rows, in place (max-entry.js).

@@ -913,3 +913,29 @@ export async function insertOptionsChainSnapshot({ commodity, underlying, snapsh
   }
   return { ok: true, count: data?.length ?? 0 };
 }
+
+/**
+ * Off-record Bitcoin Edge NO-side shadow (2026-10-24) → commodity_longshot_shadow,
+ * reason 'no_side'. First qualifying crossing per event-day wins (ON CONFLICT DO
+ * NOTHING on (tool_slug, event_day_key)); never a tool_picks row, never alerted,
+ * never copied. Until the site migration admits reason 'no_side' the insert is
+ * refused by the CHECK — the caller catches that, and nothing else is touched.
+ */
+const _noSideShadowWritten = new Set();
+export async function insertNoSideShadow(rows) {
+  const fresh = [];
+  const seen = new Set();
+  for (const r of rows ?? []) {
+    if (_noSideShadowWritten.has(r.event_day_key) || seen.has(r.event_day_key)) continue;
+    seen.add(r.event_day_key);
+    fresh.push(r);
+  }
+  if (fresh.length === 0) return { count: 0 };
+  const { error } = await getClient()
+    .from('commodity_longshot_shadow')
+    .upsert(fresh, { onConflict: 'tool_slug,event_day_key', ignoreDuplicates: true });
+  if (error) throw new Error(`commodity_longshot_shadow (no_side): ${error.message}`);
+  for (const r of fresh) _noSideShadowWritten.add(r.event_day_key);
+  if (_noSideShadowWritten.size > 5000) _noSideShadowWritten.clear();
+  return { count: fresh.length };
+}

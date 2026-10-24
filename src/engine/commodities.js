@@ -483,6 +483,15 @@ export const COMMODITIES = {
     // would republish outright BUY NO on /tools/bitcoin-edge, where the NO record
     // is still unproven and exactly what this flag was set false to stop.
     noSideEnabled: false,
+    // OFF-RECORD NO evidence (2026-10-24, prediction-marketspicks
+    // handoffs/TOOL_RULES_AUDIT_2026-10-24.md §1.2). With noSideEnabled=false the
+    // current model's NO side can never be re-tested. This logs the first NO
+    // crossing per event-day that would have cleared the published gates (NO net
+    // ≥5pp — 10pp rows tagged clears_no_floor — gross ≥7pp, ≥10 min to close,
+    // cost ≥40¢, clean quality_flag) to commodity_longshot_shadow (reason
+    // 'no_side'). It never sets direction, never mints, never alerts, never
+    // reaches the copy bot. Decide the NO side from that ledger at n≥100.
+    noSideShadow: true,
     // Discord + edge_alerts post the MINTED tool_picks row and nothing else, so
     // "what we posted" and "what we graded" are one set (2026-09-22: 23 of 48
     // graded picks since 09-09 were never alerted). Delivery only — no gate.

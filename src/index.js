@@ -35,6 +35,7 @@ import { refreshEngineRules, engineRulesStatus } from './engine/engine-rules.js'
 import { EXPIRATION_BURST_WINDOW_MS, BTC_STRIKE_COUNT_WARN } from './engine/thresholds.js';
 import {
   upsertCommodityEdgeRows,
+  insertNoSideShadow,
   insertCommodityEdgeIntraday,
   insertOptionsChainSnapshot,
   upsertGammaSnapshot,
@@ -515,6 +516,22 @@ async function runSnapshotOnceInner(state) {
       );
     } else {
       ({ count, tag } = await upsertCommodityEdgeRows(snap.rows));
+    }
+
+    // Off-record NO-side shadow (bitcoin only, config.noSideShadow). Isolated: a
+    // refused insert (e.g. the reason CHECK before its migration) must never
+    // touch the primary upsert, the mint or Discord. Warn at most every 30 min.
+    if (snap.noSideShadow?.length && !snap.meta.nearExpiry) {
+      try {
+        const { count: nShadow } = await insertNoSideShadow(snap.noSideShadow);
+        if (nShadow > 0) console.log(`[${config.commodity}] no-side shadow: +${nShadow} off-record row(s)`);
+      } catch (err) {
+        const nowMs = Date.now();
+        if (!state.lastNoShadowWarnMs || nowMs - state.lastNoShadowWarnMs > 30 * 60 * 1000) {
+          state.lastNoShadowWarnMs = nowMs;
+          console.warn(`[${config.commodity}] no-side shadow write failed: ${err?.message || err}`);
+        }
+      }
     }
     const top = snap.meta.topEdge;
     const topStr = top

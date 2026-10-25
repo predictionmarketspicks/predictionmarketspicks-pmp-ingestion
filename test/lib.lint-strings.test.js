@@ -89,10 +89,10 @@ describe('Discord silver embed brand-safety', () => {
     expect(() => assertBrandSafe(payload)).not.toThrow();
   });
 
-  it('embeds the Kalshi sign-up referral URL, not a per-market deep-link', () => {
+  it('title links OUR tool page with discord UTMs, not the Kalshi referral (F8)', () => {
     const payload = buildSilverEmbed(meta, topEdge);
     expect(payload.embeds[0].url).toBe(
-      'https://kalshi.com/sign-up/?referral=b07a96ab-4b91-4bdc-8285-5ae1927b7000',
+      'https://predictionmarketspicks.com/tools/silver-edge?utm_source=discord&utm_medium=feed&utm_campaign=commodity',
     );
   });
 

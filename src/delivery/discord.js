@@ -8,8 +8,13 @@
 //   SPECULATIVE (4-7pp) → #edge-feed     1487857830391451750  (consolidated 2026-08-01)
 //   Movers (gain/loss)  → #market-movers  1487857819482063049
 //
-// Embed link convention (CLAUDE.md, locked May 2 2026): title clicks go to the
-// Kalshi sign-up referral URL, NOT a per-market deep-link.
+// Embed link convention (superseded 2026-10-25, DISCORD_CLEANUP_AUTOPILOT F8):
+// title clicks go to OUR page for the signal (commodity → its tool page,
+// movers → the closest category page) with utm_source=discord&utm_medium=feed.
+// Kalshi isn't crediting the referral, and the rule is keep traffic on site.
+//
+// #edge-feed / #oracle-picks commodity alerts go through the shared daily
+// budget (discord-budget.js — the same contract as the site's postWithBudget).
 //
 // Brand-safety guard: every outbound payload runs through assertBrandSafe().
 // A banned-word match throws BannedWordError before any HTTP fire.
@@ -19,6 +24,15 @@ import { assertBrandSafe } from '../lib/lint-strings.js';
 import { applyCalibrationTierCeiling } from './tier-ceiling.js';
 import { settleTimeEt } from './alert-key.js';
 import { entryRangeText } from '../engine/max-entry.js';
+import { getClient } from './supabase.js';
+import {
+  commodityGate,
+  commoditySubjectKey,
+  fetchBudgetRemaining,
+  fetchUnderlyingKeysToday,
+  logCommodityPost,
+} from './discord-budget.js';
+import { etDateKey } from '../lib/et-time.js';
 
 const KALSHI_REFERRAL_URL =
   'https://kalshi.com/sign-up/?referral=b07a96ab-4b91-4bdc-8285-5ae1927b7000';
@@ -32,7 +46,6 @@ const CHANNEL_ID = {
 };
 
 const GAIN_GREEN = 0x2d5a3d; // brand --gain
-const LOSS_RED = 0x8b2e2e; // brand --loss
 
 const COLOR_BY_TIER = {
   STRONG: 0xc9a243, // oracle-gold
@@ -50,6 +63,19 @@ const TITLE_PREFIX = {
   bitcoin: 'Bitcoin Edge',
   copper: 'Copper Edge',
 };
+
+const SITE = 'https://predictionmarketspicks.com';
+const COMMODITY_UTM = 'utm_source=discord&utm_medium=feed&utm_campaign=commodity';
+const TOOL_PAGE = {
+  silver: '/tools/silver-edge',
+  gold: '/tools/gold-edge',
+  oil: '/tools/oil-edge',
+  bitcoin: '/tools/bitcoin-edge',
+};
+
+export function commodityPageUrl(commodity) {
+  return `${SITE}${TOOL_PAGE[commodity] ?? '/commodity-markets'}?${COMMODITY_UTM}`;
+}
 
 function probToAmericanOdds(prob) {
   if (!Number.isFinite(prob) || prob <= 0 || prob >= 1) return null;
@@ -78,6 +104,21 @@ export function buildCommodityEmbed(meta, topEdge) {
     tier,
   ];
 
+  // The prob that actually drove this alert: physical when the row's
+  // model_version says V2 owns direction/confidence, legacy otherwise.
+  const modelProb = topEdge.model_version === 'v2_physical' && topEdge.prob_physical != null
+    ? topEdge.prob_physical
+    : topEdge.options_prob;
+  const modelPct = (modelProb * 100).toFixed(0);
+  const marketPct = (topEdge.kalshi_yes * 100).toFixed(0);
+  const sideWord = direction === 'BUY NO' ? 'NO' : 'YES';
+  // Derived values only (OPRA rule): our model %, the Kalshi market %, the edge.
+  // The engine's rationale string is NOT published — its caveats carry internal
+  // plumbing (feed names, rule ids, gate reasons).
+  const description =
+    `Our model ${modelPct}% vs market ${marketPct}% that ${meta.commodity} is above ` +
+    `$${topEdge.strike.toFixed(2)} at settle · ${sideWord} underpriced by ${Math.abs(Number(edgePct)).toFixed(1)} pts`;
+
   const fields = [
     {
       name: 'Market price',
@@ -85,15 +126,8 @@ export function buildCommodityEmbed(meta, topEdge) {
       inline: true,
     },
     {
-      name: 'Options model',
-      // Show the prob that actually drove this alert: physical when the row's
-      // model_version says V2 owns direction/confidence, legacy otherwise.
-      value: sanitize(
-        `${((topEdge.model_version === 'v2_physical' && topEdge.prob_physical != null
-          ? topEdge.prob_physical
-          : topEdge.options_prob) * 100).toFixed(0)}%`,
-        80,
-      ),
+      name: 'Our model',
+      value: sanitize(`${modelPct}%`, 80),
       inline: true,
     },
     // Max entry (2026-10-23): the range this engine's own rule still passes in.
@@ -108,9 +142,11 @@ export function buildCommodityEmbed(meta, topEdge) {
     })(),
     // meta.publicPrice, NOT meta.spotPrice: for metals that is Kalshi's locked
     // reference (the vendor quote never goes public); null → the field is omitted.
+    // Label is plain `Spot` — meta.spotLabel is internal plumbing (it printed
+    // "Yahoo CL=F (contract-aware CLM26.NYM primary, …)" on public cards).
     ...(meta.publicPrice != null && Number.isFinite(meta.publicPrice)
       ? [{
-          name: `Spot (${meta.spotLabel})`,
+          name: 'Spot',
           value: sanitize(`$${meta.publicPrice.toFixed(2)}`, 80),
           inline: true,
         }]
@@ -121,9 +157,9 @@ export function buildCommodityEmbed(meta, topEdge) {
     embeds: [
       {
         title: sanitize(titleParts.join(' • '), 256),
-        url: KALSHI_REFERRAL_URL,
+        url: commodityPageUrl(meta.commodity),
         color: COLOR_BY_TIER[tier] ?? 0xc9a243,
-        description: sanitize(topEdge.rationale || '', 800),
+        description: sanitize(description, 800),
         fields,
         footer: {
           text: sanitize(
@@ -162,10 +198,29 @@ async function postToChannel(channelId, payload) {
     const body = await res.text().catch(() => '');
     throw new Error(`discord ${res.status}: ${body.slice(0, 200)}`);
   }
-  return true;
+  // Truthy either way; carries the message id when Discord returns one.
+  const msg = await res.json().catch(() => null);
+  return { id: msg?.id ?? null };
 }
 
-export async function postCommodityAlert(meta) {
+// In-process "never the same strike + direction twice in a session" guard.
+// Backs up the discord_posts_log check when the ledger is unreadable.
+const _sessionSent = new Set();
+let _sessionDate = null;
+
+function supabaseOrNull() {
+  try {
+    return getClient();
+  } catch {
+    return null;
+  }
+}
+
+// Returns true only when the alert was actually sent. A gated alert returns
+// false, so callers skip their posted_alerts write and the alert is
+// re-evaluated (and usually re-gated) on the next snapshot.
+// opts.sb / opts.post / opts.now are test seams.
+export async function postCommodityAlert(meta, { sb, post = postToChannel, now = new Date() } = {}) {
   const top = meta.topEdge;
   if (!top) return false;
   // Ceiling before channel routing — a ceilinged alert belongs in #edge-feed,
@@ -177,52 +232,95 @@ export async function postCommodityAlert(meta) {
 
   const payload = buildCommodityEmbed(meta, top);
   assertBrandSafe(payload);
-  return postToChannel(channelId, payload);
+
+  const today = etDateKey(now);
+  if (_sessionDate !== today) {
+    _sessionSent.clear();
+    _sessionDate = today;
+  }
+  const client = sb === undefined ? supabaseOrNull() : sb;
+  const [budgetLeft, todayKeys] = client
+    ? await Promise.all([
+        fetchBudgetRemaining(client, channelId),
+        fetchUnderlyingKeysToday(client, meta.commodity, now),
+      ])
+    : [null, null];
+  const subjectKey = commoditySubjectKey(meta.commodity, top);
+  const gate = commodityGate({ meta, edge: top, todayKeys, budgetLeft, sessionKeys: _sessionSent, now });
+  if (!gate.ok) {
+    console.log(`[discord] ${meta.commodity} alert held (${gate.reason}) ${subjectKey} ${tier}`);
+    return false;
+  }
+
+  const msg = await post(channelId, payload);
+  if (!msg) return false;
+  _sessionSent.add(`${today}|${subjectKey}`);
+  if (client) {
+    await logCommodityPost(client, {
+      channelId,
+      tier,
+      title: payload.embeds[0].title,
+      messageId: msg?.id ?? null,
+      subjectKey,
+    });
+  }
+  return true;
+}
+
+// Test-only: reset the in-process session guard.
+export function _resetCommoditySession() {
+  _sessionSent.clear();
+  _sessionDate = null;
 }
 
 // Phase 1 back-compat shims so any caller still importing the silver-named
 // helpers keeps working. Delete once nothing references them.
 export const postSilverAlert = postCommodityAlert;
-export const buildSilverEmbed = buildCommodityEmbed;
+export const buildSilverEmbed = (meta, topEdge) => buildCommodityEmbed({ commodity: 'silver', ...meta }, topEdge);
 
-// ---------- market movers (Phase 3) ----------
+// ---------- market movers (v2, 2026-10-25 F3) ----------
 //
-// Gainers + losers post: a single Discord message with up to 10 embeds, posted
-// to #market-movers. Mirrors the discord-market-movers Edge Function output
-// during the soak window so readers see no diff at handoff.
+// ONE embed, ≤8 lines, one line per event, each line a link to our closest
+// page. Lines are pre-built by engine/movers.js (moverLineText + moverPageUrl).
+// A line that trips the brand-safety lint (a Kalshi title with a banned word)
+// is dropped on its own instead of sinking the whole post.
 
-export function buildMoverEmbed(c, isGainer) {
-  const arrow = isGainer ? '🟢▲' : '🔴▼';
-  const color = isGainer ? GAIN_GREEN : LOSS_RED;
-  const absDelta = Math.abs(c.price_change_24h);
+export const MOVERS_TITLE_URL =
+  'https://predictionmarketspicks.com/kalshi?utm_source=discord&utm_medium=feed&utm_campaign=market-movers';
+
+export function buildMoversEmbed(lines, { now = new Date() } = {}) {
+  const safe = [];
+  for (const l of lines ?? []) {
+    const text = sanitize(l.text, 180).replace(/[\[\]]/g, '');
+    if (!text) continue;
+    try {
+      assertBrandSafe({ text });
+    } catch {
+      console.warn(`[movers] line dropped by brand-safety lint: ${text}`);
+      continue;
+    }
+    safe.push(l.url ? `[${text}](${l.url})` : text);
+    if (safe.length >= 8) break;
+  }
+  if (safe.length === 0) return null;
   return {
-    title: sanitize(c.title, 240),
-    url: KALSHI_REFERRAL_URL,
-    color,
-    fields: [
-      { name: 'Series', value: sanitize(c.seriesOrSlug, 80), inline: true },
-      { name: 'Yes Price', value: `${c.yes_price}¢`, inline: true },
-      { name: 'Δ 24h', value: `${arrow} ${absDelta}pp`, inline: true },
+    embeds: [
       {
-        name: 'Volume 24h',
-        value: Math.round(c.volume_24h).toLocaleString('en-US'),
-        inline: true,
+        title: 'Market Movers · last 24h on Kalshi',
+        url: MOVERS_TITLE_URL,
+        color: GAIN_GREEN,
+        description: safe.join('\n'),
+        footer: { text: 'The 7 Oracles · posts 10 AM + 6 PM ET' },
+        timestamp: now.toISOString(),
       },
-      { name: 'Ticker', value: `\`${sanitize(c.ticker, 60)}\``, inline: true },
-      { name: 'Category', value: sanitize(c.category, 40), inline: true },
     ],
-    footer: { text: 'Market Movers · The 7 Oracles' },
-    timestamp: new Date().toISOString(),
+    allowed_mentions: { parse: [] },
   };
 }
 
-export async function postMoversAlert({ gainers, losers }) {
-  const embeds = [
-    ...gainers.map((c) => buildMoverEmbed(c, true)),
-    ...losers.map((c) => buildMoverEmbed(c, false)),
-  ].slice(0, 10);
-  if (embeds.length === 0) return false;
-  const payload = { embeds, allowed_mentions: { parse: [] } };
+export async function postMoversAlert(lines) {
+  const payload = buildMoversEmbed(lines);
+  if (!payload) return false;
   assertBrandSafe(payload);
   return postToChannel(CHANNEL_ID.MOVERS, payload);
 }

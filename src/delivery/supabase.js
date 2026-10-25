@@ -305,6 +305,44 @@ export async function fetchMintedPickForEvent(toolSlug, commodity, eventTicker) 
   return data?.[0] ?? null;
 }
 
+// #market-movers repost ledger (F3): the latest feed_performance movers row
+// per EVENT in the window → Map<eventKey, { market_id, alert_price }>.
+// eventKey = market_id minus its last '-' segment (Kalshi's event ticker).
+// On a read failure returns an empty Map (post unfiltered) — with 2 posts a
+// day a repeat is cheaper than a silent feed.
+export function latestMoverPostByEvent(rows) {
+  const out = new Map();
+  for (const r of rows ?? []) {
+    const id = String(r.market_id ?? '');
+    const i = id.lastIndexOf('-');
+    const ev = i > 0 ? id.slice(0, i) : id;
+    if (!ev) continue;
+    const cur = out.get(ev);
+    if (!cur || String(r.created_at) > String(cur.created_at)) {
+      out.set(ev, { market_id: id, alert_price: Number(r.alert_price), created_at: r.created_at });
+    }
+  }
+  return out;
+}
+
+export async function fetchRecentMoverPosts({ hoursWindow = 24 } = {}) {
+  try {
+    const sb = getClient();
+    const cutoff = new Date(Date.now() - hoursWindow * 3600_000).toISOString();
+    const { data, error } = await sb
+      .from('feed_performance')
+      .select('market_id, alert_price, created_at')
+      .eq('feed_type', 'market_movers')
+      .gte('created_at', cutoff)
+      .limit(1000);
+    if (error) throw error;
+    return latestMoverPostByEvent(data);
+  } catch (err) {
+    console.warn('[movers] repost-ledger read failed, posting unfiltered:', err?.message || err);
+    return new Map();
+  }
+}
+
 // Upsert posted-alert rows. onConflict on alert_key — same key + a fresh
 // posted_at extends the cooldown window, which is the desired behavior.
 export async function recordPostedAlerts(rows) {

@@ -178,6 +178,8 @@ export async function fetchKalshiCandidates({ timeoutMs = 30_000 } = {}) {
           source: 'kalshi',
           seriesOrSlug: series,
           ticker: m.ticker,
+          // One #market-movers line per EVENT (both sides of a game are one move).
+          event_ticker: typeof m.event_ticker === 'string' ? m.event_ticker : null,
           title: m.title ?? m.subtitle ?? m.ticker,
           // KXPRESPERSON ships a generic title plus the candidate name in
           // yes_sub_title; surface it so pair-discover can match on candidate
@@ -194,5 +196,25 @@ export async function fetchKalshiCandidates({ timeoutMs = 30_000 } = {}) {
     return out;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// Event title for a #market-movers line ("Toronto vs Minnesota"). One GET per
+// line, ≤8 per post, twice a day. Null on any failure — the line falls back to
+// the market title.
+export async function fetchKalshiEventTitle(eventTicker, { timeoutMs = 8000 } = {}) {
+  if (!eventTicker) return null;
+  try {
+    const res = await kalshiGet(`${KALSHI_API_BASE}/events/${encodeURIComponent(eventTicker)}`, {
+      signal: AbortSignal.timeout(timeoutMs),
+      label: 'movers',
+      userAgent: 'pmp-ingestion/movers',
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const t = json?.event?.title;
+    return typeof t === 'string' && t.trim() ? t.trim() : null;
+  } catch {
+    return null;
   }
 }

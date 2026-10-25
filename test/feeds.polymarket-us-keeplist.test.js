@@ -33,6 +33,9 @@ describe('keepUsMarket — each rule on a captured market', () => {
     culture: 'culture',
     crypto: 'crypto',
     finance: 'finance',
+    // football_team_full_game_spread is shared with college: it is NOT nfl_game,
+    // but since 2026-10-25 a CFB full-game line is kept as league_game (§5.8.6).
+    cfb_spread: 'league_game',
   };
   for (const [name, kind] of Object.entries(kept)) {
     it(`keeps ${name} (${F[name].slug}) as ${kind}`, () => {
@@ -47,7 +50,6 @@ describe('keepUsMarket — each rule on a captured market', () => {
     politics_cmovc_margin: 'politics_bracket',
     climate: 'category_climate',
     mlb_moneyline: 'sports_non_nfl',
-    cfb_spread: 'sports_non_nfl', // football_team_full_game_spread is shared with college
     football_txs_crossleague: 'sports_non_nfl',
     nfl_team_total: 'nfl_period_or_team_total',
     nfl_first_half_spread: 'nfl_period_or_team_total',

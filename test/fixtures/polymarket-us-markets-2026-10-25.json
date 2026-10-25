@@ -1,0 +1,3056 @@
+{
+ "captured": "2026-10-25",
+ "source": "gateway.polymarket.us /v1/markets",
+ "markets": {
+  "nba_moneyline": {
+   "id": "1355714",
+   "question": "Who will win in the upcoming basketball event LA Lakers vs UTA Jazz scheduled for October 25, 2026 at 9:00 PM UTC?",
+   "slug": "aec-nba-lal-uta-2026-10-25",
+   "endDate": "2026-11-08T21:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-11T04:00:18Z",
+   "description": "This market will settle to the winner of the LA Lakers vs UTA Jazz professional basketball game originally scheduled for Oct 25, 2026 at 5:00PM ET. Overtime is included if played. If the game is delayed, postponed, suspended, or otherwise rescheduled and is not rescheduled to start within two calendar days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "moneyline",
+   "closed": false,
+   "createdAt": "2026-10-11T04:00:18Z",
+   "updatedAt": "2026-10-25T15:43:45Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T21:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "basketball_team_full_game_winner",
+   "marketSides": [
+    {
+     "id": "2710906",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aec-nba-lal-uta-2026-10-25",
+     "createdAt": "2026-10-11T04:00:18Z",
+     "updatedAt": "2026-10-11T04:00:18Z",
+     "description": "Lakers",
+     "price": "0.6900",
+     "marketId": 1355714,
+     "long": true,
+     "teamId": 24,
+     "team": {
+      "id": 24,
+      "name": "Lakers",
+      "abbreviation": "lal",
+      "league": "nba",
+      "record": "2-0",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/NBA+Team+Logos/LAL.png",
+      "alias": "Lakers",
+      "safeName": "Los Angeles L",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Los-Angeles-Lakers_R@320x320.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Los-Angeles-Lakers_L@320x320.png",
+      "colorPrimary": "#862edc",
+      "providerId": 27,
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_R@320x320.png",
+      "displayAbbreviation": "LAL",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "27"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "583ecae2-fb46-11e1-82cb-f4ce4684ea4c"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "73AEB6743EC2"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_R@320x320.png",
+      "color": {
+       "light": "#862edc",
+       "dark": "#862edc"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.6900",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "2710907",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aec-nba-lal-uta-2026-10-25",
+     "createdAt": "2026-10-11T04:00:18Z",
+     "updatedAt": "2026-10-11T04:00:18Z",
+     "description": "Jazz",
+     "price": "0.32",
+     "marketId": 1355714,
+     "long": false,
+     "teamId": 35,
+     "team": {
+      "id": 35,
+      "name": "Jazz",
+      "abbreviation": "uta",
+      "league": "nba",
+      "record": "1-1",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/NBA+Team+Logos/UTA.png",
+      "alias": "Jazz",
+      "safeName": "Utah",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Utah-Jazz_R@320x320.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Utah-Jazz_L@320x320.png",
+      "colorPrimary": "#4f0190",
+      "providerId": 17,
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Utah-Jazz_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Utah-Jazz_R@320x320.png",
+      "displayAbbreviation": "UTA",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "17"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "583ece50-fb46-11e1-82cb-f4ce4684ea4c"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "7C902BB2E272"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Utah-Jazz_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Utah-Jazz_R@320x320.png",
+      "color": {
+       "light": "#4f0190",
+       "dark": "#4f0190"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.32",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Lakers\",\"Jazz\"]",
+   "outcomePrices": "[\"0.6900\",\"0.32\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_MONEYLINE",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.6800",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.6900",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-22T11:51:43Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "nba_spread": {
+   "id": "1615586",
+   "question": "Will the WAS Wizards cover -12.5 vs the CHA Hornets in WAS Wizards vs. CHA Hornets?",
+   "slug": "asc-nba-was-cha-2026-10-26-neg-12pt5",
+   "endDate": "2026-11-09T23:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-20T10:00:25Z",
+   "description": "This market will settle to Yes if Wizards covers a -12.5 point spread in the Wizards vs Hornets professional basketball game scheduled for October 26, 2026 at 7:00PM ET (as of the listing of the event's first instrument). Overtime is included if played. If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "spreads",
+   "closed": false,
+   "createdAt": "2026-10-20T10:00:26Z",
+   "updatedAt": "2026-10-22T12:00:37Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-26T23:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "basketball_team_full_game_spread",
+   "line": -12.5,
+   "marketSides": [
+    {
+     "id": "3230646",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-nba-was-cha-2026-10-26-neg-12pt5",
+     "createdAt": "2026-10-20T10:00:26Z",
+     "updatedAt": "2026-10-20T10:00:26Z",
+     "description": "-12.50",
+     "price": "0.4400",
+     "marketId": 1615586,
+     "long": true,
+     "teamId": 36,
+     "team": {
+      "id": 36,
+      "name": "Wizards",
+      "abbreviation": "was",
+      "league": "nba",
+      "record": "2-1",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/NBA+Team+Logos/WAS.png",
+      "alias": "Wizards",
+      "safeName": "Washington",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Washington-Wizards_R_320x320.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Washington-Wizards_L_320x320.png",
+      "colorPrimary": "#e20e38",
+      "providerId": 1,
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Washington-Wizards_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Washington-Wizards_R@320x320.png",
+      "displayAbbreviation": "WAS",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "1"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "583ec8d4-fb46-11e1-82cb-f4ce4684ea4c"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "8F17F23FB753"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Washington-Wizards_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Washington-Wizards_R@320x320.png",
+      "color": {
+       "light": "#e20e38",
+       "dark": "#e20e38"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.4400",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3230647",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-nba-was-cha-2026-10-26-neg-12pt5",
+     "createdAt": "2026-10-20T10:00:26Z",
+     "updatedAt": "2026-10-20T10:00:26Z",
+     "description": "+12.50",
+     "price": "0.99",
+     "marketId": 1615586,
+     "long": false,
+     "teamId": 16,
+     "team": {
+      "id": 16,
+      "name": "Hornets",
+      "abbreviation": "cha",
+      "league": "nba",
+      "record": "2-1",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/NBA+Team+Logos/CHA.png",
+      "alias": "Hornets",
+      "safeName": "Charlotte",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Charlotte-Hornets_R_320x320.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Charlotte-Hornets_L_320x320.png",
+      "colorPrimary": "#1d98b9",
+      "providerId": 2,
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_Charlotte-Hornets_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_Charlotte-Hornets_R@320x320.png",
+      "displayAbbreviation": "CHA",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "2"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "583ec97e-fb46-11e1-82cb-f4ce4684ea4c"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_Charlotte-Hornets_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_Charlotte-Hornets_R@320x320.png",
+      "color": {
+       "light": "#1d98b9",
+       "dark": "#1d98b9"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.99",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"-12.50\",\"+12.50\"]",
+   "outcomePrices": "[\"0.4400\",\"0.99\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_SPREAD",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "bestBidQuote": {
+    "value": "0.0100",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.4400",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-22T12:00:37Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "nba_total": {
+   "id": "1761582",
+   "question": "Will the total in LA Lakers vs. UTA Jazz be more than 237.5?",
+   "slug": "tsc-nba-lal-uta-2026-10-25-237pt5",
+   "endDate": "2026-11-08T21:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-24T18:31:08Z",
+   "description": "This market will settle to Yes if LA Lakers and UTA Jazz combine for over 237.5 points in the LA Lakers vs UTA Jazz professional basketball game scheduled for October 25, 2026 at 5:00PM ET (as of the listing of the event's first instrument). Overtime is included if played. If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "totals",
+   "closed": false,
+   "createdAt": "2026-10-24T18:31:08Z",
+   "updatedAt": "2026-10-25T15:45:27Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T21:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "basketball_team_full_game_total",
+   "line": 237.5,
+   "marketSides": [
+    {
+     "id": "3522632",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nba-lal-uta-2026-10-25-237pt5",
+     "createdAt": "2026-10-24T18:31:08Z",
+     "updatedAt": "2026-10-24T18:31:08Z",
+     "description": "Over",
+     "price": "0.5100",
+     "marketId": 1761582,
+     "long": true,
+     "quote": {
+      "value": "0.5100",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3522633",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nba-lal-uta-2026-10-25-237pt5",
+     "createdAt": "2026-10-24T18:31:08Z",
+     "updatedAt": "2026-10-24T18:31:08Z",
+     "description": "Under",
+     "price": "0.5",
+     "marketId": 1761582,
+     "long": false,
+     "quote": {
+      "value": "0.5",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Over\",\"Under\"]",
+   "outcomePrices": "[\"0.5100\",\"0.5\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_TOTAL",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "bestBidQuote": {
+    "value": "0.5000",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.5100",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-24T18:31:08Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "nba_future_champ": {
+   "id": "125524",
+   "question": "2027 NBA Champion",
+   "slug": "tec-nba-champ-2027-06-18-w-tor",
+   "endDate": "2027-07-03T03:00:00Z",
+   "category": "sports",
+   "startDate": "2026-06-22T22:47:30Z",
+   "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Toronto-Raptors_L@320x320.png",
+   "description": "This market will settle to Yes if the Toronto Raptors win the 2027 NBA Finals. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-06-22T22:47:30Z",
+   "updatedAt": "2026-10-25T14:45:52Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2027-04-21T00:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "250686",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tec-nba-champ-2027-06-18-w-tor",
+     "createdAt": "2026-06-22T22:47:30Z",
+     "updatedAt": "2026-06-22T22:47:30Z",
+     "description": "Yes",
+     "price": "0.0400",
+     "marketId": 125524,
+     "long": true,
+     "teamId": 34,
+     "team": {
+      "id": 34,
+      "name": "Raptors",
+      "abbreviation": "tor",
+      "league": "nba",
+      "record": "2-0",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/NBA+Team+Logos/TOR.png",
+      "alias": "Raptors",
+      "safeName": "Toronto",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Toronto-Raptors_R@320x320.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Toronto-Raptors_L@320x320.png",
+      "colorPrimary": "#dc201e",
+      "providerId": 10,
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Toronto-Raptors_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Toronto-Raptors_R@320x320.png",
+      "displayAbbreviation": "TOR",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "10"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "583ecda6-fb46-11e1-82cb-f4ce4684ea4c"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "417F4FFF4625"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Toronto-Raptors_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Toronto-Raptors_R@320x320.png",
+      "color": {
+       "light": "#dc201e",
+       "dark": "#dc201e"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.0400",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "250687",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tec-nba-champ-2027-06-18-w-tor",
+     "createdAt": "2026-06-22T22:47:30Z",
+     "updatedAt": "2026-06-22T22:47:30Z",
+     "description": "No",
+     "price": "0.97",
+     "marketId": 125524,
+     "long": false,
+     "teamId": 34,
+     "team": {
+      "id": 34,
+      "name": "Raptors",
+      "abbreviation": "tor",
+      "league": "nba",
+      "record": "2-0",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/NBA+Team+Logos/TOR.png",
+      "alias": "Raptors",
+      "safeName": "Toronto",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Toronto-Raptors_R@320x320.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Toronto-Raptors_L@320x320.png",
+      "colorPrimary": "#dc201e",
+      "providerId": 10,
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Toronto-Raptors_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Toronto-Raptors_R@320x320.png",
+      "displayAbbreviation": "TOR",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "10"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "583ecda6-fb46-11e1-82cb-f4ce4684ea4c"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "417F4FFF4625"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Toronto-Raptors_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Toronto-Raptors_R@320x320.png",
+      "color": {
+       "light": "#dc201e",
+       "dark": "#dc201e"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.97",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0400\",\"0.97\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Toronto Raptors",
+   "subtitle": "tor",
+   "color": "#dc201e",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.0300",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0400",
+    "currency": "USD"
+   },
+   "titleShort": "Toronto Raptors",
+   "ep3SyncedAt": "2026-10-22T12:04:03Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false,
+   "politics": null
+  },
+  "nhl_moneyline": {
+   "id": "1640835",
+   "question": "Who will win in the upcoming hockey event FLA Panthers vs CHI Blackhawks scheduled for October 25, 2026 at 7:00 PM UTC?",
+   "slug": "aec-nhl-fla-chi-2026-10-25",
+   "endDate": "2026-11-09T00:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-21T04:00:27Z",
+   "description": "This market will settle to the winner of the FLA Panthers vs CHI Blackhawks NHL game scheduled for October 25, 2026 at 3:00PM ET (as of the listing of the event's first instrument). Overtime and any shootout are included if played. If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from NHL.",
+   "active": true,
+   "marketType": "moneyline",
+   "closed": false,
+   "createdAt": "2026-10-21T04:00:42Z",
+   "updatedAt": "2026-10-25T15:43:46Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T19:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "hockey_team_full_game_winner",
+   "marketSides": [
+    {
+     "id": "3281144",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aec-nhl-fla-chi-2026-10-25",
+     "createdAt": "2026-10-21T04:00:42Z",
+     "updatedAt": "2026-10-21T04:00:42Z",
+     "description": "Panthers",
+     "price": "0.6300",
+     "marketId": 1640835,
+     "long": true,
+     "teamId": 1491,
+     "team": {
+      "id": 1491,
+      "name": "Panthers",
+      "abbreviation": "fla",
+      "league": "nhl",
+      "record": "40-38-4",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_dark.png",
+      "alias": "Panthers",
+      "safeName": "Florida Panthers",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_dark.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_dark.png",
+      "colorPrimary": "#bc9562",
+      "providerId": 8,
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_light.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_light.png",
+      "displayAbbreviation": "FLA",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "8"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "4418464d-0f24-11e2-8525-18a905767e44"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "7EF1D5EF169A"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_dark.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_dark.png",
+      "color": {
+       "light": "#bc9562",
+       "dark": "#bc9562"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.6300",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3281145",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aec-nhl-fla-chi-2026-10-25",
+     "createdAt": "2026-10-21T04:00:42Z",
+     "updatedAt": "2026-10-21T04:00:42Z",
+     "description": "Blackhawks",
+     "price": "0.38",
+     "marketId": 1640835,
+     "long": false,
+     "teamId": 1500,
+     "team": {
+      "id": 1500,
+      "name": "Blackhawks",
+      "abbreviation": "chi",
+      "league": "nhl",
+      "record": "29-39-14",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_dark.png",
+      "alias": "Blackhawks",
+      "safeName": "Chicago Blackhawks",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_dark.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_dark.png",
+      "colorPrimary": "#d3020e",
+      "providerId": 17,
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_light.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_light.png",
+      "displayAbbreviation": "CHI",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "17"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "4416272f-0f24-11e2-8525-18a905767e44"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "61C572E0C890"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_dark.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_dark.png",
+      "color": {
+       "light": "#d3020e",
+       "dark": "#d3020e"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.38",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Panthers\",\"Blackhawks\"]",
+   "outcomePrices": "[\"0.6300\",\"0.38\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_MONEYLINE",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.6200",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.6300",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-22T11:51:35Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "nhl_spread": {
+   "id": "1640837",
+   "question": "Will the FLA Panthers cover -3.5 vs the CHI Blackhawks in FLA vs CHI?",
+   "slug": "asc-nhl-fla-chi-2026-10-25-neg-3pt5",
+   "endDate": "2026-11-09T00:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-21T04:00:28Z",
+   "description": "This market will settle to Yes if Panthers covers a -3.5 goal spread in the Panthers vs Blackhawks NHL game scheduled for October 25, 2026 at 3:00PM ET (as of the listing of the event's first instrument). Overtime is included if played. If a shootout determines the winner, the shootout will count as one goal for the winning team. If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from NHL.",
+   "active": true,
+   "marketType": "spreads",
+   "closed": false,
+   "createdAt": "2026-10-21T04:00:42Z",
+   "updatedAt": "2026-10-25T15:12:56Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T19:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "hockey_team_full_game_spread",
+   "line": -3.5,
+   "marketSides": [
+    {
+     "id": "3281148",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-nhl-fla-chi-2026-10-25-neg-3pt5",
+     "createdAt": "2026-10-21T04:00:42Z",
+     "updatedAt": "2026-10-21T04:00:42Z",
+     "description": "-3.50",
+     "price": "0.1300",
+     "marketId": 1640837,
+     "long": true,
+     "teamId": 1491,
+     "team": {
+      "id": 1491,
+      "name": "Panthers",
+      "abbreviation": "fla",
+      "league": "nhl",
+      "record": "40-38-4",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_dark.png",
+      "alias": "Panthers",
+      "safeName": "Florida Panthers",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_dark.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_dark.png",
+      "colorPrimary": "#bc9562",
+      "providerId": 8,
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_light.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_light.png",
+      "displayAbbreviation": "FLA",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "8"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "4418464d-0f24-11e2-8525-18a905767e44"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "7EF1D5EF169A"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_dark.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/FLA_dark.png",
+      "color": {
+       "light": "#bc9562",
+       "dark": "#bc9562"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.1300",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3281149",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-nhl-fla-chi-2026-10-25-neg-3pt5",
+     "createdAt": "2026-10-21T04:00:42Z",
+     "updatedAt": "2026-10-21T04:00:42Z",
+     "description": "+3.50",
+     "price": "0.88",
+     "marketId": 1640837,
+     "long": false,
+     "teamId": 1500,
+     "team": {
+      "id": 1500,
+      "name": "Blackhawks",
+      "abbreviation": "chi",
+      "league": "nhl",
+      "record": "29-39-14",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_dark.png",
+      "alias": "Blackhawks",
+      "safeName": "Chicago Blackhawks",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_dark.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_dark.png",
+      "colorPrimary": "#d3020e",
+      "providerId": 17,
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_light.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_light.png",
+      "displayAbbreviation": "CHI",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "17"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "4416272f-0f24-11e2-8525-18a905767e44"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "61C572E0C890"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_dark.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/CHI_dark.png",
+      "color": {
+       "light": "#d3020e",
+       "dark": "#d3020e"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.88",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"-3.50\",\"+3.50\"]",
+   "outcomePrices": "[\"0.1300\",\"0.88\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_SPREAD",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "goals",
+   "bestBidQuote": {
+    "value": "0.1200",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.1300",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-22T11:59:56Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "nhl_total": {
+   "id": "1640848",
+   "question": "Will the total in FLA vs CHI be more than 2.5?",
+   "slug": "tsc-nhl-fla-chi-2026-10-25-2pt5",
+   "endDate": "2026-11-09T00:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-21T04:00:35Z",
+   "description": "This market will settle to Yes if FLA Panthers and CHI Blackhawks combine for over 2.5 goals in the FLA Panthers vs CHI Blackhawks NHL game scheduled for October 25, 2026 at 3:00PM ET (as of the listing of the event's first instrument). Overtime is included if played. If a shootout determines the winner, the shootout will count as one goal for the winning team. If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from NHL.",
+   "active": true,
+   "marketType": "totals",
+   "closed": false,
+   "createdAt": "2026-10-21T04:00:45Z",
+   "updatedAt": "2026-10-22T11:59:56Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T19:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "hockey_team_full_game_total",
+   "line": 2.5,
+   "marketSides": [
+    {
+     "id": "3281170",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nhl-fla-chi-2026-10-25-2pt5",
+     "createdAt": "2026-10-21T04:00:45Z",
+     "updatedAt": "2026-10-21T04:00:45Z",
+     "description": "Over",
+     "price": "0.9800",
+     "marketId": 1640848,
+     "long": true,
+     "quote": {
+      "value": "0.9800",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3281171",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nhl-fla-chi-2026-10-25-2pt5",
+     "createdAt": "2026-10-21T04:00:45Z",
+     "updatedAt": "2026-10-21T04:00:45Z",
+     "description": "Under",
+     "price": "0.03",
+     "marketId": 1640848,
+     "long": false,
+     "quote": {
+      "value": "0.03",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Over\",\"Under\"]",
+   "outcomePrices": "[\"0.9800\",\"0.03\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_TOTAL",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "goals",
+   "bestBidQuote": {
+    "value": "0.9700",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.9800",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-22T11:59:56Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "nhl_future_cup": {
+   "id": "125615",
+   "question": "NHL Eastern Conference Champion",
+   "slug": "tec-nhl-eastconf-2027-05-19-w-was",
+   "endDate": "2027-06-13T03:00:00Z",
+   "category": "sports",
+   "startDate": "2026-06-22T22:50:18Z",
+   "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NHL/variant/WAS_light.png",
+   "description": "This market will settle to Yes if the Washington Capitals win the 2027 NHL Eastern Conference Finals. Outcome sourced from the NHL.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-06-22T22:50:18Z",
+   "updatedAt": "2026-10-25T14:45:53Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2027-04-19T00:20:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "250868",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tec-nhl-eastconf-2027-05-19-w-was",
+     "createdAt": "2026-06-22T22:50:18Z",
+     "updatedAt": "2026-06-22T22:50:18Z",
+     "description": "Yes",
+     "price": "0.0900",
+     "marketId": 125615,
+     "long": true,
+     "quote": {
+      "value": "0.0900",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "250869",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tec-nhl-eastconf-2027-05-19-w-was",
+     "createdAt": "2026-06-22T22:50:18Z",
+     "updatedAt": "2026-06-22T22:50:18Z",
+     "description": "No",
+     "price": "0.92",
+     "marketId": 125615,
+     "long": false,
+     "quote": {
+      "value": "0.92",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"No\",\"Yes\"]",
+   "outcomePrices": "[\"0.0900\",\"0.92\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Washington Capitals",
+   "subtitle": "was",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.0800",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0900",
+    "currency": "USD"
+   },
+   "titleShort": "Washington Capitals",
+   "ep3SyncedAt": "2026-10-22T12:04:03Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false,
+   "politics": null
+  },
+  "cfb_moneyline": {
+   "id": "1438254",
+   "question": "Who will win in the upcoming football event Delaware vs Western Kentucky scheduled for October 27, 2026 at 11:00 PM UTC?",
+   "slug": "aec-cfb-del-wkent-2026-10-27",
+   "endDate": "2026-11-11T04:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-14T06:30:07Z",
+   "description": "This market will settle to the winner of the Delaware vs Western Kentucky college football game scheduled for October 27, 2026 at 7:00PM ET (as of the listing of the event's first instrument). Overtime is included if played. If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "moneyline",
+   "closed": false,
+   "createdAt": "2026-10-14T06:30:07Z",
+   "updatedAt": "2026-10-25T15:43:43Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.005,
+   "gameStartTime": "2026-10-27T23:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_team_full_game_winner",
+   "marketSides": [
+    {
+     "id": "2875986",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aec-cfb-del-wkent-2026-10-27",
+     "createdAt": "2026-10-14T06:30:07Z",
+     "updatedAt": "2026-10-14T06:30:07Z",
+     "description": "Fightin' Blue Hens",
+     "price": "0.5550",
+     "marketId": 1438254,
+     "long": true,
+     "teamId": 1156,
+     "team": {
+      "id": 1156,
+      "name": "Delaware",
+      "abbreviation": "del",
+      "league": "cfb",
+      "record": "3-4",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/team_logos/football/cfb/_del_50000133.png",
+      "alias": "Fightin' Blue Hens",
+      "safeName": "Delaware",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/ncaa/Polymarket_Delaware+Blue+Hens_R%40160x160.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/ncaa/Polymarket_Delaware+Blue+Hens_L%40160x160.png",
+      "colorPrimary": "#00539F",
+      "providerId": 133,
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Delaware-Blue-Hens_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Delaware-Blue-Hens_R@320x320.png",
+      "displayAbbreviation": "DEL",
+      "ranking": "0",
+      "conference": "Conference USA",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "133"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "a9ea6143-d1c9-414d-81ff-7c57a10baf1f"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Delaware-Blue-Hens_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Delaware-Blue-Hens_R@320x320.png",
+      "color": {
+       "light": "#00539F",
+       "dark": "#00539F"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.5550",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "2875987",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aec-cfb-del-wkent-2026-10-27",
+     "createdAt": "2026-10-14T06:30:07Z",
+     "updatedAt": "2026-10-14T06:30:07Z",
+     "description": "Hilltoppers",
+     "price": "0.46",
+     "marketId": 1438254,
+     "long": false,
+     "teamId": 1167,
+     "team": {
+      "id": 1167,
+      "name": "Western Kentucky",
+      "abbreviation": "wkent",
+      "league": "cfb",
+      "record": "3-4",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/team_logos/football/cfb/_wkent_50000144.png",
+      "alias": "Hilltoppers",
+      "safeName": "Western Kentucky",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/ncaa/Polymarket_Western+Kentucky+Hilltoppers_R%40160x160%40160x160.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/ncaa/Polymarket_Western+Kentucky+Hilltoppers_L%40160x160%40160x160.png",
+      "colorPrimary": "#C8102E",
+      "providerId": 144,
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Western-Kentucky-Hilltoppers_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Western-Kentucky-Hilltoppers_R@320x320.png",
+      "displayAbbreviation": "WKU",
+      "ranking": "0",
+      "conference": "Conference USA",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "144"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "e65ef52d-6a34-426e-816e-040258d2f33b"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Western-Kentucky-Hilltoppers_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Western-Kentucky-Hilltoppers_R@320x320.png",
+      "color": {
+       "light": "#C8102E",
+       "dark": "#C8102E"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.46",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Fightin' Blue Hens\",\"Hilltoppers\"]",
+   "outcomePrices": "[\"0.5550\",\"0.46\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_MONEYLINE",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.5400",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.5550",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-22T11:51:13Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "cfb_total": {
+   "id": "1655023",
+   "question": "Will the total in Florida vs. Georgia be more than 25.5?",
+   "slug": "tsc-cfb-fl-ga-2026-10-31-total-25pt5",
+   "endDate": "2026-11-15T00:30:00Z",
+   "category": "sports",
+   "startDate": "2026-10-21T17:31:54Z",
+   "description": "This market will settle to Yes if Florida and Georgia combine for over 25.5 points in the Florida vs Georgia college football game scheduled for October 31, 2026 at 3:30PM ET (as of the listing of the event's first instrument). Overtime is included if played. If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "totals",
+   "closed": false,
+   "createdAt": "2026-10-21T17:31:54Z",
+   "updatedAt": "2026-10-22T11:59:42Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-31T19:30:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_team_full_game_total",
+   "line": 25.5,
+   "marketSides": [
+    {
+     "id": "3309520",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-cfb-fl-ga-2026-10-31-total-25pt5",
+     "createdAt": "2026-10-21T17:31:54Z",
+     "updatedAt": "2026-10-21T17:31:54Z",
+     "description": "Over",
+     "price": "0.9900",
+     "marketId": 1655023,
+     "long": true,
+     "quote": {
+      "value": "0.9900",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3309521",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-cfb-fl-ga-2026-10-31-total-25pt5",
+     "createdAt": "2026-10-21T17:31:54Z",
+     "updatedAt": "2026-10-21T17:31:54Z",
+     "description": "Under",
+     "price": "0.43",
+     "marketId": 1655023,
+     "long": false,
+     "quote": {
+      "value": "0.43",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Over\",\"Under\"]",
+   "outcomePrices": "[\"0.9900\",\"0.43\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_TOTAL",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "bestBidQuote": {
+    "value": "0.5700",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.9900",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-22T11:59:42Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "cfb_future_champ": {
+   "id": "129231",
+   "question": "College Football National Championship Winner 2027",
+   "slug": "tec-cfb-champ-2027-01-25-w-utah",
+   "endDate": "2027-02-09T04:00:00Z",
+   "category": "sports",
+   "startDate": "2026-06-23T15:52:32Z",
+   "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Utah-Utes_L@320x320.png",
+   "description": "This market will settle to Yes if Utah wins the College Football Playoff National Championship scheduled for January 25, 2027. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-06-23T15:52:32Z",
+   "updatedAt": "2026-10-25T10:28:01Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-08-28T16:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "258100",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tec-cfb-champ-2027-01-25-w-utah",
+     "createdAt": "2026-06-23T15:52:32Z",
+     "updatedAt": "2026-06-23T15:52:32Z",
+     "description": "Yes",
+     "price": "0.0300",
+     "marketId": 129231,
+     "long": true,
+     "teamId": 1235,
+     "team": {
+      "id": 1235,
+      "name": "Utah",
+      "abbreviation": "utah",
+      "league": "cfb",
+      "record": "7-0",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/team_logos/football/cfb/_utah_50000248.png",
+      "alias": "Utes",
+      "safeName": "Utah",
+      "colorPrimary": "#CC0000",
+      "providerId": 248,
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Utah-Utes_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Utah-Utes_R@320x320.png",
+      "displayAbbreviation": "UTAH",
+      "ranking": "10",
+      "conference": "Big 12",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "248"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "28e1dbb0-1295-42ca-bda1-fddb122aed2b"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Utah-Utes_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Utah-Utes_R@320x320.png",
+      "color": {
+       "light": "#CC0000",
+       "dark": "#CC0000"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.0300",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "258101",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tec-cfb-champ-2027-01-25-w-utah",
+     "createdAt": "2026-06-23T15:52:32Z",
+     "updatedAt": "2026-06-23T15:52:32Z",
+     "description": "No",
+     "price": "0.98",
+     "marketId": 129231,
+     "long": false,
+     "teamId": 1235,
+     "team": {
+      "id": 1235,
+      "name": "Utah",
+      "abbreviation": "utah",
+      "league": "cfb",
+      "record": "7-0",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/team_logos/football/cfb/_utah_50000248.png",
+      "alias": "Utes",
+      "safeName": "Utah",
+      "colorPrimary": "#CC0000",
+      "providerId": 248,
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Utah-Utes_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Utah-Utes_R@320x320.png",
+      "displayAbbreviation": "UTAH",
+      "ranking": "10",
+      "conference": "Big 12",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "248"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "28e1dbb0-1295-42ca-bda1-fddb122aed2b"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Utah-Utes_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Utah-Utes_R@320x320.png",
+      "color": {
+       "light": "#CC0000",
+       "dark": "#CC0000"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.98",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0300\",\"0.98\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Utah",
+   "subtitle": "utah",
+   "color": "#CC0000",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.0200",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0300",
+    "currency": "USD"
+   },
+   "titleShort": "Utah",
+   "ep3SyncedAt": "2026-10-22T12:04:03Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false,
+   "politics": null
+  },
+  "ufc_moneyline": {
+   "id": "1537554",
+   "question": "Who will win in the upcoming mma event Renato Moicano vs Tom Nolan scheduled for November 1, 2026 at 2:00 AM UTC?",
+   "slug": "aec-ufc-renmoi-tomnol-2026-10-31",
+   "endDate": "2026-11-15T02:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-18T00:01:12Z",
+   "description": "This market will settle to the winner of the Renato Moicano vs Tom Nolan UFC fight scheduled for October 31 at 5:00PM ET. If the fight ends in a draw or is declared a no contest, the market will settle to $0.50. If the fight is cancelled before the opening bell, the market will settle to the last fair market price. If the fight is not held within two weeks of the originally scheduled date, the market will settle to the last fair market price. Outcome sourced from UFC.",
+   "active": true,
+   "marketType": "moneyline",
+   "closed": false,
+   "createdAt": "2026-10-18T00:01:12Z",
+   "updatedAt": "2026-10-25T14:58:47Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-11-01T03:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "ufc_fight_winner",
+   "marketSides": [
+    {
+     "id": "3074586",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aec-ufc-renmoi-tomnol-2026-10-31",
+     "createdAt": "2026-10-18T00:01:12Z",
+     "updatedAt": "2026-10-18T00:01:12Z",
+     "description": "Renato Moicano",
+     "price": "0.4700",
+     "marketId": 1537554,
+     "long": true,
+     "teamId": 2193,
+     "team": {
+      "id": 2193,
+      "name": "Renato Moicano",
+      "abbreviation": "renmoi",
+      "league": "ufc",
+      "record": "21-7-1",
+      "logo": "https://azuswufclivepubstorstd.blob.core.windows.net/public-files/3a45a39e-e435-4292-aa98-19d5dbe58145/MOICANO_RENATO_04-04.png",
+      "alias": "Renato Moicano",
+      "safeName": "Renato Moicano",
+      "colorPrimary": "#696977",
+      "ordering": "home",
+      "longIcon": "https://azuswufclivepubstorstd.blob.core.windows.net/public-files/3a45a39e-e435-4292-aa98-19d5dbe58145/MOICANO_RENATO_04-04.png",
+      "shortIcon": "https://azuswufclivepubstorstd.blob.core.windows.net/public-files/3a45a39e-e435-4292-aa98-19d5dbe58145/MOICANO_RENATO_04-04.png",
+      "displayAbbreviation": "Moicano",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_UFC",
+        "providerId": "2375"
+       }
+      ],
+      "longIconDark": "https://azuswufclivepubstorstd.blob.core.windows.net/public-files/3a45a39e-e435-4292-aa98-19d5dbe58145/MOICANO_RENATO_04-04.png",
+      "shortIconDark": "https://azuswufclivepubstorstd.blob.core.windows.net/public-files/3a45a39e-e435-4292-aa98-19d5dbe58145/MOICANO_RENATO_04-04.png",
+      "color": {
+       "light": "#696977",
+       "dark": "#696977"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_HEADSHOT"
+     },
+     "quote": {
+      "value": "0.4700",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3074587",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aec-ufc-renmoi-tomnol-2026-10-31",
+     "createdAt": "2026-10-18T00:01:12Z",
+     "updatedAt": "2026-10-18T00:01:12Z",
+     "description": "Tom Nolan",
+     "price": "0.54",
+     "marketId": 1537554,
+     "long": false,
+     "teamId": 5566,
+     "team": {
+      "id": 5566,
+      "name": "Tom Nolan",
+      "abbreviation": "tomnol",
+      "league": "ufc",
+      "record": "11-1-0",
+      "logo": "https://azuswufclivepubstorstd.blob.core.windows.net/public-files/71fb4aba-b1e9-4dac-845b-b5e423de4ba1/NOLAN_TOM_06-06.png",
+      "alias": "Tom Nolan",
+      "safeName": "Tom Nolan",
+      "colorPrimary": "#D20A09",
+      "ordering": "away",
+      "longIcon": "https://azuswufclivepubstorstd.blob.core.windows.net/public-files/71fb4aba-b1e9-4dac-845b-b5e423de4ba1/NOLAN_TOM_06-06.png",
+      "shortIcon": "https://azuswufclivepubstorstd.blob.core.windows.net/public-files/71fb4aba-b1e9-4dac-845b-b5e423de4ba1/NOLAN_TOM_06-06.png",
+      "displayAbbreviation": "Nolan",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_UFC",
+        "providerId": "4024"
+       }
+      ],
+      "longIconDark": "https://azuswufclivepubstorstd.blob.core.windows.net/public-files/71fb4aba-b1e9-4dac-845b-b5e423de4ba1/NOLAN_TOM_06-06.png",
+      "shortIconDark": "https://azuswufclivepubstorstd.blob.core.windows.net/public-files/71fb4aba-b1e9-4dac-845b-b5e423de4ba1/NOLAN_TOM_06-06.png",
+      "color": {
+       "light": "#D20A09",
+       "dark": "#D20A09"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_HEADSHOT"
+     },
+     "quote": {
+      "value": "0.54",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Renato Moicano\",\"Tom Nolan\"]",
+   "outcomePrices": "[\"0.4700\",\"0.54\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_MONEYLINE",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.4600",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.4700",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-24T00:00:18Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "epl_3way": {
+   "id": "1523069",
+   "question": "Will Hull City AFC win against Brentford FC in the Premier League match scheduled for Oct 25, 2026?",
+   "slug": "atc-epl-hul-bre-2026-10-25-hul",
+   "endDate": "2026-11-08T19:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-17T14:00:44Z",
+   "description": "This market will settle to the winner at the end of 90 minutes plus stoppage time in the Hull City AFC vs Brentford FC Premier League match scheduled for October 25, 2026 at 10:00AM ET (as of the listing of the event's first instrument). If the match is tied following 90 minutes plus stoppage time, the market will settle to Tie. If the match is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from Premier League.",
+   "active": true,
+   "marketType": "drawable_outcome",
+   "closed": false,
+   "createdAt": "2026-10-17T14:00:44Z",
+   "updatedAt": "2026-10-25T15:44:44Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T14:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "soccer_team_full_time_winner",
+   "marketSides": [
+    {
+     "id": "3045616",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "atc-epl-hul-bre-2026-10-25-hul",
+     "createdAt": "2026-10-17T14:00:44Z",
+     "updatedAt": "2026-10-17T14:00:44Z",
+     "description": "Yes",
+     "price": "0.0200",
+     "marketId": 1523069,
+     "long": true,
+     "teamId": 2706,
+     "team": {
+      "id": 2706,
+      "name": "Hull City AFC",
+      "abbreviation": "hul",
+      "league": "epl",
+      "record": "2-3-2",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/soccer/premier-league/hull-city-afc.png",
+      "alias": "The Tigers",
+      "safeName": "Hull City",
+      "colorPrimary": "#F18A01",
+      "providerId": 972,
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/soccer/premier-league/hull-city-afc.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/soccer/premier-league/hull-city-afc.png",
+      "displayAbbreviation": "HUL",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "972"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "sr:competitor:96"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/soccer/premier-league/hull-city-afc.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/soccer/premier-league/hull-city-afc.png",
+      "color": {
+       "light": "#F18A01",
+       "dark": "#F18A01"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.0200",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3045617",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "atc-epl-hul-bre-2026-10-25-hul",
+     "createdAt": "2026-10-17T14:00:44Z",
+     "updatedAt": "2026-10-17T14:00:44Z",
+     "description": "No",
+     "price": "0.99",
+     "marketId": 1523069,
+     "long": false,
+     "teamId": 2706,
+     "team": {
+      "id": 2706,
+      "name": "Hull City AFC",
+      "abbreviation": "hul",
+      "league": "epl",
+      "record": "2-3-2",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/soccer/premier-league/hull-city-afc.png",
+      "alias": "The Tigers",
+      "safeName": "Hull City",
+      "colorPrimary": "#F18A01",
+      "providerId": 972,
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/soccer/premier-league/hull-city-afc.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/soccer/premier-league/hull-city-afc.png",
+      "displayAbbreviation": "HUL",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "972"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "sr:competitor:96"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/soccer/premier-league/hull-city-afc.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/soccer/premier-league/hull-city-afc.png",
+      "color": {
+       "light": "#F18A01",
+       "dark": "#F18A01"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.99",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0200\",\"0.99\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_DRAWABLE_OUTCOME",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "sortOrder": 1,
+   "bestBidQuote": {
+    "value": "0.0100",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0200",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-22T12:02:07Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "ucl_3way": {
+   "id": "1761543",
+   "question": "Will FC Shakhtar Donetsk win against Sporting CP in the UEFA Champions League match scheduled for Nov 3, 2026?",
+   "slug": "atc-ucl-sha-spo-2026-11-03-sha",
+   "endDate": "2026-11-17T22:45:00Z",
+   "category": "sports",
+   "startDate": "2026-10-24T18:30:26Z",
+   "description": "This market will settle to the winner at the end of 90 minutes plus stoppage time in the FC Shakhtar Donetsk vs Sporting CP UEFA Champions League match scheduled for November 3, 2026 at 12:45PM ET (as of the listing of the event's first instrument). If the match is tied following 90 minutes plus stoppage time, the market will settle to Tie. If the match is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from UEFA.",
+   "active": true,
+   "marketType": "drawable_outcome",
+   "closed": false,
+   "createdAt": "2026-10-24T18:30:26Z",
+   "updatedAt": "2026-10-25T13:14:04Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-11-03T17:45:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "soccer_team_full_time_winner",
+   "marketSides": [
+    {
+     "id": "3522554",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "atc-ucl-sha-spo-2026-11-03-sha",
+     "createdAt": "2026-10-24T18:30:26Z",
+     "updatedAt": "2026-10-24T18:30:26Z",
+     "description": "Yes",
+     "price": "0.2700",
+     "marketId": 1761543,
+     "long": true,
+     "teamId": 30622,
+     "team": {
+      "id": 30622,
+      "name": "FC Shakhtar Donetsk",
+      "abbreviation": "sha",
+      "league": "ucl",
+      "record": "",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/uefa-champions-league/fc-shakhtar-donetsk.png",
+      "alias": "FC Shakhtar Donetsk",
+      "safeName": "FC Shakhtar Donetsk",
+      "colorPrimary": "#2E5CFF",
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/uefa-champions-league/fc-shakhtar-donetsk.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/uefa-champions-league/fc-shakhtar-donetsk.png",
+      "displayAbbreviation": "SHA",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "sr:competitor:3313"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/uefa-champions-league/fc-shakhtar-donetsk.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/uefa-champions-league/fc-shakhtar-donetsk.png",
+      "color": {
+       "light": "#2E5CFF",
+       "dark": "#2E5CFF"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.2700",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3522555",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "atc-ucl-sha-spo-2026-11-03-sha",
+     "createdAt": "2026-10-24T18:30:26Z",
+     "updatedAt": "2026-10-24T18:30:26Z",
+     "description": "No",
+     "price": "0.74",
+     "marketId": 1761543,
+     "long": false,
+     "teamId": 30622,
+     "team": {
+      "id": 30622,
+      "name": "FC Shakhtar Donetsk",
+      "abbreviation": "sha",
+      "league": "ucl",
+      "record": "",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/uefa-champions-league/fc-shakhtar-donetsk.png",
+      "alias": "FC Shakhtar Donetsk",
+      "safeName": "FC Shakhtar Donetsk",
+      "colorPrimary": "#2E5CFF",
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/uefa-champions-league/fc-shakhtar-donetsk.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/uefa-champions-league/fc-shakhtar-donetsk.png",
+      "displayAbbreviation": "SHA",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "sr:competitor:3313"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/uefa-champions-league/fc-shakhtar-donetsk.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/uefa-champions-league/fc-shakhtar-donetsk.png",
+      "color": {
+       "light": "#2E5CFF",
+       "dark": "#2E5CFF"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.74",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.2700\",\"0.74\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_DRAWABLE_OUTCOME",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "sortOrder": 1,
+   "bestBidQuote": {
+    "value": "0.2600",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.2700",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-24T18:30:26Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "epl_future_title": {
+   "id": "213925",
+   "question": "English Premier League Champion",
+   "slug": "tec-epl-title-2027-05-30-w-mnc",
+   "endDate": "2027-06-14T03:00:00Z",
+   "category": "sports",
+   "startDate": "2026-07-11T18:07:18Z",
+   "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/epl/Polymarket_manchester-city-real.png",
+   "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO",
+   "description": "This market will settle to Yes if Manchester City FC wins the 2026-2027 Premier League title. Outcome sourced from Premier League.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-07-11T18:07:18Z",
+   "updatedAt": "2026-10-25T15:45:12Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-08-21T19:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "427484",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tec-epl-title-2027-05-30-w-mnc",
+     "createdAt": "2026-07-11T18:07:18Z",
+     "updatedAt": "2026-07-11T18:07:18Z",
+     "description": "Yes",
+     "price": "0.1700",
+     "marketId": 213925,
+     "long": true,
+     "teamId": 2693,
+     "team": {
+      "id": 2693,
+      "name": "Manchester City FC",
+      "abbreviation": "mnc",
+      "league": "epl",
+      "record": "7-0-1",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/epl/Polymarket_manchester-city-real.png",
+      "alias": "City",
+      "safeName": "Manchester City",
+      "colorPrimary": "#98C5E9",
+      "providerId": 516,
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/epl/Polymarket_manchester-city-real.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/epl/Polymarket_manchester-city-real.png",
+      "displayAbbreviation": "MNC",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "516"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "sr:competitor:17"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/epl/Polymarket_manchester-city-real.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/epl/Polymarket_manchester-city-real.png",
+      "color": {
+       "light": "#98C5E9",
+       "dark": "#98C5E9"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.1700",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "427485",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tec-epl-title-2027-05-30-w-mnc",
+     "createdAt": "2026-07-11T18:07:18Z",
+     "updatedAt": "2026-07-11T18:07:18Z",
+     "description": "No",
+     "price": "0.84",
+     "marketId": 213925,
+     "long": false,
+     "teamId": 2693,
+     "team": {
+      "id": 2693,
+      "name": "Manchester City FC",
+      "abbreviation": "mnc",
+      "league": "epl",
+      "record": "7-0-1",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/epl/Polymarket_manchester-city-real.png",
+      "alias": "City",
+      "safeName": "Manchester City",
+      "colorPrimary": "#98C5E9",
+      "providerId": 516,
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/epl/Polymarket_manchester-city-real.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/epl/Polymarket_manchester-city-real.png",
+      "displayAbbreviation": "MNC",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "516"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "sr:competitor:17"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/epl/Polymarket_manchester-city-real.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/epl/Polymarket_manchester-city-real.png",
+      "color": {
+       "light": "#98C5E9",
+       "dark": "#98C5E9"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.84",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.1700\",\"0.84\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Manchester City",
+   "subtitle": "7-0-1",
+   "color": "#98C5E9",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.1600",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.1700",
+    "currency": "USD"
+   },
+   "titleShort": "Manchester City",
+   "ep3SyncedAt": "2026-10-22T12:04:02Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false,
+   "politics": null
+  },
+  "weather_nyc_high": {
+   "id": "1747905",
+   "question": "Highest temperature in NYC on October 25?",
+   "slug": "tc-temp-nychigh-2026-10-25-lt64f",
+   "endDate": "2026-10-26T09:00:00Z",
+   "category": "climate",
+   "startDate": "2026-10-24T09:45:10Z",
+   "description": "Will the highest temperature recorded at Central Park (KNYC) in New York City for 2026-10-25 as reported by the National Weather Service's Climatological Report (Daily) be less than or equal to 63F? Outcome verified from NWS Climatological Report.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-10-24T09:45:10Z",
+   "updatedAt": "2026-10-25T15:45:11Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T05:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "3495278",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tc-temp-nychigh-2026-10-25-lt64f",
+     "createdAt": "2026-10-24T09:45:10Z",
+     "updatedAt": "2026-10-24T09:45:10Z",
+     "description": "Yes",
+     "price": "0.0500",
+     "marketId": 1747905,
+     "long": true,
+     "quote": {
+      "value": "0.0500",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3495279",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tc-temp-nychigh-2026-10-25-lt64f",
+     "createdAt": "2026-10-24T09:45:10Z",
+     "updatedAt": "2026-10-24T09:45:10Z",
+     "description": "No",
+     "price": "0.96",
+     "marketId": 1747905,
+     "long": false,
+     "quote": {
+      "value": "0.96",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0500\",\"0.96\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "63 or below",
+   "feeCoefficient": 0.0695,
+   "sortOrder": 1,
+   "bestBidQuote": {
+    "value": "0.0400",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0500",
+    "currency": "USD"
+   },
+   "titleShort": "63 or below",
+   "ep3SyncedAt": "2026-10-24T09:45:10Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false,
+   "politics": null
+  },
+  "nba_player_prop": {
+   "id": "1777397",
+   "question": "Will Immanuel Quickley record at least 10 points in TOR Raptors vs. MIN Timberwolves?",
+   "slug": "astatc-nba-tor-min-2026-10-25-pts-immqui-gte10",
+   "endDate": "2026-11-08T23:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-25T02:40:25Z",
+   "image": "https://static.polymarket.us/images/teams/basketball/nba/tor/jerseys/5.png",
+   "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO",
+   "description": "This market will settle to Yes if Immanuel Quickley records 10 or more points in the TOR Raptors vs MIN Timberwolves professional basketball game scheduled for October 25, 2026 at 7:00PM ET (as of the listing of the event's first instrument). Overtime is included if played. The listed player must participate in the game by taking the court for any amount of playing time; otherwise, the market will settle to the last fair market price. The market will settle based on the official box score at the conclusion of the game. For purposes of this market, stat corrections enforced after settlement will not count. If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "props",
+   "closed": false,
+   "createdAt": "2026-10-25T02:40:25Z",
+   "updatedAt": "2026-10-25T03:46:23Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T23:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "basketball_player_points",
+   "line": 10,
+   "marketSides": [
+    {
+     "id": "3554262",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "astatc-nba-tor-min-2026-10-25-pts-immqui-gte10",
+     "createdAt": "2026-10-25T02:40:25Z",
+     "updatedAt": "2026-10-25T02:40:25Z",
+     "description": "Yes",
+     "price": "0.8000",
+     "marketId": 1777397,
+     "long": true,
+     "quote": {
+      "value": "0.8000",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3554263",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "astatc-nba-tor-min-2026-10-25-pts-immqui-gte10",
+     "createdAt": "2026-10-25T02:40:25Z",
+     "updatedAt": "2026-10-25T02:40:25Z",
+     "description": "No",
+     "price": "0.3",
+     "marketId": 1777397,
+     "long": false,
+     "quote": {
+      "value": "0.3",
+      "currency": "USD"
+     },
+     "tradable": false
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.8000\",\"0.3\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_PROP",
+   "hidden": false,
+   "tags": [],
+   "title": "Immanuel Quickley",
+   "color": "#dc201e",
+   "darkColor": "#D34154",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.7000",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.8000",
+    "currency": "USD"
+   },
+   "metadata": {
+    "playerAbbreviation": "immqui",
+    "playerId": 1060,
+    "playerName": "Immanuel Quickley",
+    "teamId": 34
+   },
+   "titleShort": "Immanuel Quickley",
+   "ep3SyncedAt": "2026-10-25T02:40:25Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "nba_team_total": {
+   "id": "1795322",
+   "question": "Will LA Lakers score more than 109.5 points in LA Lakers vs. UTA Jazz?",
+   "slug": "tsc-nba-lal-uta-2026-10-25-tt-lal-fg-109pt5",
+   "endDate": "2026-11-08T21:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-25T12:08:51Z",
+   "image": "https://static.polymarket.us/images/teams/basketball/nba/lal/logo-long.png",
+   "description": "This market will settle to Yes if LA Lakers scores over 109.5 points in the LA Lakers vs UTA Jazz professional basketball game scheduled for October 25, 2026 at 5:00PM ET (as of the listing of the event's first instrument). Overtime is included if played. If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "totals",
+   "closed": false,
+   "createdAt": "2026-10-25T12:08:51Z",
+   "updatedAt": "2026-10-25T12:30:00Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T21:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "basketball_team_total_points",
+   "line": 109.5,
+   "marketSides": [
+    {
+     "id": "3590110",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nba-lal-uta-2026-10-25-tt-lal-fg-109pt5",
+     "createdAt": "2026-10-25T12:08:51Z",
+     "updatedAt": "2026-10-25T12:08:51Z",
+     "description": "Over",
+     "price": "0.9900",
+     "marketId": 1795322,
+     "long": true,
+     "tradable": true
+    },
+    {
+     "id": "3590111",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nba-lal-uta-2026-10-25-tt-lal-fg-109pt5",
+     "createdAt": "2026-10-25T12:08:51Z",
+     "updatedAt": "2026-10-25T12:08:51Z",
+     "description": "Under",
+     "price": "0.6",
+     "marketId": 1795322,
+     "long": false,
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Over\",\"Under\"]",
+   "outcomePrices": "[\"0.9900\",\"0.6\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_TOTAL",
+   "hidden": false,
+   "tags": [],
+   "title": "LA Lakers total points",
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "metadata": {
+    "teamId": 24
+   },
+   "titleShort": "LA Lakers total points",
+   "ep3SyncedAt": "2026-10-25T12:08:51Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "nba_first_half_spread": {
+   "id": "1795218",
+   "question": "Will the LA Lakers cover -21.5 vs the UTA Jazz in the first half of LA Lakers vs. UTA Jazz?",
+   "slug": "asc-nba-lal-uta-2026-10-25-fh-neg-21pt5",
+   "endDate": "2026-11-08T21:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-25T12:07:09Z",
+   "description": "This market will settle to Yes if Lakers covers a -21.5 point spread in the first half of the Lakers vs Jazz professional basketball game scheduled for October 25, 2026 at 5:00PM ET (as of the listing of the event's first instrument). If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "spreads",
+   "closed": false,
+   "createdAt": "2026-10-25T12:07:09Z",
+   "updatedAt": "2026-10-25T12:28:11Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T21:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "basketball_team_first_half_spread",
+   "line": -21.5,
+   "marketSides": [
+    {
+     "id": "3589902",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-nba-lal-uta-2026-10-25-fh-neg-21pt5",
+     "createdAt": "2026-10-25T12:07:09Z",
+     "updatedAt": "2026-10-25T12:07:09Z",
+     "description": "-21.50",
+     "price": "0.0400",
+     "marketId": 1795218,
+     "long": true,
+     "teamId": 24,
+     "team": {
+      "id": 24,
+      "name": "Lakers",
+      "abbreviation": "lal",
+      "league": "nba",
+      "record": "2-0",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/NBA+Team+Logos/LAL.png",
+      "alias": "Lakers",
+      "safeName": "Los Angeles L",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Los-Angeles-Lakers_R@320x320.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Los-Angeles-Lakers_L@320x320.png",
+      "colorPrimary": "#862edc",
+      "providerId": 27,
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_R@320x320.png",
+      "displayAbbreviation": "LAL",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "27"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "583ecae2-fb46-11e1-82cb-f4ce4684ea4c"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "73AEB6743EC2"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_R@320x320.png",
+      "color": {
+       "light": "#862edc",
+       "dark": "#862edc"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.0400",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3589903",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-nba-lal-uta-2026-10-25-fh-neg-21pt5",
+     "createdAt": "2026-10-25T12:07:09Z",
+     "updatedAt": "2026-10-25T12:07:09Z",
+     "description": "+21.50",
+     "price": "0.99",
+     "marketId": 1795218,
+     "long": false,
+     "teamId": 35,
+     "team": {
+      "id": 35,
+      "name": "Jazz",
+      "abbreviation": "uta",
+      "league": "nba",
+      "record": "1-1",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/NBA+Team+Logos/UTA.png",
+      "alias": "Jazz",
+      "safeName": "Utah",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Utah-Jazz_R@320x320.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Utah-Jazz_L@320x320.png",
+      "colorPrimary": "#4f0190",
+      "providerId": 17,
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Utah-Jazz_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Utah-Jazz_R@320x320.png",
+      "displayAbbreviation": "UTA",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "17"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "583ece50-fb46-11e1-82cb-f4ce4684ea4c"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "7C902BB2E272"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Utah-Jazz_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Utah-Jazz_R@320x320.png",
+      "color": {
+       "light": "#4f0190",
+       "dark": "#4f0190"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.99",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"-21.50\",\"+21.50\"]",
+   "outcomePrices": "[\"0.0400\",\"0.99\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_SPREAD",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "bestBidQuote": {
+    "value": "0.0100",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0400",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-25T12:07:09Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "nba_future_bestrecord": {
+   "id": "270458",
+   "question": "NBA Best Regular Season Record",
+   "slug": "aachc-nba-2027-04-11-bestrecord-lal",
+   "endDate": "2027-04-26T03:00:00Z",
+   "category": "sports",
+   "startDate": "2026-07-21T20:48:34Z",
+   "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_L@320x320.png",
+   "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO",
+   "description": "This market will settle to Yes if the Los Angeles Lakers finish with the best overall regular season record in the 2026-27 NBA season, which is scheduled to end on April 11, 2027. If two or more teams tie for the best overall record, each tied team's market will settle at $1.00 divided by the number of teams tied. If the regular season is not completed as scheduled, the market will settle based on final records from the games played. Outcome sourced from the NBA.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-07-21T20:48:34Z",
+   "updatedAt": "2026-10-24T22:29:26Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-21T00:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "540480",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aachc-nba-2027-04-11-bestrecord-lal",
+     "createdAt": "2026-07-21T20:48:34Z",
+     "updatedAt": "2026-07-21T20:48:34Z",
+     "description": "Yes",
+     "price": "0.0200",
+     "marketId": 270458,
+     "long": true,
+     "teamId": 24,
+     "team": {
+      "id": 24,
+      "name": "Lakers",
+      "abbreviation": "lal",
+      "league": "nba",
+      "record": "2-0",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/NBA+Team+Logos/LAL.png",
+      "alias": "Lakers",
+      "safeName": "Los Angeles L",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Los-Angeles-Lakers_R@320x320.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Los-Angeles-Lakers_L@320x320.png",
+      "colorPrimary": "#862edc",
+      "providerId": 27,
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_R@320x320.png",
+      "displayAbbreviation": "LAL",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "27"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "583ecae2-fb46-11e1-82cb-f4ce4684ea4c"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "73AEB6743EC2"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_R@320x320.png",
+      "color": {
+       "light": "#862edc",
+       "dark": "#862edc"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.0200",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "540481",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "aachc-nba-2027-04-11-bestrecord-lal",
+     "createdAt": "2026-07-21T20:48:34Z",
+     "updatedAt": "2026-07-21T20:48:34Z",
+     "description": "No",
+     "price": "0.99",
+     "marketId": 270458,
+     "long": false,
+     "teamId": 24,
+     "team": {
+      "id": 24,
+      "name": "Lakers",
+      "abbreviation": "lal",
+      "league": "nba",
+      "record": "2-0",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/NBA+Team+Logos/LAL.png",
+      "alias": "Lakers",
+      "safeName": "Los Angeles L",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Los-Angeles-Lakers_R@320x320.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/nba/Polymarket_Los-Angeles-Lakers_L@320x320.png",
+      "colorPrimary": "#862edc",
+      "providerId": 27,
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_R@320x320.png",
+      "displayAbbreviation": "LAL",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "27"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "583ecae2-fb46-11e1-82cb-f4ce4684ea4c"
+       },
+       {
+        "provider": "PROVIDER_OPTICODDS",
+        "providerId": "73AEB6743EC2"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/NBA/Polymarket_NBA_Los-Angeles-Lakers_R@320x320.png",
+      "color": {
+       "light": "#862edc",
+       "dark": "#862edc"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "quote": {
+      "value": "0.99",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0200\",\"0.99\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Los Angeles L",
+   "subtitle": "2-0",
+   "color": "#862edc",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.0100",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.0200",
+    "currency": "USD"
+   },
+   "titleShort": "Los Angeles L",
+   "ep3SyncedAt": "2026-10-22T11:50:32Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false,
+   "politics": null
+  },
+  "nhl_first_period_total": {
+   "id": "1640885",
+   "question": "Will FLA vs CHI have more than 0.5 goals in the first period?",
+   "slug": "tsc-nhl-fla-chi-2026-10-25-p1-0pt5",
+   "endDate": "2026-11-09T00:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-21T04:00:55Z",
+   "description": "This market will settle to Yes if FLA Panthers and CHI Blackhawks combine for over 0.5 goals during the first period in the FLA Panthers vs CHI Blackhawks NHL game scheduled for October 25, 2026 at 3:00PM ET (as of the listing of the event's first instrument). If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from NHL.",
+   "active": true,
+   "marketType": "totals",
+   "closed": false,
+   "createdAt": "2026-10-21T04:00:56Z",
+   "updatedAt": "2026-10-25T13:45:05Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T19:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "hockey_team_first_period_total",
+   "line": 0.5,
+   "marketSides": [
+    {
+     "id": "3281244",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nhl-fla-chi-2026-10-25-p1-0pt5",
+     "createdAt": "2026-10-21T04:00:56Z",
+     "updatedAt": "2026-10-21T04:00:56Z",
+     "description": "Over",
+     "price": "0.8300",
+     "marketId": 1640885,
+     "long": true,
+     "quote": {
+      "value": "0.8300",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3281245",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tsc-nhl-fla-chi-2026-10-25-p1-0pt5",
+     "createdAt": "2026-10-21T04:00:56Z",
+     "updatedAt": "2026-10-21T04:00:56Z",
+     "description": "Under",
+     "price": "0.18",
+     "marketId": 1640885,
+     "long": false,
+     "quote": {
+      "value": "0.18",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Over\",\"Under\"]",
+   "outcomePrices": "[\"0.8300\",\"0.18\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_TOTAL",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "goals",
+   "bestBidQuote": {
+    "value": "0.8200",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.8300",
+    "currency": "USD"
+   },
+   "ep3SyncedAt": "2026-10-22T11:59:56Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "nhl_player_goals": {
+   "id": "1765324",
+   "question": "Will Brady Tkachuk record at least 1 goals in FLA vs CHI?",
+   "slug": "astatc-nhl-fla-chi-2026-10-25-goals-bratka-gte1",
+   "endDate": "2026-11-09T00:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-24T20:00:32Z",
+   "image": "https://static.polymarket.us/images/teams/hockey/nhl/fla/jerseys/8.png",
+   "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO",
+   "description": "This market will settle to Yes if Brady Tkachuk records 1 or more goals in the FLA Panthers vs CHI Blackhawks NHL game scheduled for October 25, 2026 at 3:00PM ET (as of the listing of the event's first instrument). Overtime is included if played. Goals scored in a shootout do not count for purposes of this market. If the listed player does not record any time on ice, the market will settle to the last fair market price. For purposes of this market, stat corrections enforced after settlement will not count. If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from NHL.",
+   "active": true,
+   "marketType": "props",
+   "closed": false,
+   "createdAt": "2026-10-24T20:00:32Z",
+   "updatedAt": "2026-10-25T06:44:10Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T19:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "hockey_player_goals",
+   "line": 1,
+   "marketSides": [
+    {
+     "id": "3530116",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "astatc-nhl-fla-chi-2026-10-25-goals-bratka-gte1",
+     "createdAt": "2026-10-24T20:00:32Z",
+     "updatedAt": "2026-10-24T20:00:32Z",
+     "description": "Yes",
+     "price": "0.3800",
+     "marketId": 1765324,
+     "long": true,
+     "quote": {
+      "value": "0.3800",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3530117",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "astatc-nhl-fla-chi-2026-10-25-goals-bratka-gte1",
+     "createdAt": "2026-10-24T20:00:32Z",
+     "updatedAt": "2026-10-24T20:00:32Z",
+     "description": "No",
+     "price": "0.63",
+     "marketId": 1765324,
+     "long": false,
+     "quote": {
+      "value": "0.63",
+      "currency": "USD"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.3800\",\"0.63\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_PROP",
+   "hidden": false,
+   "tags": [],
+   "title": "Brady Tkachuk",
+   "color": "#bc9562",
+   "darkColor": "#4675BB",
+   "feeCoefficient": 0.0695,
+   "bestBidQuote": {
+    "value": "0.3700",
+    "currency": "USD"
+   },
+   "bestAskQuote": {
+    "value": "0.3800",
+    "currency": "USD"
+   },
+   "metadata": {
+    "playerAbbreviation": "bratka",
+    "playerId": 2025,
+    "playerName": "Brady Tkachuk",
+    "teamId": 1491
+   },
+   "titleShort": "Brady Tkachuk",
+   "ep3SyncedAt": "2026-10-24T20:00:32Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "cfb_first_half_spread": {
+   "id": "1655097",
+   "question": "Will the Florida cover 2.5 vs the Georgia in Florida vs. Georgia?",
+   "slug": "asc-cfb-fl-ga-2026-10-31-1h-pos-2pt5",
+   "endDate": "2026-11-15T00:30:00Z",
+   "category": "sports",
+   "startDate": "2026-10-21T17:45:24Z",
+   "description": "This market will settle to Yes if Florida covers a +2.5 point spread in the first half of the Florida vs Georgia college football game scheduled for October 31, 2026 at 3:30PM ET (as of the listing of the event's first instrument). If the game is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from the relevant governing body.",
+   "active": true,
+   "marketType": "spreads",
+   "closed": false,
+   "createdAt": "2026-10-21T17:45:24Z",
+   "updatedAt": "2026-10-22T11:59:37Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-31T19:30:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "football_team_first_half_spread",
+   "line": 2.5,
+   "marketSides": [
+    {
+     "id": "3309668",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-cfb-fl-ga-2026-10-31-1h-pos-2pt5",
+     "createdAt": "2026-10-21T17:45:24Z",
+     "updatedAt": "2026-10-21T17:45:24Z",
+     "description": "+2.50",
+     "price": "0.9900",
+     "marketId": 1655097,
+     "long": true,
+     "teamId": 1255,
+     "team": {
+      "id": 1255,
+      "name": "Florida",
+      "abbreviation": "fl",
+      "league": "cfb",
+      "record": "5-2",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/team_logos/football/cfb/_fl_50000271.png",
+      "alias": "Gators",
+      "safeName": "Florida",
+      "colorPrimary": "#FA4616",
+      "providerId": 271,
+      "ordering": "away",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_University-of-Florida_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_University-of-Florida_R@320x320.png",
+      "displayAbbreviation": "FLA",
+      "ranking": "20",
+      "conference": "Southeastern",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "271"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "c765cbff-99d8-4c43-8f6b-e49577ca18fa"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_University-of-Florida_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_University-of-Florida_R@320x320.png",
+      "color": {
+       "light": "#FA4616",
+       "dark": "#FA4616"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3309669",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "asc-cfb-fl-ga-2026-10-31-1h-pos-2pt5",
+     "createdAt": "2026-10-21T17:45:24Z",
+     "updatedAt": "2026-10-21T17:45:24Z",
+     "description": "-2.50",
+     "price": "0.99",
+     "marketId": 1655097,
+     "long": false,
+     "teamId": 1256,
+     "team": {
+      "id": 1256,
+      "name": "Georgia",
+      "abbreviation": "ga",
+      "league": "cfb",
+      "record": "6-1",
+      "logo": "https://polymarket-upload.s3.us-east-2.amazonaws.com/team_logos/football/cfb/_ga_50000272.png",
+      "alias": "Bulldogs",
+      "safeName": "Georgia",
+      "homeIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/ncaa/Polymarket_Georgia+Bulldogs_R%40160x160.png",
+      "awayIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us/ncaa/Polymarket_Georgia+Bulldogs_L%40160x160.png",
+      "colorPrimary": "#BA0C2F",
+      "providerId": 272,
+      "ordering": "home",
+      "longIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Georgia-Bulldogs_L@320x320.png",
+      "shortIcon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Georgia-Bulldogs_R@320x320.png",
+      "displayAbbreviation": "UGA",
+      "ranking": "5",
+      "conference": "Southeastern",
+      "providerIds": [
+       {
+        "provider": "PROVIDER_SPORTSDATAIO",
+        "providerId": "272"
+       },
+       {
+        "provider": "PROVIDER_SPORTRADAR",
+        "providerId": "2eef738d-c637-4b12-b8df-4b79efcce71e"
+       }
+      ],
+      "longIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Georgia-Bulldogs_L@320x320.png",
+      "shortIconDark": "https://polymarket-upload.s3.us-east-2.amazonaws.com/us-logos/CFB/Polymarket_CFB_Georgia-Bulldogs_R@320x320.png",
+      "color": {
+       "light": "#BA0C2F",
+       "dark": "#BA0C2F"
+      },
+      "imageDisplayType": "IMAGE_DISPLAY_TYPE_LOGO"
+     },
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"+2.50\",\"-2.50\"]",
+   "outcomePrices": "[\"0.9900\",\"0.99\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_SPREAD",
+   "hidden": false,
+   "tags": [],
+   "feeCoefficient": 0.0695,
+   "spreadTotalSuffix": "points",
+   "ep3SyncedAt": "2026-10-22T11:59:37Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "epl_exact_score": {
+   "id": "1523821",
+   "question": "Will CRY vs NEW finish Draw 0-0?",
+   "slug": "atc-epl-cry-new-2026-10-25-exact-score-0-0",
+   "endDate": "2026-11-08T19:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-17T14:27:52Z",
+   "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/tie-icon.png",
+   "imageDisplayType": "IMAGE_DISPLAY_TYPE_ARTWORK",
+   "description": "This market will settle to Yes if the score is 0-0 (Crystal Palace FC 0, Newcastle United FC 0) at the end of 90 minutes plus stoppage time in the Crystal Palace FC vs Newcastle United FC Premier League match scheduled for October 25, 2026 at 10:00AM ET (as of the listing of the event's first instrument). If the match is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from Premier League.",
+   "active": true,
+   "marketType": "props",
+   "closed": false,
+   "createdAt": "2026-10-17T14:27:52Z",
+   "updatedAt": "2026-10-25T15:13:48Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T14:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "soccer_game_exact_score",
+   "marketSides": [
+    {
+     "id": "3047120",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "atc-epl-cry-new-2026-10-25-exact-score-0-0",
+     "createdAt": "2026-10-17T14:27:52Z",
+     "updatedAt": "2026-10-17T14:27:52Z",
+     "description": "Yes",
+     "price": "0.0100",
+     "marketId": 1523821,
+     "long": true,
+     "quote": {
+      "value": "0.0100",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3047121",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "atc-epl-cry-new-2026-10-25-exact-score-0-0",
+     "createdAt": "2026-10-17T14:27:52Z",
+     "updatedAt": "2026-10-17T14:27:52Z",
+     "description": "No",
+     "marketId": 1523821,
+     "long": false,
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0100\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_PROP",
+   "hidden": false,
+   "tags": [],
+   "title": "Draw 0-0",
+   "feeCoefficient": 0.0695,
+   "sortOrder": 1,
+   "bestAskQuote": {
+    "value": "0.0100",
+    "currency": "USD"
+   },
+   "titleShort": "Draw 0-0",
+   "ep3SyncedAt": "2026-10-22T12:02:06Z",
+   "minimumTradeQty": 0.01,
+   "rulesDisclaimer": "Resolves based on the final score at the end of regulation time (90 minutes plus stoppage time). Extra time and penalty shootouts do not count.",
+   "rulesDisclaimerPopup": false,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "epl_player_goals": {
+   "id": "1756847",
+   "question": "Will Harvey Barnes record at least 2 goals in CRY vs NEW?",
+   "slug": "astatc-epl-cry-new-2026-10-25-g-eplharvbar-gte2",
+   "endDate": "2026-11-08T19:00:00Z",
+   "category": "sports",
+   "startDate": "2026-10-24T14:35:55Z",
+   "image": "https://static.polymarket.us/images/teams/soccer/epl/new/jerseys/11.png",
+   "description": "This market will settle to Yes if Harvey Barnes scores 2 or more goals in the Crystal Palace FC vs Newcastle United FC Premier League match scheduled for October 25, 2026 at 10:00AM ET (as of the listing of the event's first instrument). Extra time is included if played. Penalty shootouts are not included if played. Own goals do not count. If the listed player does not start the match, the market will settle to the last fair market price. For purposes of this market, stat corrections enforced after settlement will not count. If the match is delayed, postponed, suspended or otherwise rescheduled to a date and time not within two days of the originally scheduled date and time, the market will settle to the last fair market price. Outcome sourced from Premier League.",
+   "active": true,
+   "marketType": "props",
+   "closed": false,
+   "createdAt": "2026-10-24T14:35:55Z",
+   "updatedAt": "2026-10-25T15:44:14Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T14:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "soccer_player_goals",
+   "line": 2,
+   "marketSides": [
+    {
+     "id": "3513162",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "astatc-epl-cry-new-2026-10-25-g-eplharvbar-gte2",
+     "createdAt": "2026-10-24T14:35:55Z",
+     "updatedAt": "2026-10-24T14:35:55Z",
+     "description": "Yes",
+     "price": "0.0100",
+     "marketId": 1756847,
+     "long": true,
+     "quote": {
+      "value": "0.0100",
+      "currency": "USD"
+     },
+     "tradable": true
+    },
+    {
+     "id": "3513163",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "astatc-epl-cry-new-2026-10-25-g-eplharvbar-gte2",
+     "createdAt": "2026-10-24T14:35:55Z",
+     "updatedAt": "2026-10-24T14:35:55Z",
+     "description": "No",
+     "marketId": 1756847,
+     "long": false,
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.0100\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_PROP",
+   "hidden": false,
+   "tags": [],
+   "title": "Harvey Barnes",
+   "color": "#274488",
+   "darkColor": "#616161",
+   "feeCoefficient": 0.0695,
+   "bestAskQuote": {
+    "value": "0.0100",
+    "currency": "USD"
+   },
+   "metadata": {
+    "playerAbbreviation": "eplharvbar",
+    "playerId": 7154,
+    "playerName": "Harvey Barnes",
+    "teamId": 2695
+   },
+   "titleShort": "Harvey Barnes",
+   "ep3SyncedAt": "2026-10-24T14:35:55Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": true,
+   "politics": null
+  },
+  "weather_monthly": {
+   "id": "1161419",
+   "question": "Will the temperature in San Jose (SJC Airport) drop below 40F in December 2026?",
+   "slug": "tc-temp-sjc-dec-lt40",
+   "endDate": "2027-01-15T04:00:00Z",
+   "category": "climate",
+   "startDate": "2026-10-01T22:06:49Z",
+   "description": "Will the temperature recorded at San Jose (SJC Airport) in San Jose, California be strictly less than 40 degrees Fahrenheit on any day in December 2026 as reported by the National Weather Service's Climatological Report (Daily)? Outcome verified from NWS Climatological Report.",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-10-01T22:06:49Z",
+   "updatedAt": "2026-10-22T12:03:34Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-01T21:18:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "2322320",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tc-temp-sjc-dec-lt40",
+     "createdAt": "2026-10-01T22:06:49Z",
+     "updatedAt": "2026-10-01T22:06:49Z",
+     "description": "Yes",
+     "price": "0.9900",
+     "marketId": 1161419,
+     "long": true,
+     "tradable": true
+    },
+    {
+     "id": "2322321",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "tc-temp-sjc-dec-lt40",
+     "createdAt": "2026-10-01T22:06:49Z",
+     "updatedAt": "2026-10-01T22:06:49Z",
+     "description": "No",
+     "marketId": 1161419,
+     "long": false,
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.9900\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "Below 40F",
+   "feeCoefficient": 0.0695,
+   "sortOrder": 100,
+   "titleShort": "Below 40F",
+   "ep3SyncedAt": "2026-10-22T12:03:34Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false,
+   "politics": null
+  },
+  "weather_rain": {
+   "id": "1749262",
+   "question": "Where will it rain on Oct 25?",
+   "slug": "rainc-rain-daily-2026-10-25-knyc",
+   "endDate": "2026-11-04T17:00:00Z",
+   "category": "climate",
+   "startDate": "2026-10-24T11:00:12Z",
+   "description": "This market will resolve to \"Yes\" if rain is reported at Central Park, New York (KNYC) on October 25, 2026. Otherwise, this market will resolve to \"No\".\n\nRain is reported if the present-weather group of any observation for KNYC on that date contains a rain code. No minimum amount or duration is required; a single observation reporting rain is sufficient. Both routine (METAR) and special (SPECI) observations count.\n\nThe present-weather group appears in the body of the observation, after the visibility and before the cloud groups and any RMK. A rain code is RA, alone or with an intensity qualifier (\u2212 light, + heavy), with the shower (SH), freezing (FZ), or thunderstorm (TS) descriptor, or reported in combination with another precipitation code. \u2212RA, RA, +RA, SHRA, \u2212SHRA, TSRA, FZRA and RASN all count; in RASN rain is falling mixed with snow and the observation counts. Precipitation beginning or ending remarks (e.g., RAB, RAE) and precipitation amounts in the remarks (RMK) do not count. This means that rain that starts and stops in between METAR hourly readings will not be considered qualifying rain if not included in the present-weather reading.\n\nDrizzle (DZ), snow (SN), snow grains (SG), ice pellets (PL), snow pellets or small hail (GS), hail (GR), ice crystals (IC), unknown precipitation (UP), mist (BR), fog (FG) and haze (HZ), and a thunderstorm reported without a precipitation code (TS) do not count. A rain code also does not count where it appears only with the vicinity qualifier (VC), as in VCSH, which reports showers near the station but not at it; only in the recent-weather group (RE), as in RERA, which reports rain since the previous observation rather than at the time of the observation; or only in a trend group (TEMPO, BECMG), which is a forecast rather than an observation.\n\nAn observation counts if its time stamp, converted to the station's local standard time falls on the observation date.\n\nThis market will resolve at the issuance of the first observation for the station on the day following the observation date or by 11:59 PM ET on the day following the observation date, whichever comes first. Resolution is determined from the observations the resolution source shows for the observation date.\n\nIn the event that no observation for the observation date has been issued by 11:59 PM ET on the day following the observation date, this market will resolve using the National Weather Service Daily Climate Report for KNYC for the observation date, and will resolve to \u201cYes\u201d if the WEATHER CONDITIONS section of that report lists RAIN, LIGHT RAIN, HEAVY RAIN, FREEZING RAIN or LT FREEZING RAIN. MIXED PRECIP counts only where one of those entries is also listed, and a precipitation amount or a trace (\u201cT\u201d) alone does not count. Where more than one Daily Climate Report is issued for the date, the last report issued by 12:00 PM EST on the following day governs, and a report stated to be valid as of a time earlier than the end of the day is not such a report. If neither source has published data for the observation date, resolution may be delayed by up to 7 days, and the first data published within that period governs; if no data is published by the end of that period, this market will resolve at last fair market prices.\n\nA correction is published as a new report with the same observation time as the original, marked COR, and replaces the report it corrects. The resolution source shows one report per observation time, so where a correction has been issued, the corrected report is the one that counts. Corrections to observations recorded within this market's timeframe will be considered until the first datapoint for the following date has been published, after which any alterations will not be considered.\n\nThe resolution source for this market will be the observations for KNYC published here: https://aviationweather.gov/api/data/metar?ids=KNYC&format=raw&date=2026-10-26T05:00:00Z&hours=30",
+   "active": true,
+   "marketType": "futures",
+   "closed": false,
+   "createdAt": "2026-10-24T11:00:19Z",
+   "updatedAt": "2026-10-24T11:25:18Z",
+   "archived": false,
+   "orderPriceMinTickSize": 0.01,
+   "gameStartTime": "2026-10-25T05:00:00Z",
+   "manualActivation": false,
+   "sportsMarketType": "futures",
+   "marketSides": [
+    {
+     "id": "3497992",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "rainc-rain-daily-2026-10-25-knyc",
+     "createdAt": "2026-10-24T11:00:19Z",
+     "updatedAt": "2026-10-24T11:00:19Z",
+     "description": "Yes",
+     "price": "0.9900",
+     "marketId": 1749262,
+     "long": true,
+     "tradable": true
+    },
+    {
+     "id": "3497993",
+     "marketSideType": "MARKET_SIDE_TYPE_INSTRUMENT",
+     "identifier": "rainc-rain-daily-2026-10-25-knyc",
+     "createdAt": "2026-10-24T11:00:19Z",
+     "updatedAt": "2026-10-24T11:00:19Z",
+     "description": "No",
+     "marketId": 1749262,
+     "long": false,
+     "tradable": true
+    }
+   ],
+   "outcomes": "[\"Yes\",\"No\"]",
+   "outcomePrices": "[\"0.9900\"]",
+   "ep3Status": "OPEN",
+   "status": "MARKET_STATUS_OPEN",
+   "assetPriceTerms": null,
+   "sportsMarketTypeV2": "SPORTS_MARKET_TYPE_FUTURE",
+   "hidden": false,
+   "tags": [],
+   "title": "New York",
+   "feeCoefficient": 0.0695,
+   "sortOrder": 1,
+   "titleShort": "New York",
+   "ep3SyncedAt": "2026-10-24T11:00:19Z",
+   "minimumTradeQty": 0.01,
+   "comboEnabled": false,
+   "politics": null
+  }
+ }
+}

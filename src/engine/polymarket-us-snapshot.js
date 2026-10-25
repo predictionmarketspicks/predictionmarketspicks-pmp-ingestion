@@ -11,8 +11,11 @@
 //
 //   1. KEEP  — keepUsMarket(): NFL full-game moneyline/spread/total, NFL
 //              futures/awards, politics minus brackets, culture, finance,
-//              technology, macro, crypto. Everything else is dropped.
-//   2. FETCH — NFL game markets every tick; NFL futures + non-sports hourly
+//              technology, macro, crypto; since 2026-10-25 also NBA/NHL/CFB
+//              full-game lines, UFC moneylines, NBA/NHL/CFB/EPL tec- futures,
+//              EPL/UCL 3-way results and the daily weather high/low ladders.
+//              Everything else (every player prop included) is dropped.
+//   2. FETCH — NFL game markets every tick; everything else hourly
 //              (the fetch itself is skipped between hours — server-side
 //              filters, see US_QUERIES).
 //   3. WRITE — change-only: a kept market is written when best_bid, best_ask
@@ -30,6 +33,12 @@
 import { fetchUsMarkets } from '../feeds/polymarket-us.js';
 import { insertPolymarketSnapshots, fetchLatestUsSnapshots } from '../delivery/supabase.js';
 import { recordTick, registerFeed, markFeedRequired, setFeedStatus } from '../observability/health.js';
+
+// Fetched once an hour (US_QUERIES in feeds/polymarket-us.js). The §5.8.6
+// league groups (NBA/NHL/CFB/UFC game lines, league futures, EPL/UCL 3-way,
+// daily weather) are discovery + listing counts for the site — hourly is
+// enough; the two-venue pages read prices live from the gateway per event.
+export const HOURLY_GROUPS = ['nfl_futures', 'non_sports', 'league_games', 'league_futures', 'soccer_3way', 'weather'];
 
 const INTERVAL_MS = Number(process.env.POLY_US_SNAPSHOT_INTERVAL_MS || 15 * 60 * 1000);
 
@@ -175,7 +184,7 @@ export async function runPolymarketUsSnapshotOnce({ now = Date.now() } = {}) {
     await seedOnce();
 
     const hourlyDue = now - state.lastHourlyFetchAt >= HOUR_MS - SLACK_MS;
-    const groups = hourlyDue ? ['nfl_games', 'nfl_futures', 'non_sports'] : ['nfl_games'];
+    const groups = hourlyDue ? ['nfl_games', ...HOURLY_GROUPS] : ['nfl_games'];
     const { entries, stats } = await fetchUsMarkets({ groups });
     const rows = entries.map((e) => e.row);
 

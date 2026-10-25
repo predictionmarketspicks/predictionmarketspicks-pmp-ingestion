@@ -114,6 +114,58 @@ const NFL_GAME_MARKET_TYPES = new Set(['moneyline', 'spreads', 'totals']);
 // Dropped: astatc- (season stat thresholds), ftsc-/fptc- (fantasy).
 const NFL_FUTURE_PREFIXES = new Set(['tec', 'aqc', 'atc']);
 
+// ── Other leagues the site's two-venue pages read (2026-10-25,
+// prediction-marketspicks/handoffs/POLYMARKET_US_COVERAGE_2026-10-25.md §5.8.6).
+// Only what those pages use, for discovery and the listing counts — player
+// props stay out (the pages read them live per event). League = the slug's
+// 2nd token; every family below was measured on the live gateway 2026-10-25
+// (fixtures: test/fixtures/polymarket-us-markets-2026-10-25.json).
+//
+//   aec- full-game moneyline   NBA, NHL, CFB, UFC
+//   asc- full-game spread      NBA, NHL, CFB
+//   tsc- full-game total       NBA, NHL, CFB
+//
+// Period lines (…-fh-, …-p1-, …-1h-, …-1q-) and team totals (…-tt-…) share
+// the prefixes and are dropped on sportsMarketType, exactly like the NFL.
+export const LEAGUE_GAME_SPORTS_MARKET_TYPES = {
+  nba: new Set(['basketball_team_full_game_winner', 'basketball_team_full_game_spread', 'basketball_team_full_game_total']),
+  nhl: new Set(['hockey_team_full_game_winner', 'hockey_team_full_game_spread', 'hockey_team_full_game_total']),
+  cfb: new Set(['football_team_full_game_winner', 'football_team_full_game_spread', 'football_team_full_game_total']),
+  ufc: new Set(['ufc_fight_winner']),
+};
+const GAME_PREFIX_FOR_MARKET_TYPE = { moneyline: 'aec', spreads: 'asc', totals: 'tsc' };
+//   tec- futures (champion, conference, division, awards)   NBA, NHL, CFB, EPL
+const LEAGUE_FUTURE_LEAGUES = new Set(['nba', 'nhl', 'cfb', 'epl']);
+//   atc- regular-time 3-way result (one yes/no market per outcome)  EPL, UCL
+//   (atc- also carries exact score / half winners — props, dropped.)
+const SOCCER_3WAY_LEAGUES = new Set(['epl', 'ucl']);
+// Weather: the daily high/low ladders (event `temp-<city>{high,low}-<date>`,
+// markets `tc-temp-nychigh-2026-10-25-gte64lt65f`). Not the monthly one-offs
+// (`tc-temp-sjc-dec-lt40`), the rain map (`rainc-`) or the hottest-year ranks.
+export const WEATHER_DAILY_RE = /^tc-temp-[a-z]+(high|low)-\d{4}-\d{2}-\d{2}-/;
+
+function classifyLeagueMarket(m, slug) {
+  const [prefix, league] = slug.split('-');
+  const gameTypes = LEAGUE_GAME_SPORTS_MARKET_TYPES[league];
+  const known = gameTypes || LEAGUE_FUTURE_LEAGUES.has(league) || SOCCER_3WAY_LEAGUES.has(league);
+  if (!known) return { keep: false, rule: 'sports_non_nfl' };
+  if (gameTypes && GAME_PREFIX_FOR_MARKET_TYPE[m.marketType] === prefix && gameTypes.has(m.sportsMarketType)) {
+    return { keep: true, kind: 'league_game' };
+  }
+  if (m.marketType === 'futures' && prefix === 'tec' && LEAGUE_FUTURE_LEAGUES.has(league)) {
+    return { keep: true, kind: 'league_future' };
+  }
+  if (
+    m.marketType === 'drawable_outcome' &&
+    prefix === 'atc' &&
+    m.sportsMarketType === 'soccer_team_full_time_winner' &&
+    SOCCER_3WAY_LEAGUES.has(league)
+  ) {
+    return { keep: true, kind: 'soccer_3way' };
+  }
+  return { keep: false, rule: 'league_period_prop_or_future' };
+}
+
 function hasNflTeamSide(m) {
   return (
     Array.isArray(m?.marketSides) &&
@@ -123,8 +175,8 @@ function hasNflTeamSide(m) {
 
 /**
  * Pure classifier. `{ keep: true, kind }` or `{ keep: false, rule }`.
- * kind ∈ nfl_game | nfl_future | politics | culture | finance | technology |
- * macro | crypto. `rule` names the drop rule (used for per-tick counters).
+ * kind ∈ nfl_game | nfl_future | league_game | league_future | soccer_3way |
+ * weather | politics | culture | finance | technology | macro | crypto. `rule` names the drop rule (used for per-tick counters).
  */
 export function classifyUsMarket(m) {
   if (!m || typeof m !== 'object') return { keep: false, rule: 'malformed' };
@@ -132,7 +184,7 @@ export function classifyUsMarket(m) {
   const category = m.category;
 
   if (category === 'sports') {
-    if (!NFL_SLUG_RE.test(slug)) return { keep: false, rule: 'sports_non_nfl' };
+    if (!NFL_SLUG_RE.test(slug)) return classifyLeagueMarket(m, slug);
     if (NFL_GAME_MARKET_TYPES.has(m.marketType)) {
       return NFL_GAME_SPORTS_MARKET_TYPES.has(m.sportsMarketType)
         ? { keep: true, kind: 'nfl_game' }
@@ -152,6 +204,7 @@ export function classifyUsMarket(m) {
       ? { keep: false, rule: 'politics_bracket' }
       : { keep: true, kind: 'politics' };
   }
+  if (category === 'climate' && WEATHER_DAILY_RE.test(slug)) return { keep: true, kind: 'weather' };
   if (KEEP_CATEGORIES.includes(category)) return { keep: true, kind: category };
   return { keep: false, rule: `category_${category ?? 'none'}` };
 }
@@ -382,6 +435,16 @@ export const US_QUERIES = {
   // (~7.6k / 16 pages).
   nfl_futures: 'tagIds=1&marketTypes=futures',
   non_sports: KEEP_CATEGORIES.map((c) => `categories=${c}`).join('&'),
+  // Hourly (§5.8.6, measured 2026-10-25). League tags from GET /v1/sports:
+  // nba 5, cfb 6, nhl 7, ufc 9, epl 17, ucl 18; tagIds= is repeatable.
+  //   league_games   ~11.1k fetched / 23 pages → ~4.1k kept (full game only)
+  //   league_futures ~4.3k fetched / 9 pages   → ~1.0k kept (tec- only)
+  //   soccer_3way    69 / 1 page
+  //   weather        119 / 1 page              → ~96 kept (daily high/low)
+  league_games: 'tagIds=5&tagIds=7&tagIds=6&tagIds=9&marketTypes=moneyline&marketTypes=spreads&marketTypes=totals',
+  league_futures: 'tagIds=5&tagIds=7&tagIds=6&tagIds=17&marketTypes=futures',
+  soccer_3way: 'tagIds=17&tagIds=18&marketTypes=drawable_outcome',
+  weather: 'categories=climate',
 };
 
 async function fetchPage(query, offset) {

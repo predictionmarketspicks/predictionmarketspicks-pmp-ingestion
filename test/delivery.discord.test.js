@@ -67,9 +67,15 @@ describe('buildCommodityEmbed', () => {
     expect(payload.embeds[0].title).toMatch(/^Bitcoin Edge/);
   });
 
-  it('embeds the Kalshi sign-up referral URL, not a per-market deep-link', () => {
+  it('title links the commodity tool page with discord UTMs, never the Kalshi referral (F8)', () => {
     const payload = buildCommodityEmbed(makeMeta('gold'), TOP_EDGE);
-    expect(payload.embeds[0].url).toBe(KALSHI_REFERRAL_URL);
+    expect(payload.embeds[0].url).toBe(
+      'https://predictionmarketspicks.com/tools/gold-edge?utm_source=discord&utm_medium=feed&utm_campaign=commodity',
+    );
+    expect(JSON.stringify(payload)).not.toContain(KALSHI_REFERRAL_URL);
+    expect(buildCommodityEmbed(makeMeta('copper'), TOP_EDGE).embeds[0].url).toMatch(
+      /\/commodity-markets\?utm_source=discord/,
+    );
   });
 
   it('does not call toLocaleString on odds (no commas in numbers)', () => {
@@ -83,13 +89,33 @@ describe('buildCommodityEmbed', () => {
     expect(payload.embeds[0].title).toMatch(/^Silver Edge/);
   });
 
-  it('shows the spot label from meta in the spot field name', () => {
-    const payload = buildCommodityEmbed(
-      makeMeta('gold', { spotLabel: 'Kalshi 15-min reference' }),
-      TOP_EDGE,
-    );
+  it('labels the spot field plain `Spot` — the internal spotLabel never prints (F4)', () => {
+    const label = 'Yahoo CL=F (contract-aware CLM26.NYM primary, CL=F continuous fallback)';
+    const payload = buildCommodityEmbed(makeMeta('oil', { spotLabel: label }), TOP_EDGE);
     const spotField = payload.embeds[0].fields.find((f) => f.name.includes('Spot'));
-    expect(spotField.name).toContain('Kalshi 15-min reference');
+    expect(spotField.name).toBe('Spot');
+    expect(JSON.stringify(payload)).not.toMatch(/Yahoo|CLM26|CL=F/);
+  });
+
+  it('labels the model field `Our model`, never `Options model` (F4)', () => {
+    const payload = buildCommodityEmbed(makeMeta('gold'), TOP_EDGE);
+    const names = payload.embeds[0].fields.map((f) => f.name);
+    expect(names).toContain('Our model');
+    expect(names).not.toContain('Options model');
+    expect(payload.embeds[0].fields.find((f) => f.name === 'Our model').value).toBe('45%');
+  });
+
+  it('publishes only derived values: description is model % vs market % + edge, never the raw rationale', () => {
+    const edge = {
+      ...TOP_EDGE,
+      rationale: 'Model implies 45% (caveat: thin options volume on contributing strikes — IV may be unreliable) rule:R12',
+    };
+    const payload = buildCommodityEmbed(makeMeta('gold'), edge);
+    const d = payload.embeds[0].description;
+    expect(d).toBe('Our model 45% vs market 31% that gold is above $35.99 at settle · YES underpriced by 14.2 pts');
+    const blob = JSON.stringify(payload);
+    expect(blob).not.toMatch(/\bIV\b|implied vol|options chain|bid|ask|NBBO|Databento|OPRA|Tradier|Massive|Yahoo|Pyth/i);
+    expect(blob).not.toContain('rule:R12');
   });
 
   it('prints the PUBLIC price, never the engine spot (vendor quote / licensed index)', () => {

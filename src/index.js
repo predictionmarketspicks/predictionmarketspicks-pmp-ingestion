@@ -43,6 +43,7 @@ import {
   recordPostedAlerts,
   recordFeedPerformance,
   fetchMintedPickForEvent,
+  fetchRecentMoverPosts,
 } from './delivery/supabase.js';
 import { postCommodityAlert, postMoversAlert, postBotLog } from './delivery/discord.js';
 import { publishCommodityEdgeAlert } from './delivery/alert-feed.js';
@@ -56,13 +57,19 @@ import {
 } from './delivery/alert-key.js';
 import { revalidateCommodityEdge } from './delivery/revalidate.js';
 import { findActiveRollover as findOilRollover } from './engine/wti-rollover.js';
-import { fetchKalshiCandidates } from './feeds/movers.js';
+import { fetchKalshiCandidates, fetchKalshiEventTitle } from './feeds/movers.js';
 import {
   applyFilters as applyMoverFilters,
-  selectTop as selectTopMovers,
+  collapseByEvent,
+  applyRepostRule,
+  selectMoverLines,
+  moverLineText,
+  moverPageUrl,
+  eventKeyOf,
   alertKey as moverAlertKey,
   moverTier,
 } from './engine/movers.js';
+import { nextEtSlot } from './lib/et-time.js';
 import {
   bootstrapMacro,
   stopMacro,
@@ -301,9 +308,13 @@ for (const config of enabledCommodities) {
 markFeedRequired('kalshi');
 registerFeed('movers_engine');
 
-// Phase 3 movers state. Cadence: every 4 hours, matches the discord-market-
-// movers Edge Function it replaces. Test bypass: GET /dev/movers?test=true.
-const MOVERS_INTERVAL_MS = Number(process.env.MOVERS_INTERVAL_MS || 4 * 3600 * 1000);
+// Movers cadence (DISCORD_CLEANUP_AUTOPILOT_2026-10-25 F3): twice a day at
+// 10:00 and 18:00 ET — was every 4h plus one run on every boot/deploy.
+// Override with MOVERS_ET_HOURS="10,18". Manual: GET /dev/movers?test=true.
+const MOVERS_ET_HOURS = String(process.env.MOVERS_ET_HOURS || '10,18')
+  .split(',')
+  .map((h) => Number(h.trim()))
+  .filter((h) => Number.isInteger(h) && h >= 0 && h <= 23);
 const moversState = {
   scans: 0,
   candidates: 0,
@@ -930,35 +941,40 @@ async function runMoversOnce({ isTest = false } = {}) {
     recordTick('movers_engine');
     const all = await fetchKalshiCandidates();
     const sportsRestricted = process.env.NEXT_PUBLIC_SPORTS_RESTRICTION === '1';
-    let filtered = applyMoverFilters(all, { sportsRestricted, isTest });
+    const filtered = applyMoverFilters(all, { sportsRestricted, isTest });
     moversState.candidates += filtered.length;
 
-    if (!isTest && filtered.length > 0) {
-      const keys = filtered.map(moverAlertKey);
-      const suppressed = await filterAlreadyPostedKeys(keys, { hoursWindow: 24 });
-      const before = filtered.length;
-      filtered = filtered.filter((c) => !suppressed.has(moverAlertKey(c)));
-      moversState.suppressed += before - filtered.length;
+    // One candidate per event, then the 24h repost rule (posted market must
+    // have moved another ≥5pp), then ≤4 sports + econ/politics/crypto, ≤8 lines.
+    let perEvent = collapseByEvent(filtered, all);
+    if (!isTest && perEvent.length > 0) {
+      const lastPosts = await fetchRecentMoverPosts({ hoursWindow: 24 });
+      const priceByTicker = new Map(all.map((c) => [c.ticker, c.yes_price]));
+      const before = perEvent.length;
+      perEvent = applyRepostRule(perEvent, lastPosts, priceByTicker);
+      moversState.suppressed += before - perEvent.length;
     }
-
-    const { gainers, losers } = selectTopMovers(filtered, { isTest });
-    const toPost = [...gainers, ...losers];
+    const toPost = selectMoverLines(perEvent);
 
     if (toPost.length === 0) {
       console.log(
-        `[movers] scanned=${all.length} candidates=${filtered.length} posted=0 test=${isTest}`,
+        `[movers] scanned=${all.length} candidates=${filtered.length} events=${perEvent.length} posted=0 test=${isTest}`,
       );
       return { scanned: all.length, candidates: filtered.length, posted: 0 };
     }
 
     if (!isTest && tag === 'delayed_test') {
-      console.log(
-        `[movers] would post ${toPost.length} (gated by writer_tag=${tag}) — gainers=${gainers.length} losers=${losers.length}`,
-      );
+      console.log(`[movers] would post ${toPost.length} line(s) (gated by writer_tag=${tag})`);
       return { scanned: all.length, candidates: filtered.length, posted: 0, gated: true };
     }
 
-    const sent = await postMoversAlert({ gainers, losers });
+    const lines = [];
+    for (const c of toPost) {
+      const eventTitle = await fetchKalshiEventTitle(eventKeyOf(c));
+      lines.push({ text: moverLineText(c, eventTitle), url: moverPageUrl(c) });
+    }
+
+    const sent = await postMoversAlert(lines);
     if (!sent) {
       console.warn('[movers] postMoversAlert returned false (no token?) — skipping dedup write');
       return { scanned: all.length, candidates: filtered.length, posted: 0 };
@@ -976,6 +992,8 @@ async function runMoversOnce({ isTest = false } = {}) {
           posted_at: now,
         })),
       );
+      // feed_performance is also the repost ledger: fetchRecentMoverPosts reads
+      // market_id + alert_price back to apply the ≥5pp rule.
       await recordFeedPerformance(
         toPost.map((c) => ({
           feed_type: 'market_movers',
@@ -990,15 +1008,13 @@ async function runMoversOnce({ isTest = false } = {}) {
       );
     }
 
-    console.log(
-      `[movers] posted ${toPost.length} (gainers=${gainers.length} losers=${losers.length}) scanned=${all.length}`,
-    );
+    console.log(`[movers] posted ${toPost.length} line(s) scanned=${all.length} events=${perEvent.length}`);
     return {
       scanned: all.length,
       candidates: filtered.length,
-      gainers: gainers.length,
-      losers: losers.length,
+      events: perEvent.length,
       posted: toPost.length,
+      lines: lines.map((l) => l.text),
     };
   } catch (err) {
     moversState.lastErrorAt = new Date().toISOString();
@@ -1010,6 +1026,9 @@ async function runMoversOnce({ isTest = false } = {}) {
 
 function scheduleMovers() {
   if (stopRequested) return;
+  const next = nextEtSlot(MOVERS_ET_HOURS.length ? MOVERS_ET_HOURS : [10, 18]);
+  const delay = Math.max(1000, next.getTime() - Date.now());
+  moversState.nextRunAt = next.toISOString();
   moversState.scanTimer = setTimeout(async () => {
     try {
       await runMoversOnce();
@@ -1017,7 +1036,7 @@ function scheduleMovers() {
       /* runMoversOnce already logged + reported */
     }
     scheduleMovers();
-  }, MOVERS_INTERVAL_MS);
+  }, delay);
 }
 
 // --- daily canary (F8) ---
@@ -1054,12 +1073,9 @@ function scheduleCanary() {
 }
 
 function bootstrapMovers() {
-  // Wait briefly so Kalshi WS + commodity engines have settled before the
-  // first REST burst. 30s also avoids racing the engine's first snapshot log.
-  setTimeout(() => {
-    runMoversOnce().catch(() => {});
-    scheduleMovers();
-  }, 30_000);
+  // No run on boot: a deploy or machine restart must not post to #market-movers.
+  // The first post is the next 10:00 / 18:00 ET slot.
+  scheduleMovers();
 }
 
 // --- HTTP server ---
@@ -1140,6 +1156,7 @@ const server = http.createServer((req, res) => {
       suppressed: moversState.suppressed,
       lastRunAt: moversState.lastRunAt,
       lastErrorAt: moversState.lastErrorAt,
+      nextRunAt: moversState.nextRunAt ?? null,
     };
     snap.engine.macro = getMacroState();
     snap.engine.polymarket_snapshot = getPolymarketSnapshotState();

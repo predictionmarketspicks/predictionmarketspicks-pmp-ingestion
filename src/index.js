@@ -15,6 +15,7 @@ import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts, WTI_FRONT_MON
 import { startBrtiSpot, stopBrtiSpot, BRTI_SOURCE_TAG } from './feeds/brti-spot.js';
 import { startCoinbaseWs } from './feeds/coinbase-ws.js';
 import { startKalshiBtc15m, getBook1sHealth } from './feeds/kalshi-btc15m.js';
+import { startPolymarketUsUpdown, getPolymarketUsUpdownHealth } from './feeds/polymarket-us-updown.js';
 import { startCfBenchmarks, stopCfBenchmarks, isCfArmed, cfHealth, CF_SOURCE_TAG } from './feeds/cfbenchmarks.js';
 // isOptionsMarketOpen still lives in massive.js (pure utility, no provider
 // coupling). Lifecycle goes through the options-provider abstraction so the
@@ -904,6 +905,9 @@ async function bootstrapAll() {
   // nothing prices off it. Neither is a required feed, so neither can 503 /health.
   startCoinbaseWs();
   startKalshiBtc15m();
+  // Polymarket US 5m/15m Up/Down book + the permanent 5m ledger (the site's 5-Minute Board).
+  // Not a required feed. POLY_US_UPDOWN_ENABLED=0 to switch off.
+  startPolymarketUsUpdown();
   for (const state of engines.values()) {
     bootstrapEngine(state).catch((err) => {
       console.error(`[${state.config.commodity}] bootstrap failed`, err);
@@ -1114,6 +1118,7 @@ const server = http.createServer((req, res) => {
     // counts rows actually INSERTED, not frames received — a healthy socket is not a
     // populated table. Aggregates only; no index value.
     snap.crypto15m = { book1s: getBook1sHealth() };
+    snap.polyUsUpdown = getPolymarketUsUpdownHealth();
     snap.engine = {
       env: ENGINE_ENV,
       // Which commit is actually serving. Cheap, and its absence turned a

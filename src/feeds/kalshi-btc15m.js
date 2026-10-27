@@ -39,6 +39,11 @@
 // ⛔ PUBLIC SPOT ONLY on these rows (coinbase-ws.js getPubSpot1s). No CF Benchmarks
 // value, no running average, ever — those stay where the shadow ticks keep them.
 //
+// R-AVG-LOCK (engine/btc15m-lock.js, 2026-10-27): at 50/40/30/20/10 s before each close the
+// sampler also asks the lock model for a decision row (btc15m_lock_obs — z and the locked
+// share only, never an index value), buffered and flushed with the book. Paper only; the
+// database grades it. Kill switch: BTC15M_LOCK_ENABLED=0.
+//
 // Kill switch: BTC15M_CAPTURE_ENABLED=0.
 
 import { monitorEventLoopDelay } from 'node:perf_hooks';
@@ -47,7 +52,8 @@ import WebSocket from 'ws';
 import { setFeedStatus, recordTick } from '../observability/health.js';
 import { authHeaders, KALSHI_WS_URL, KALSHI_WS_PATH } from './kalshi-auth.js';
 import { getPubSpot1s } from './coinbase-ws.js';
-import { insertFifteenMinBookRows, insertFifteenMinTrades, insertFifteenMinFirstTouch } from '../delivery/supabase.js';
+import { insertFifteenMinBookRows, insertFifteenMinTrades, insertFifteenMinFirstTouch, insertBtc15mLockObs } from '../delivery/supabase.js';
+import { lockObservation, forgetWindow as forgetLockWindow, lockHealth } from '../engine/btc15m-lock.js';
 import { postBotLog } from '../delivery/discord.js';
 
 export const SERIES = 'KXBTC15M';
@@ -297,6 +303,7 @@ let bookBuf = [];
 let tradeBuf = []; // raw prints, aggregated at flush
 let tradeRetry = []; // aggregated rows from a failed flush
 let touchBuf = []; // first-touch rows for windows that have rolled off
+let lockBuf = []; // R-AVG-LOCK decision rows (≤ 5 per window)
 /** market_ticker → { event, fromOpen, ft } for the live window's first-touch tracking. */
 const touchState = new Map();
 /** market → last 5s book bucket stored (bookBucketToStore). */
@@ -462,6 +469,7 @@ function roll() {
   for (const m of drop) {
     books.delete(m);
     lastBookBucket.delete(m);
+    forgetLockWindow(m);
     const st = touchState.get(m);
     if (st?.fromOpen) touchBuf.push(...firstTouchRows(st.event, st.ft));
     touchState.delete(m);
@@ -494,7 +502,16 @@ function sampleOnce() {
       st = { event: w.event, fromOpen: tau >= WINDOW_MS - 5_000, ft: emptyTouches() };
       touchState.set(w.market, st);
     }
-    updateFirstTouch(st.ft, bookTop(book), observedMs, tau);
+    const top = bookTop(book);
+    updateFirstTouch(st.ft, top, observedMs, tau);
+    // R-AVG-LOCK decision row at each final-minute checkpoint. Never lets a model fault
+    // touch the capture.
+    try {
+      const lock = lockObservation(w, top, observedMs);
+      if (lock) lockBuf.push(lock);
+    } catch (err) {
+      console.warn('[btc15m] lock model failed', err?.message || err);
+    }
     const bucket = bookBucketToStore(lastBookBucket.get(w.market), observedMs);
     if (bucket == null) continue;
     lastBookBucket.set(w.market, bucket);
@@ -530,6 +547,11 @@ async function flush() {
     if (trades.length) {
       await insertFifteenMinTrades(trades);
       stats.tradesLastAt = trades.reduce((a, r) => (r.bucket_at > a ? r.bucket_at : a), stats.tradesLastAt ?? '');
+    }
+    if (lockBuf.length) {
+      const rows = lockBuf;
+      await insertBtc15mLockObs(rows);
+      lockBuf = lockBuf.slice(rows.length);
     }
     if (touchBuf.length) {
       const rows = touchBuf;
@@ -608,6 +630,7 @@ export function getBook1sHealth() {
     seqGapReconnects: stats.seqGapReconnects,
     firstTouchWindows: stats.firstTouchWindows,
     pendingFirstTouch: touchBuf.length,
+    lock: { ...lockHealth(), pending: lockBuf.length },
     lastFlushError: stats.lastFlushError,
     alerting: stats.alerting,
     // P4 theory check: if p99 event-loop lag in weekday 10–16 ET is > 1s, the real fix

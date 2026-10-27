@@ -62,8 +62,12 @@ export const CF_MAX_AGE_MS = 15_000;
  */
 const VOL_TICK_INTERVAL_MS = 10_000;
 
-/** 3 minutes of 1 Hz prints — enough for the running settlement average (E5). */
-const RAW_RING = 180;
+/**
+ * 7.5 minutes of 1 Hz prints. The running settlement average (E5) needs the last 60 s;
+ * the R-AVG-LOCK lane (engine/btc15m-lock.js) also needs σ from 5-s returns between
+ * 6:00 and 1:00 before the close, so the ring covers 360 s + slack. ~450 small objects.
+ */
+const RAW_RING = 450;
 
 /** index_id → latest observation. */
 const latest = new Map();
@@ -327,6 +331,17 @@ export function getRunningAvg(id, sinceMs) {
     }
   }
   return { avg: n > 0 ? sum / n : null, n };
+}
+
+/**
+ * Raw prints `{ price, t }` with `t` in [fromMs, toMs), oldest first — a copy.
+ * ⛔ INTERNAL CALCULATION ONLY (header): callers derive a number from these and never
+ * store, log or publish a print.
+ */
+export function getIndexPrints(id, fromMs, toMs = Infinity) {
+  const st = state.get(id);
+  if (!st) return [];
+  return st.prints.filter((p) => p.t >= fromMs && p.t < toMs).map((p) => ({ price: p.price, t: p.t }));
 }
 
 export function cfHealth() {

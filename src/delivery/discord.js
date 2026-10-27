@@ -34,8 +34,10 @@ import {
 } from './discord-budget.js';
 import { etDateKey } from '../lib/et-time.js';
 
-const KALSHI_REFERRAL_URL =
-  'https://kalshi.com/sign-up/?referral=b07a96ab-4b91-4bdc-8285-5ae1927b7000';
+// Plain sign-up since 2026-10-27: Kalshi rejects our old referral code and has
+// referrals off on our account (main repo handoffs/OFFERS_AUDIT_2026-10-27.md §2).
+// Name kept for the importers; mirrors KALSHI_REFERRAL.url in lib/affiliates.ts.
+const KALSHI_REFERRAL_URL = 'https://kalshi.com/sign-up';
 
 const CHANNEL_ID = {
   STRONG: '1487857828084584528',

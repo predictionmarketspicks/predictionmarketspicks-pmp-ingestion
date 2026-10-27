@@ -125,14 +125,14 @@ describe('priceToCents', () => {
 describe('kalshiMarketUrl', () => {
   it('keeps a 3-segment event ticker as-is', () => {
     expect(kalshiMarketUrl('KXMENWORLDCUP-26-FRA')).toBe(
-      'https://kalshi.com/markets/KXMENWORLDCUP-26-FRA?referral=b07a96ab-4b91-4bdc-8285-5ae1927b7000&m=true',
+      'https://kalshi.com/markets/KXMENWORLDCUP-26-FRA',
     );
   });
 
   it('trims a 4+-segment market ticker to the 3-segment event level', () => {
     // Site routes only on event level; PredictionMarketsPicks/CLAUDE.md locks this.
     expect(kalshiMarketUrl('KXWCGAME-26FRASEN-FRA')).toBe(
-      'https://kalshi.com/markets/KXWCGAME-26FRASEN-FRA?referral=b07a96ab-4b91-4bdc-8285-5ae1927b7000&m=true',
+      'https://kalshi.com/markets/KXWCGAME-26FRASEN-FRA',
     );
   });
 

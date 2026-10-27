@@ -254,8 +254,6 @@ export function priceToCents(p) {
   return c;
 }
 
-export const KALSHI_REFERRAL_PARAM = 'b07a96ab-4b91-4bdc-8285-5ae1927b7000';
-
 // Per CLAUDE.md sitemap-locked URL format:
 // API tickers have 4+ segments; site routes only on 3-segment event level.
 export function kalshiMarketUrl(eventTicker) {
@@ -263,7 +261,8 @@ export function kalshiMarketUrl(eventTicker) {
   const segments = String(eventTicker).split('-');
   // Drop trailing market segments to land on the 3-segment event ticker.
   const event = segments.slice(0, 3).join('-');
-  return `https://kalshi.com/markets/${event}?referral=${KALSHI_REFERRAL_PARAM}&m=true`;
+  // No referral since 2026-10-27 (main repo handoffs/OFFERS_AUDIT_2026-10-27.md §2).
+  return `https://kalshi.com/markets/${event}`;
 }
 
 export function polymarketMarketUrl(slug) {

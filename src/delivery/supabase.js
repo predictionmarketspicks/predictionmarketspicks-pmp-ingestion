@@ -97,6 +97,18 @@ export async function insertFifteenMinFirstTouch(rows) {
 }
 
 /**
+ * R-AVG-LOCK decision rows (engine/btc15m-lock.js), ≤ 5 per KXBTC15M window. z and the
+ * locked share only — never an index value. The PK makes a retried flush idempotent.
+ */
+export async function insertBtc15mLockObs(rows) {
+  if (!rows?.length) return;
+  const { error } = await getClient()
+    .from('btc15m_lock_obs')
+    .upsert(rows, { onConflict: 'event_ticker,checkpoint_s,model_version', ignoreDuplicates: true });
+  if (error) throw new Error(`btc15m_lock_obs: ${error.message}`);
+}
+
+/**
  * KXBTC15M tape, one row per (market, 10s bucket, taker side) — aggregated by
  * aggregateTrades(). The PK makes a retried flush idempotent.
  */

@@ -9,10 +9,14 @@
 //                             SOL and XRP every 15 s, every 5 s in the final 90 s (~32 rows a
 //                             window, ~37K a day), plus the current 15m window in ITS final 5 min
 //                             at the same cadence (the site's "same closing minute" panel, ~12K a
-//                             day). 14-day TTL (pg_cron poly-us-updown-book-cull).
-//   poly_us_updown_windows  — one permanent ledger row per 5m window, rolled 2 min after the close
-//                             (retried each minute until 30 min after) from the closed event's
-//                             outcome + published terms and this process's own book samples.
+//                             day). BTC's 15m window is sampled for its WHOLE 15 minutes (the
+//                             Polymarket US bot's market; ~7K a day), each row carrying the
+//                             Coinbase BTC-USD spot beside the quote (pub_spot*, same columns as
+//                             fifteen_min_book_5s; null when Coinbase is stale or for other coins).
+//                             14-day TTL (pg_cron poly-us-updown-book-cull).
+//   poly_us_updown_windows  — one permanent ledger row per 5m AND 15m window, rolled 2 min after
+//                             the close (retried each minute until 30 min after) from the closed
+//                             event's outcome + published terms and this process's own book samples.
 //
 // Reads (public gateway, no key):
 //   GET /v1/events/slug/<coin>-updown-<h>-<UTC start>z — once per window for the market slug, and
@@ -25,11 +29,12 @@
 // missing from it (those rows carry no book prices; source 'backfill').
 //
 // ⛔ Price to beat / settlement are Polymarket US's PUBLISHED market terms (stored for move_bps and
-// audit; the site renders derived values only, decision D1). Nothing here reads or stores an index
-// print. POLY_US_UPDOWN_ENABLED=0 switches it off without a redeploy.
+// audit; the site renders derived values only, decision D1). Nothing here stores an index print:
+// pub_spot is Coinbase's exchange print only (never the BRTI-basket fallback), research-only. POLY_US_UPDOWN_ENABLED=0 switches it off without a redeploy.
 
 import { getClient } from '../delivery/supabase.js';
 import { registerFeed, recordTick, setFeedStatus } from '../observability/health.js';
+import { getPubSpot1s, COINBASE_SOURCE_TAG } from './coinbase-ws.js';
 
 export const FEED = 'poly_us_updown';
 const BASE = process.env.POLY_US_GATEWAY_BASE || 'https://gateway.polymarket.us';
@@ -37,9 +42,12 @@ const UA = { 'User-Agent': 'PredictionMarketsPicks/1.0', Accept: 'application/js
 const ENABLED = process.env.POLY_US_UPDOWN_ENABLED !== '0';
 
 export const COINS = ['btc', 'eth', 'sol', 'xrp'];
+export const HORIZONS = ['5m', '15m'];
 export const HORIZON_MS = { '5m': 300_000, '15m': 900_000 };
-/** 15m windows are only captured in their last 5 minutes (when a 5m window closes with them). */
+/** 15m windows are captured in their last 5 minutes (when a 5m window closes with them) — except BTC's, whole. */
 export const CAPTURE_FROM_TAU_MS = { '5m': 300_000, '15m': 300_000 };
+export const FULL_WINDOW = new Set(['btc|15m']);
+const SPOT_COIN = 'btc';
 export const FAST_TAU_MS = 90_000;
 export const SLOW_EVERY_S = 15;
 export const FAST_EVERY_S = 5;
@@ -62,9 +70,10 @@ export function windowStart(nowMs, horizon) {
   return Math.floor(nowMs / len) * len;
 }
 
-/** Sample on this 5-second boundary? Every 15 s, every 5 s inside the final 90 s; 15m only in its last 5 min. */
-export function shouldSample(tauMs, horizon, boundaryMs) {
-  if (tauMs <= 0 || tauMs > CAPTURE_FROM_TAU_MS[horizon]) return false;
+/** Sample on this 5-second boundary? Every 15 s, every 5 s inside the final 90 s; 15m only in its last 5 min unless FULL_WINDOW. */
+export function shouldSample(tauMs, horizon, boundaryMs, coin) {
+  const from = FULL_WINDOW.has(`${coin}|${horizon}`) ? HORIZON_MS[horizon] : CAPTURE_FROM_TAU_MS[horizon];
+  if (tauMs <= 0 || tauMs > from) return false;
   const s = Math.round(boundaryMs / 1000);
   if (tauMs <= FAST_TAU_MS) return s % FAST_EVERY_S === 0;
   return s % SLOW_EVERY_S === 0;
@@ -104,6 +113,12 @@ export function midCents(s) {
   if (!s || s.up_bid == null || s.up_ask == null) return null;
   if (s.up_ask < s.up_bid || s.up_ask - s.up_bid > MAX_SPREAD + 1e-9) return null;
   return Math.round(((s.up_bid + s.up_ask) / 2) * 10000) / 100;
+}
+
+/** Coinbase spot columns for a book row — BTC only, Coinbase prints only (never the index-basket fallback). */
+export function spotColumns(coin, spot) {
+  if (coin !== SPOT_COIN || !spot || spot.source !== COINBASE_SOURCE_TAG) return { pub_spot: null, pub_spot_age_ms: null, pub_spot_source: null };
+  return { pub_spot: spot.price, pub_spot_age_ms: Math.max(0, Math.round(spot.ageMs)), pub_spot_source: spot.source };
 }
 
 /** The four ledger prices from one window's samples ({tau_ms, up_bid, up_ask}, any order). */
@@ -163,6 +178,8 @@ export function ledgerRow(body, coin, horizon, samples = []) {
   if (ptb != null && sp != null && (sp >= ptb ? 'up' : 'down') !== result) return null;
   const move = ptb != null && sp != null && ptb > 0 ? Math.round(((sp - ptb) / ptb) * 1e4 * 1000) / 1000 : null;
   const prices = samples.length ? windowPrices(samples) : { up_open_c: null, up_t60_c: null, up_t30_c: null, up_final_c: null, observations: 0 };
+  // A window sampled only in its last 5 minutes has no opening read — its first sample is T−5 min.
+  if (CAPTURE_FROM_TAU_MS[horizon] < HORIZON_MS[horizon] && !FULL_WINDOW.has(`${coin}|${horizon}`)) prices.up_open_c = null;
   return {
     coin,
     horizon,
@@ -213,7 +230,7 @@ const state = {
 };
 /** `${coin}|${horizon}|${startMs}` → { marketSlug, samples: [] } */
 const windows = new Map();
-/** `${coin}|${startMs}` → first roll attempt due (ms) for 5m windows awaiting the ledger. */
+/** `${coin}|${horizon}|${startMs}` → first roll attempt due (ms) for windows awaiting the ledger. */
 const pendingRolls = new Map();
 let buffer = [];
 
@@ -229,7 +246,7 @@ async function marketSlugFor(coin, horizon, startMs) {
   if (!w) {
     w = { marketSlug: null, samples: [] };
     windows.set(key, w);
-    if (horizon === '5m') pendingRolls.set(`${coin}|${startMs}`, startMs + HORIZON_MS['5m'] + ROLL_DELAY_MS);
+    pendingRolls.set(key, startMs + HORIZON_MS[horizon] + ROLL_DELAY_MS);
   }
   return w;
 }
@@ -238,7 +255,7 @@ async function sampleOne(coin, horizon, boundaryMs) {
   const startMs = windowStart(boundaryMs, horizon);
   const endMs = startMs + HORIZON_MS[horizon];
   const tauMs = endMs - boundaryMs;
-  if (!shouldSample(tauMs, horizon, boundaryMs)) return;
+  if (!shouldSample(tauMs, horizon, boundaryMs, coin)) return;
   const w = await marketSlugFor(coin, horizon, startMs);
   let eventMarket = null;
   if (!w.marketSlug) {
@@ -264,6 +281,7 @@ async function sampleOne(coin, horizon, boundaryMs) {
     observed_at: new Date(boundaryMs).toISOString(),
     tau_ms: tauMs,
     ...top,
+    ...spotColumns(coin, getPubSpot1s(boundaryMs)),
   };
   w.samples.push({ tau_ms: tauMs, up_bid: top.up_bid, up_ask: top.up_ask });
   buffer.push(row);
@@ -284,16 +302,16 @@ async function flush() {
 async function rollDue(nowMs) {
   for (const [key, dueMs] of pendingRolls) {
     if (nowMs < dueMs) continue;
-    const [coin, startStr] = key.split('|');
+    const [coin, horizon, startStr] = key.split('|');
     const startMs = Number(startStr);
-    if (nowMs > startMs + HORIZON_MS['5m'] + ROLL_GIVE_UP_MS) {
+    if (nowMs > startMs + HORIZON_MS[horizon] + ROLL_GIVE_UP_MS) {
       pendingRolls.delete(key);
-      windows.delete(`${coin}|5m|${startMs}`);
+      windows.delete(key);
       continue;
     }
-    const ev = await getJson(`/v1/events/slug/${eventSlug(coin, '5m', startMs)}`);
-    const w = windows.get(`${coin}|5m|${startMs}`);
-    const row = ev.body ? ledgerRow(ev.body, coin, '5m', w?.samples ?? []) : null;
+    const ev = await getJson(`/v1/events/slug/${eventSlug(coin, horizon, startMs)}`);
+    const w = windows.get(key);
+    const row = ev.body ? ledgerRow(ev.body, coin, horizon, w?.samples ?? []) : null;
     if (!row) {
       pendingRolls.set(key, nowMs + 60_000); // not resolved yet — retry in a minute
       continue;
@@ -305,44 +323,42 @@ async function rollDue(nowMs) {
       continue;
     }
     pendingRolls.delete(key);
-    windows.delete(`${coin}|5m|${startMs}`);
+    windows.delete(key);
     state.windowsRolled += 1;
     state.lastRollAt = new Date().toISOString();
   }
-  // 15m windows carry no ledger here — drop their samples once closed.
-  for (const key of windows.keys()) {
-    const [, horizon, startStr] = key.split('|');
-    if (horizon === '15m' && Number(startStr) + HORIZON_MS['15m'] < nowMs) windows.delete(key);
-  }
 }
 
-/** Re-read any of the last `hours` of 5m windows missing from the ledger (the gateway forgets them after ~120 h). */
+/** Re-read any of the last `hours` of 5m/15m windows missing from the ledger (the gateway forgets 5m after ~120 h). */
 export async function sweepMissing({ hours = 6, nowMs = Date.now() } = {}) {
   const since = new Date(nowMs - hours * 3_600_000).toISOString();
   const { data, error } = await getClient()
     .from('poly_us_updown_windows')
-    .select('coin, window_start')
-    .eq('horizon', '5m')
+    .select('coin, horizon, window_start')
     .gte('window_start', since)
     .order('window_start', { ascending: true })
-    .limit(1000); // 6 h × 12 × 4 coins = 288 rows max — inside one page
+    .limit(1000); // 6 h × (12 + 4) × 4 coins = 384 rows max — inside one page
   if (error) {
     noteError('sweep read', error);
     return 0;
   }
-  const have = new Set((data ?? []).map((r) => `${r.coin}|${Date.parse(r.window_start)}`));
-  const newest = windowStart(nowMs, '5m') - 2 * HORIZON_MS['5m']; // closed ≥ 5 min ago
+  const have = new Set((data ?? []).map((r) => `${r.coin}|${r.horizon}|${Date.parse(r.window_start)}`));
   let wrote = 0;
-  for (const coin of COINS) {
-    for (let s = newest; s >= nowMs - hours * 3_600_000; s -= HORIZON_MS['5m']) {
-      if (have.has(`${coin}|${s}`) || pendingRolls.has(`${coin}|${s}`)) continue;
-      const ev = await getJson(`/v1/events/slug/${eventSlug(coin, '5m', s)}`);
-      const row = ev.body ? ledgerRow(ev.body, coin, '5m', []) : null;
-      if (!row) continue;
-      const { error: e2 } = await getClient().from('poly_us_updown_windows').upsert(row, { onConflict: 'coin,horizon,window_start', ignoreDuplicates: true });
-      if (e2) noteError('sweep upsert', e2);
-      else wrote += 1;
-      await new Promise((r) => setTimeout(r, 200)); // ≤ 5 req/s
+  for (const horizon of HORIZONS) {
+    const len = HORIZON_MS[horizon];
+    const newest = windowStart(nowMs, horizon) - 2 * len; // closed ≥ one window ago
+    for (const coin of COINS) {
+      for (let s = newest; s >= nowMs - hours * 3_600_000; s -= len) {
+        const key = `${coin}|${horizon}|${s}`;
+        if (have.has(key) || pendingRolls.has(key)) continue;
+        const ev = await getJson(`/v1/events/slug/${eventSlug(coin, horizon, s)}`);
+        const row = ev.body ? ledgerRow(ev.body, coin, horizon, []) : null;
+        if (!row) continue;
+        const { error: e2 } = await getClient().from('poly_us_updown_windows').upsert(row, { onConflict: 'coin,horizon,window_start', ignoreDuplicates: true });
+        if (e2) noteError('sweep upsert', e2);
+        else wrote += 1;
+        await new Promise((r) => setTimeout(r, 200)); // ≤ 5 req/s
+      }
     }
   }
   state.sweepRows += wrote;
@@ -352,7 +368,7 @@ export async function sweepMissing({ hours = 6, nowMs = Date.now() } = {}) {
 async function tick() {
   const boundaryMs = Math.round(Date.now() / 5000) * 5000;
   try {
-    await Promise.all(COINS.flatMap((c) => ['5m', '15m'].map((h) => sampleOne(c, h, boundaryMs).catch((e) => noteError(`sample ${c} ${h}`, e)))));
+    await Promise.all(COINS.flatMap((c) => HORIZONS.map((h) => sampleOne(c, h, boundaryMs).catch((e) => noteError(`sample ${c} ${h}`, e)))));
     if (buffer.length) state.lastSampleAt = new Date(boundaryMs).toISOString();
     await flush();
     await rollDue(Date.now());
@@ -386,7 +402,7 @@ export function startPolymarketUsUpdown() {
   const sweep = () => sweepMissing().then((n) => n && console.log(`[poly-us-updown] sweep wrote ${n} missing windows`)).catch((e) => noteError('sweep', e));
   setTimeout(sweep, 30_000);
   state.sweepTimer = setInterval(sweep, 60 * 60_000);
-  console.log('[poly-us-updown] started: 5m book 15 s / 5 s final 90 s, 15m final 5 min, ledger roll T+2 min');
+  console.log('[poly-us-updown] started: 5m book 15 s / 5 s final 90 s, 15m final 5 min (BTC whole window + Coinbase spot), 5m+15m ledger roll T+2 min');
 }
 
 export function stopPolymarketUsUpdown() {

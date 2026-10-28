@@ -2,7 +2,7 @@
 // prediction-marketspicks/handoffs/FINAL_MINUTE_LANE_AND_5MIN_HUB_2026-10-27.md §4.6
 
 import { describe, it, expect } from 'vitest';
-import { eventSlug, windowStart, shouldSample, topOfBook, topFromEventMarket, midCents, windowPrices, resolvedResult, ledgerRow } from '../src/feeds/polymarket-us-updown.js';
+import { eventSlug, windowStart, shouldSample, topOfBook, topFromEventMarket, midCents, windowPrices, resolvedResult, ledgerRow, spotColumns } from '../src/feeds/polymarket-us-updown.js';
 
 const T = Date.parse('2026-10-27T12:30:00Z');
 
@@ -28,6 +28,26 @@ describe('cadence', () => {
     expect(shouldSample(600_000, '15m', T)).toBe(false);
     expect(shouldSample(300_000, '15m', T)).toBe(true);
     expect(shouldSample(0, '5m', T)).toBe(false);
+  });
+  it('BTC 15m: the whole window → 72 rows (every 15 s, 5 s in the final 90 s)', () => {
+    let n = 0;
+    for (let b = T; b < T + 900_000; b += 5_000) if (shouldSample(T + 900_000 - b, '15m', b, 'btc')) n++;
+    expect(n).toBe(72);
+    expect(shouldSample(600_000, '15m', T, 'btc')).toBe(true);
+    expect(shouldSample(600_000, '15m', T, 'eth')).toBe(false);
+  });
+});
+
+describe('spot beside the quote', () => {
+  const cb = { price: 113250.5, ageMs: 812.4, source: 'coinbase_ws' };
+  it('BTC rows carry the Coinbase print', () => {
+    expect(spotColumns('btc', cb)).toEqual({ pub_spot: 113250.5, pub_spot_age_ms: 812, pub_spot_source: 'coinbase_ws' });
+  });
+  it('never the index-basket fallback, never another coin, null when stale', () => {
+    const none = { pub_spot: null, pub_spot_age_ms: null, pub_spot_source: null };
+    expect(spotColumns('btc', { ...cb, source: 'brti_basket' })).toEqual(none);
+    expect(spotColumns('eth', cb)).toEqual(none);
+    expect(spotColumns('btc', null)).toEqual(none);
   });
 });
 
@@ -87,6 +107,22 @@ describe('ledger', () => {
     const r = ledgerRow(closed('["0","1"]', '80063.00', '80000.00'), 'btc', '5m');
     expect(r.source).toBe('backfill');
     expect(r.up_final_c).toBeNull();
+  });
+  it('15m rows: BTC keeps its opening read; a final-5-minutes-only coin has none', () => {
+    const fifteen = (coin) => {
+      const b = closed('["1","0"]', '80063.00', '80116.24');
+      const m = b.event.markets[0];
+      b.event.slug = `${coin}-updown-15m-2026-10-27-1230z`;
+      m.slug = `cpc-${coin}-updown-15m-2026-10-27-1230z`;
+      m.assetPriceTerms = { ...m.assetPriceTerms, horizon: '15m', windowEnd: '2026-10-27T12:45:00Z' };
+      return b;
+    };
+    const samples = [{ tau_ms: 300_000, up_bid: 0.6, up_ask: 0.62 }, { tau_ms: 5_000, up_bid: 0.95, up_ask: 0.97 }];
+    const btc = ledgerRow(fifteen('btc'), 'btc', '15m', [{ tau_ms: 895_000, up_bid: 0.49, up_ask: 0.51 }, ...samples]);
+    expect([btc.horizon, btc.up_open_c, btc.up_final_c]).toEqual(['15m', 50, 96]);
+    const eth = ledgerRow(fifteen('eth'), 'eth', '15m', samples);
+    expect([eth.up_open_c, eth.up_final_c]).toEqual([null, 96]);
+    expect(ledgerRow(fifteen('btc'), 'btc', '5m')).toBeNull(); // horizon must match the terms
   });
   it('windowPrices ignores unpriced reads', () => {
     expect(windowPrices([{ tau_ms: 200_000, up_bid: null, up_ask: 0.5 }]).up_open_c).toBeNull();

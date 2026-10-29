@@ -34,7 +34,7 @@
 
 import { getClient } from '../delivery/supabase.js';
 import { registerFeed, recordTick, setFeedStatus } from '../observability/health.js';
-import { getPubSpot1s, COINBASE_SOURCE_TAG } from './coinbase-ws.js';
+import { getCoinSpot, COINBASE_SOURCE_TAG } from './coinbase-ws.js';
 
 export const FEED = 'poly_us_updown';
 const BASE = process.env.POLY_US_GATEWAY_BASE || 'https://gateway.polymarket.us';
@@ -47,7 +47,8 @@ export const HORIZON_MS = { '5m': 300_000, '15m': 900_000 };
 /** 15m windows are captured in their last 5 minutes (when a 5m window closes with them) — except BTC's, whole. */
 export const CAPTURE_FROM_TAU_MS = { '5m': 300_000, '15m': 300_000 };
 export const FULL_WINDOW = new Set(['btc|15m']);
-const SPOT_COIN = 'btc';
+// All four coins since 2026-10-28 (bucket-loop §5): Coinbase prints only, never the BRTI basket.
+const SPOT_COINS = new Set(['btc', 'eth', 'sol', 'xrp']);
 export const FAST_TAU_MS = 90_000;
 export const SLOW_EVERY_S = 15;
 export const FAST_EVERY_S = 5;
@@ -117,7 +118,7 @@ export function midCents(s) {
 
 /** Coinbase spot columns for a book row — BTC only, Coinbase prints only (never the index-basket fallback). */
 export function spotColumns(coin, spot) {
-  if (coin !== SPOT_COIN || !spot || spot.source !== COINBASE_SOURCE_TAG) return { pub_spot: null, pub_spot_age_ms: null, pub_spot_source: null };
+  if (!SPOT_COINS.has(coin) || !spot || spot.source !== COINBASE_SOURCE_TAG) return { pub_spot: null, pub_spot_age_ms: null, pub_spot_source: null };
   return { pub_spot: spot.price, pub_spot_age_ms: Math.max(0, Math.round(spot.ageMs)), pub_spot_source: spot.source };
 }
 
@@ -281,7 +282,7 @@ async function sampleOne(coin, horizon, boundaryMs) {
     observed_at: new Date(boundaryMs).toISOString(),
     tau_ms: tauMs,
     ...top,
-    ...spotColumns(coin, getPubSpot1s(boundaryMs)),
+    ...spotColumns(coin, getCoinSpot(coin, boundaryMs)),
   };
   w.samples.push({ tau_ms: tauMs, up_bid: top.up_bid, up_ask: top.up_ask });
   buffer.push(row);

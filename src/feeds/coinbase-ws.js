@@ -35,7 +35,11 @@ let reconnectTimer = null;
 let reconnectAttempts = 0;
 let sampleTimer = null;
 
-let latest = null; // { price, bid, ask, publishTimeMs, source }
+let latest = null; // { price, bid, ask, publishTimeMs, source } — BTC-USD only (getPubSpot1s + the 1s buffer)
+// ETH/SOL/XRP on the same socket (handoff SHORT_CRYPTO_BUCKET_LOOP_AND_5MIN_LANE_2026-10-28 §5): their own
+// latest quote per product, Coinbase print only — no basket fallback exists for them, so stale ⇒ null.
+export const ALT_PRODUCTS = { eth: 'ETH-USD', sol: 'SOL-USD', xrp: 'XRP-USD' };
+const latestAlt = new Map(); // product_id → quote
 const buffer = []; // [{ t (ms, whole second), price, source }]
 
 /** Parse one Coinbase `ticker` frame into a quote; null when it is not a usable two-sided quote. */
@@ -52,7 +56,21 @@ export function parseCoinbaseTicker(m, nowMs = Date.now()) {
     // A server clock ahead of ours must never produce a future timestamp.
     publishTimeMs: Number.isFinite(t) ? Math.min(t, nowMs) : nowMs,
     source: COINBASE_SOURCE_TAG,
+    product: typeof m.product_id === 'string' ? m.product_id : null,
   };
+}
+
+/**
+ * Fresh Coinbase mid for one coin (`btc`, `eth`, `sol`, `xrp`) with its age, or null when the
+ * socket has nothing within COINBASE_MAX_AGE_MS. BTC goes through getPubSpot1s (basket fallback
+ * included); the others never fall back.
+ */
+export function getCoinSpot(coin, nowMs = Date.now()) {
+  if (coin === 'btc') return getPubSpot1s(nowMs);
+  const product = ALT_PRODUCTS[coin];
+  const q = product ? latestAlt.get(product) : null;
+  if (!q || nowMs - q.publishTimeMs > COINBASE_MAX_AGE_MS) return null;
+  return { ...q, ageMs: nowMs - q.publishTimeMs };
 }
 
 /**
@@ -100,7 +118,7 @@ function connect() {
   ws.on('open', () => {
     reconnectAttempts = 0;
     setFeedStatus(COINBASE_SOURCE_TAG, { connected: true, lastError: null });
-    ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker'] }));
+    ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD', ...Object.values(ALT_PRODUCTS)], channels: ['ticker'] }));
   });
   ws.on('message', (raw) => {
     let m;
@@ -115,8 +133,13 @@ function connect() {
     }
     const q = parseCoinbaseTicker(m);
     if (q) {
-      latest = q;
-      recordTick(COINBASE_SOURCE_TAG);
+      // A frame with no product_id is the BTC-only socket's historical shape — treat it as BTC.
+      if (!q.product || q.product === 'BTC-USD') {
+        latest = q;
+        recordTick(COINBASE_SOURCE_TAG);
+      } else {
+        latestAlt.set(q.product, q);
+      }
     }
   });
   ws.on('close', (code) => {

@@ -43,11 +43,14 @@ describe('spot beside the quote', () => {
   it('BTC rows carry the Coinbase print', () => {
     expect(spotColumns('btc', cb)).toEqual({ pub_spot: 113250.5, pub_spot_age_ms: 812, pub_spot_source: 'coinbase_ws' });
   });
-  it('never the index-basket fallback, never another coin, null when stale', () => {
+  it('never the index-basket fallback, never an unknown coin, null when stale', () => {
     const none = { pub_spot: null, pub_spot_age_ms: null, pub_spot_source: null };
     expect(spotColumns('btc', { ...cb, source: 'brti_basket' })).toEqual(none);
-    expect(spotColumns('eth', cb)).toEqual(none);
+    expect(spotColumns('doge', cb)).toEqual(none);
     expect(spotColumns('btc', null)).toEqual(none);
+  });
+  it('ETH/SOL/XRP carry their own Coinbase print (2026-10-28)', () => {
+    for (const c of ['eth', 'sol', 'xrp']) expect(spotColumns(c, { ...cb, price: 4100.25 }).pub_spot).toBe(4100.25);
   });
 });
 
@@ -126,5 +129,19 @@ describe('ledger', () => {
   });
   it('windowPrices ignores unpriced reads', () => {
     expect(windowPrices([{ tau_ms: 200_000, up_bid: null, up_ask: 0.5 }]).up_open_c).toBeNull();
+  });
+});
+
+describe('coinbase per-product quotes (bucket-loop §5)', async () => {
+  const { parseCoinbaseTicker, getCoinSpot, ALT_PRODUCTS } = await import('../src/feeds/coinbase-ws.js');
+  it('keeps the product id so an ETH tick can never overwrite BTC', () => {
+    const q = parseCoinbaseTicker({ type: 'ticker', product_id: 'ETH-USD', best_bid: '4100', best_ask: '4100.5', time: '2026-10-28T12:00:00Z' }, Date.parse('2026-10-28T12:00:01Z'));
+    expect(q.product).toBe('ETH-USD');
+    expect(q.price).toBeCloseTo(4100.25);
+  });
+  it('subscribes ETH, SOL and XRP; unknown coins and empty sockets give null', () => {
+    expect(Object.values(ALT_PRODUCTS)).toEqual(['ETH-USD', 'SOL-USD', 'XRP-USD']);
+    expect(getCoinSpot('doge')).toBeNull();
+    expect(getCoinSpot('sol')).toBeNull(); // nothing received in a test process
   });
 });

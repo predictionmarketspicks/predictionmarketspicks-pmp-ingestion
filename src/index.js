@@ -16,6 +16,7 @@ import { startBrtiSpot, stopBrtiSpot, BRTI_SOURCE_TAG } from './feeds/brti-spot.
 import { startCoinbaseWs } from './feeds/coinbase-ws.js';
 import { startKalshiBtc15m, getBook1sHealth } from './feeds/kalshi-btc15m.js';
 import { startPolymarketUsUpdown, getPolymarketUsUpdownHealth } from './feeds/polymarket-us-updown.js';
+import { startPolymarketUsHorizonDetector } from './feeds/polymarket-us-horizon-detector.js';
 import { startCfBenchmarks, stopCfBenchmarks, isCfArmed, cfHealth, CF_SOURCE_TAG } from './feeds/cfbenchmarks.js';
 // isOptionsMarketOpen still lives in massive.js (pure utility, no provider
 // coupling). Lifecycle goes through the options-provider abstraction so the
@@ -908,6 +909,9 @@ async function bootstrapAll() {
   // Polymarket US 5m/15m Up/Down book + the permanent 5m ledger (the site's 5-Minute Board).
   // Not a required feed. POLY_US_UPDOWN_ENABLED=0 to switch off.
   startPolymarketUsUpdown();
+  // W3-lite: tells #bot-logs the first time Polymarket US lists a new up/down horizon (30m / 4h filed for
+  // no earlier than 2026-11-03). Hourly census read, not a required feed. POLY_US_HORIZON_DETECTOR_ENABLED=0 off.
+  startPolymarketUsHorizonDetector();
   for (const state of engines.values()) {
     bootstrapEngine(state).catch((err) => {
       console.error(`[${state.config.commodity}] bootstrap failed`, err);

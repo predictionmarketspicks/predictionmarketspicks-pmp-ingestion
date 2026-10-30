@@ -48,6 +48,11 @@ import {
 export const COMMODITIES = {
   silver: {
     commodity: 'silver',
+    // The alert IS the minted pick (MCP_FULL_SWEEP_AND_METALS_PAIR_2026-10-30 A3, the
+    // bitcoin rule since 2026-09-22). Alerting the snapshot's top edge upstream of the mint
+    // left 15 gold/silver alerts in edge_alerts (10-06 → 10-28) with no tool_picks row:
+    // published, never graded. Delivery only — no gate.
+    alertOnPickOnly: true,
     // ⛔ DAILY, not weekly. Kalshi retired the weekly metals series after
     // 2026-09-04T21:00Z (KXGOLDW / KXSILVERW are 200/200 finalized, zero open
     // events) and replaced it with a DAILY series. The engines sat pointed at the
@@ -139,6 +144,11 @@ export const COMMODITIES = {
   },
   gold: {
     commodity: 'gold',
+    // The alert IS the minted pick (MCP_FULL_SWEEP_AND_METALS_PAIR_2026-10-30 A3, the
+    // bitcoin rule since 2026-09-22). Alerting the snapshot's top edge upstream of the mint
+    // left 15 gold/silver alerts in edge_alerts (10-06 → 10-28) with no tool_picks row:
+    // published, never graded. Delivery only — no gate.
+    alertOnPickOnly: true,
     // ⛔ DAILY, not weekly. Kalshi retired the weekly metals series after
     // 2026-09-04T21:00Z (KXGOLDW / KXSILVERW are 200/200 finalized, zero open
     // events) and replaced it with a DAILY series. The engines sat pointed at the
@@ -225,6 +235,11 @@ export const COMMODITIES = {
   },
   oil: {
     commodity: 'oil',
+    // The alert IS the minted pick (MCP_FULL_SWEEP_AND_METALS_PAIR_2026-10-30 A3, the
+    // bitcoin rule since 2026-09-22). Alerting the snapshot's top edge upstream of the mint
+    // left 15 gold/silver alerts in edge_alerts (10-06 → 10-28) with no tool_picks row:
+    // published, never graded. Delivery only — no gate.
+    alertOnPickOnly: true,
     seriesTicker: 'KXWTI',
     underlyingEtf: 'USO',
     pythSymbol: 'WTI', // not used when useYahooSpot is true; kept for shape parity

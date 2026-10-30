@@ -131,3 +131,14 @@ describe('COMMODITIES registry', () => {
     expect(() => getCommodityConfig('platinum')).toThrow(/unknown commodity/);
   });
 });
+
+// MCP_FULL_SWEEP_AND_METALS_PAIR_2026-10-30 A3: an alert is the minted pick, never the
+// snapshot's top edge — otherwise a row a gate diverts (entry_floor, metals_pair, no_side)
+// still reaches Discord/edge_alerts and can never be graded (15 gold/silver orphans 10-06 → 10-28).
+describe('alert = the minted pick', () => {
+  it('every graded commodity (silver, gold, oil, bitcoin) alerts on the pick only', () => {
+    for (const c of ['silver', 'gold', 'oil', 'bitcoin']) {
+      expect(COMMODITIES[c].alertOnPickOnly, c).toBe(true);
+    }
+  });
+});

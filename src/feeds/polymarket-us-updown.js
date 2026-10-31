@@ -52,7 +52,11 @@ const SPOT_COINS = new Set(['btc', 'eth', 'sol', 'xrp']);
 export const FAST_TAU_MS = 90_000;
 export const SLOW_EVERY_S = 15;
 export const FAST_EVERY_S = 5;
-export const ROLL_DELAY_MS = 120_000;
+// 15 s (was 120 s): the gateway shows the closed event with its settlementPrice ~35 s after the close
+// (measured 2026-10-31 05:10Z), and window N's settlement = N+1's price to beat — the site's Bitcoin
+// 5-Minute tool reads it as the official price to beat (BTC5M_POLY_US_TOOL_2026-10-31 A3). Not resolved
+// yet → the existing retry loop tries again (every 15 s now, was 60 s), until ROLL_GIVE_UP_MS.
+export const ROLL_DELAY_MS = 15_000;
 export const ROLL_GIVE_UP_MS = 30 * 60_000;
 const MAX_SPREAD = 0.15;
 
@@ -314,7 +318,7 @@ async function rollDue(nowMs) {
     const w = windows.get(key);
     const row = ev.body ? ledgerRow(ev.body, coin, horizon, w?.samples ?? []) : null;
     if (!row) {
-      pendingRolls.set(key, nowMs + 60_000); // not resolved yet — retry in a minute
+      pendingRolls.set(key, nowMs + 15_000); // not resolved yet — retry in 15 s
       continue;
     }
     const { error } = await getClient().from('poly_us_updown_windows').upsert(row, { onConflict: 'coin,horizon,window_start' });

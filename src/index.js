@@ -9,6 +9,8 @@ import {
   recordTick,
   setFeedStatus,
   evaluateLiveness,
+  recordGuardRejection,
+  missingInputAlarmDue,
 } from './observability/health.js';
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
 import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts, WTI_FRONT_MONTH_SYMBOL, pythConfidenceRejects } from './feeds/pyth.js';
@@ -29,7 +31,7 @@ import {
   OPTIONS_PROVIDER,
 } from './feeds/options-provider.js';
 import { startYahooOil, stopYahooOil } from './feeds/yahoo-oil.js';
-import { computeSnapshot, discoverEvent } from './engine/commodity-base.js';
+import { computeSnapshot, discoverEvent, getLastInputSkip } from './engine/commodity-base.js';
 import { listAllCommodities, listEnabledCommodities } from './engine/commodities.js';
 import { startFlowAlerts } from './engine/flow-alerts.js';
 import { refreshCalibrationMaps, calibrationStatus } from './engine/calibration.js';
@@ -472,12 +474,35 @@ async function runSnapshotOnceInner(state) {
       // commodity-base logs the specific reason (missing pyth, missing chain,
       // etc.) — but only to stdout, where nothing watches it. Mirror it onto
       // the feed for the same reason as the no-event branch above.
+      const ticker = state.currentEvent.eventTicker || config.seriesTicker;
+      const missing = getLastInputSkip(config.commodity);
       setFeedStatus(`${config.commodity}_engine`, {
         connected: false,
-        lastError: `computeSnapshot returned nothing for ${state.currentEvent.eventTicker || config.seriesTicker} — see logs for the gate that refused`,
+        lastError: missing
+          ? `no input: ${missing.reason} for ${ticker} — ${JSON.stringify(missing.detail).slice(0, 160)}`
+          : `computeSnapshot returned nothing for ${ticker} — see logs for the gate that refused`,
       });
+      // ⛔ P0-B (ENGINE_OUTAGE_ALARMS_AND_OPEN_FIXES_2026-11-03): this exit was
+      // silent for 49 h while the Databento sidecar was dead. A missing input in
+      // market hours now raises the same alarm a guard rejection does (Discord
+      // #bot-logs + data_health unhealthy), after a 10-min grace, 5-min cooldown.
+      if (missing) {
+        const nowMs = Date.now();
+        state.inputMissingSince ??= nowMs;
+        if (missingInputAlarmDue({ sinceMs: state.inputMissingSince, nowMs, marketOpen: isOptionsMarketOpen() })) {
+          recordGuardRejection(
+            config.commodity,
+            missing.reason,
+            { ...missing.detail, event: ticker, dark_min: Math.round((nowMs - state.inputMissingSince) / 60000) },
+            { kind: 'missing_input' },
+          ).catch(() => {});
+        }
+      } else {
+        state.inputMissingSince = null;
+      }
       return;
     }
+    state.inputMissingSince = null;
     state.snapshotCount += 1;
     state.lastSnapshotMeta = snap.meta;
     // Clear the reason on success, or a one-off skip would look permanent.

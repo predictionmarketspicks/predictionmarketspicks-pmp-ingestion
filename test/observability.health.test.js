@@ -188,3 +188,21 @@ describe('snapshot', () => {
     expect(snap.feeds.arb_engine.required).toBe(false);
   });
 });
+
+// P0-B (ENGINE_OUTAGE_ALARMS_AND_OPEN_FIXES_2026-11-03): "no input arrived" must
+// alarm in market hours after the grace; a closed market never alarms.
+describe('missingInputAlarmDue', () => {
+  const since = Date.parse('2026-11-02T15:00:00Z');
+  it('stays quiet inside the 10-min grace', () => {
+    expect(health.missingInputAlarmDue({ sinceMs: since, nowMs: since + health.MISSING_INPUT_GRACE_MS - 1, marketOpen: true })).toBe(false);
+  });
+  it('fires at the grace boundary while the market is open', () => {
+    expect(health.missingInputAlarmDue({ sinceMs: since, nowMs: since + health.MISSING_INPUT_GRACE_MS, marketOpen: true })).toBe(true);
+  });
+  it('never fires while the market is closed (a weekend with no chain is not an outage)', () => {
+    expect(health.missingInputAlarmDue({ sinceMs: since, nowMs: since + 49 * 3600_000, marketOpen: false })).toBe(false);
+  });
+  it('never fires without a start time', () => {
+    expect(health.missingInputAlarmDue({ sinceMs: null, nowMs: since, marketOpen: true })).toBe(false);
+  });
+});

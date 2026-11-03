@@ -179,6 +179,17 @@ const IV_HARD_CAP = 3.0;
 const SMILE_CLUSTER_IV_FLOOR = 3.5;
 const SMILE_CLUSTER_EPS = 0.02;
 const SMILE_CLUSTER_LEN = 3;
+// ⛔ TWO SILENCES (ENGINE_OUTAGE_ALARMS_AND_OPEN_FIXES_2026-11-03 P0-B). A null
+// snapshot because an INPUT never arrived (no options chain, no spot, no
+// underlying price) is an outage; a quiet board where no strike cleared the bar
+// is the product working and still returns a snapshot. computeSnapshot records
+// the missing input here so src/index.js can alarm on it — the guard-rejection
+// exit below alarms on its own and leaves this unset. Nov 1–3 2026: the
+// Databento sidecar died and this exit ran silently for 49 hours.
+const lastInputSkip = new Map(); // commodity → { reason, detail }
+export function getLastInputSkip(commodity) {
+  return lastInputSkip.get(commodity) ?? null;
+}
 const firstSnapshotWritten = new Map(); // commodity → true once one clean parity write has landed this session
 let prevMarketOpen = null; // tracks options-market-open transition for session reset
 
@@ -603,6 +614,8 @@ export function resolveTwapMu({ muRaw, muClamped = null, scale = BTC_MU_SCALE, c
 // Returns { meta, rows } shaped for the supabase writer. Returns null if any
 // upstream feed has no data yet (cold-start race) or a fail-open guard fires.
 export async function computeSnapshot(config, event, { now = new Date() } = {}) {
+  // Cleared on every call; set only on the "an input never arrived" exits below.
+  lastInputSkip.delete(config.commodity);
   // Spot source ladder (oil-specific path is the most complex):
   //   silver/gold        → Pyth via getPrice(config.pythSymbol)
   //   bitcoin            → BRTI constituent basket (getBrtiSpot) — Kalshi
@@ -745,12 +758,20 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
         useYahooSpot ? 'yahoo CL=F' : useBrtiSpot ? 'BRTI basket' : `pyth ${config.pythSymbol}`
       }) — skipping snapshot`,
     );
+    lastInputSkip.set(config.commodity, {
+      reason: 'no_spot_price',
+      detail: { source: useYahooSpot ? 'yahoo CL=F' : useBrtiSpot ? 'BRTI basket' : `pyth ${config.pythSymbol}` },
+    });
     return null;
   }
   if (!chain || !chain.contracts || chain.contracts.length === 0) {
     console.warn(
       `[${config.commodity}] empty chain — skipping snapshot (chain=${chain ? 'present' : 'null'}, contracts=${chain?.contracts?.length ?? 0})`,
     );
+    lastInputSkip.set(config.commodity, {
+      reason: 'no_options_chain',
+      detail: { underlying: config.underlyingEtf, chain: chain ? 'present' : 'null', contracts: chain?.contracts?.length ?? 0 },
+    });
     return null;
   }
 
@@ -762,6 +783,10 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       etfPrice = await fetchPrevClose(config.underlyingEtf);
     } catch (err) {
       console.warn(`[${config.commodity}] ${config.underlyingEtf} spot fallback failed: ${err?.message || err}`);
+      lastInputSkip.set(config.commodity, {
+        reason: 'no_underlying_price',
+        detail: { underlying: config.underlyingEtf, error: String(err?.message || err).slice(0, 200) },
+      });
       return null;
     }
   }
@@ -769,6 +794,10 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     console.warn(
       `[${config.commodity}] bad spot/etf — skipping snapshot (etfPrice=${etfPrice}, spotPrice=${spotPrice})`,
     );
+    lastInputSkip.set(config.commodity, {
+      reason: 'no_underlying_price',
+      detail: { underlying: config.underlyingEtf, etfPrice, spotPrice },
+    });
     return null;
   }
 

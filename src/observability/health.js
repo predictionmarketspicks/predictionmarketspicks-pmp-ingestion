@@ -114,8 +114,15 @@ export function evaluateLiveness(nowMs = Date.now()) {
 const guardRejectionLastFire = new Map(); // `${commodity}:${reason}` → ms
 const GUARD_REJECTION_COOLDOWN_MS = 5 * 60 * 1000;
 
-export async function recordGuardRejection(commodity, reason, detail = {}) {
-  setFeedStatus(`${commodity}_engine`, { lastError: `guard_${reason}_failed` });
+// kind 'missing_input' (P0-B, 2026-11-03): the same alarm for "an input never
+// arrived" — no options chain, no spot. Same cooldown, same data_health row;
+// different copy, so an outage never reads like a guard doing its job (and a
+// quiet board, which never reaches here, stays silent).
+export async function recordGuardRejection(commodity, reason, detail = {}, { kind = 'guard' } = {}) {
+  const outage = kind === 'missing_input';
+  setFeedStatus(`${commodity}_engine`, {
+    lastError: outage ? `missing_input_${reason}` : `guard_${reason}_failed`,
+  });
 
   const key = `${commodity}:${reason}`;
   const now = Date.now();
@@ -124,7 +131,9 @@ export async function recordGuardRejection(commodity, reason, detail = {}) {
   if (shouldPost) {
     guardRejectionLastFire.set(key, now);
     const lines = [
-      `Engine guard rejected ${commodity} snapshot`,
+      outage
+        ? `🚨 OUTAGE — ${commodity} engine has no input (${reason}) during market hours; nothing is being priced`
+        : `Engine guard rejected ${commodity} snapshot`,
       `Commodity: ${commodity}`,
       `Reason: ${reason}`,
       `Detail: ${JSON.stringify(detail).slice(0, 600)}`,
@@ -147,7 +156,7 @@ export async function recordGuardRejection(commodity, reason, detail = {}) {
           status: 'unhealthy',
           stale_count: 1,
           total_checked: 1,
-          details: { reason, detail, snapshot_at: new Date(now).toISOString() },
+          details: { kind, reason, detail, snapshot_at: new Date(now).toISOString() },
           checked_at: new Date(now).toISOString(),
         },
         { onConflict: 'check_id' },
@@ -156,6 +165,17 @@ export async function recordGuardRejection(commodity, reason, detail = {}) {
   } catch (err) {
     console.warn(`[guard] data_health upsert threw: ${err?.message || err}`);
   }
+}
+
+// Missing-input alarm timing (P0-B). Pure, so it is testable. Alarm only while
+// the options market is open AND the input has been missing for at least
+// MISSING_INPUT_GRACE_MS — the first minutes after 09:30 ET or after a restart
+// legitimately have no chain yet, and an alarm that fires every open trains
+// people to ignore it. Repeats are throttled by the 5-min cooldown above.
+export const MISSING_INPUT_GRACE_MS = 10 * 60 * 1000;
+export function missingInputAlarmDue({ sinceMs, nowMs, marketOpen }) {
+  if (!marketOpen || sinceMs == null) return false;
+  return nowMs - sinceMs >= MISSING_INPUT_GRACE_MS;
 }
 
 // Mark a commodity engine as healthy after a clean validateSnapshot pass.

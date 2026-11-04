@@ -11,6 +11,7 @@ import {
   evaluateLiveness,
   recordGuardRejection,
   missingInputAlarmDue,
+  noEventAlarmDue,
 } from './observability/health.js';
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
 import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts, WTI_FRONT_MONTH_SYMBOL, pythConfidenceRejects } from './feeds/pyth.js';
@@ -309,6 +310,8 @@ for (const config of enabledCommodities) {
     requiredOffHours: !config.pauseSnapshotsOffHours,
   });
 }
+// N5b: the series each engine prices, so a Kalshi roll is visible on day one.
+console.log(`[boot] series: ${enabledCommodities.map((c) => `${c.commodity}=${c.seriesTicker}`).join(' ')}`);
 markFeedRequired('kalshi');
 registerFeed('movers_engine');
 
@@ -466,8 +469,20 @@ async function runSnapshotOnceInner(state) {
       connected: false,
       lastError: `no open ${config.seriesTicker} event — nothing to price (series retired or rolled?)`,
     });
+    // ⛔ N5: the _engine_loop feed keeps ticking through this branch (its recordTick is in
+    // runSnapshotOnce's `finally`), so the required-feed watch never sees it. This is the alarm.
+    const nowMs = Date.now();
+    if (noEventAlarmDue(state, { nowMs, marketOpen: isOptionsMarketOpen() })) {
+      recordGuardRejection(
+        config.commodity,
+        'no_open_event',
+        { seriesTicker: config.seriesTicker, dark_min: Math.round((nowMs - state.noEventSince) / 60000), hint: 'series retired or rolled?' },
+        { kind: 'missing_input' },
+      ).catch(() => {});
+    }
     return;
   }
+  state.noEventSince = null;
   try {
     const snap = await computeSnapshot(config, state.currentEvent);
     if (!snap) {

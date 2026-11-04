@@ -178,6 +178,18 @@ export function missingInputAlarmDue({ sinceMs, nowMs, marketOpen }) {
   return nowMs - sinceMs >= MISSING_INPUT_GRACE_MS;
 }
 
+// No-event alarm timing (N5, MCP_DEEP_DIVE_AND_GROWTH_FIXES_2026-11-04). Same grace and market
+// gate as a missing input, on its own clock. The clock runs only while the market is open: a
+// series with no event all weekend must get the full grace at the open, not alarm on the first pass.
+export function noEventAlarmDue(state, { nowMs, marketOpen }) {
+  if (!marketOpen) {
+    state.noEventSince = null;
+    return false;
+  }
+  state.noEventSince ??= nowMs;
+  return missingInputAlarmDue({ sinceMs: state.noEventSince, nowMs, marketOpen });
+}
+
 // Mark a commodity engine as healthy after a clean validateSnapshot pass.
 // Lets /admin/oracle-health recover from a prior rejection without waiting for
 // an out-of-band reset. Same upsert path as recordGuardRejection.

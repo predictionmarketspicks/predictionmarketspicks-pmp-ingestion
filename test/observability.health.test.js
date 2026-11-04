@@ -206,3 +206,33 @@ describe('missingInputAlarmDue', () => {
     expect(health.missingInputAlarmDue({ sinceMs: null, nowMs: since, marketOpen: true })).toBe(false);
   });
 });
+
+// N5 (MCP_DEEP_DIVE_AND_GROWTH_FIXES_2026-11-04): no open event alarms like a missing input.
+describe('noEventAlarmDue', () => {
+  const start = Date.parse('2026-11-02T15:00:00Z');
+  const grace = () => health.MISSING_INPUT_GRACE_MS;
+  it('starts its clock on the first pass and stays quiet through the roll gap', () => {
+    const state = {};
+    expect(health.noEventAlarmDue(state, { nowMs: start, marketOpen: true })).toBe(false);
+    expect(state.noEventSince).toBe(start);
+    expect(health.noEventAlarmDue(state, { nowMs: start + grace() - 1, marketOpen: true })).toBe(false);
+  });
+  it('fires at the grace boundary in market hours', () => {
+    const state = {};
+    health.noEventAlarmDue(state, { nowMs: start, marketOpen: true });
+    expect(health.noEventAlarmDue(state, { nowMs: start + grace(), marketOpen: true })).toBe(true);
+  });
+  it('stays quiet off-hours, however long the gap', () => {
+    const state = {};
+    expect(health.noEventAlarmDue(state, { nowMs: start, marketOpen: false })).toBe(false);
+    expect(health.noEventAlarmDue(state, { nowMs: start + 49 * 3600_000, marketOpen: false })).toBe(false);
+    expect(state.noEventSince).toBeNull();
+  });
+  it('gives the full grace at the open after a closed market', () => {
+    const state = { noEventSince: start };
+    health.noEventAlarmDue(state, { nowMs: start + 60_000, marketOpen: false });
+    const open = start + 65 * 3600_000;
+    expect(health.noEventAlarmDue(state, { nowMs: open, marketOpen: true })).toBe(false);
+    expect(health.noEventAlarmDue(state, { nowMs: open + grace(), marketOpen: true })).toBe(true);
+  });
+});

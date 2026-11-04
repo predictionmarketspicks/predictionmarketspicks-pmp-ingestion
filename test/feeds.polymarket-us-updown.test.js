@@ -36,6 +36,14 @@ describe('cadence', () => {
     expect(shouldSample(600_000, '15m', T, 'btc')).toBe(true);
     expect(shouldSample(600_000, '15m', T, 'eth')).toBe(false);
   });
+
+  it('samples BTC 5m every 5 s for the whole window, and no other coin', () => {
+    expect(shouldSample(200_000, '5m', T + 5_000, 'btc')).toBe(true);
+    expect(shouldSample(200_000, '5m', T + 5_000, 'eth')).toBe(false);
+    let n = 0;
+    for (let b = T; b < T + 300_000; b += 5_000) if (shouldSample(T + 300_000 - b, '5m', b, 'btc')) n++;
+    expect(n).toBe(60);
+  });
 });
 
 describe('spot beside the quote', () => {

@@ -7,7 +7,8 @@
 // What it writes:
 //   poly_us_updown_book_5s  — top of book (Up/"Yes" side) for the CURRENT 5m window of BTC, ETH,
 //                             SOL and XRP every 15 s, every 5 s in the final 90 s (~32 rows a
-//                             window, ~37K a day), plus the current 15m window in ITS final 5 min
+//                             window, ~37K a day; BTC every 5 s for the whole window, ~60 rows,
+//                             +8K a day, BTC5M_BOARD_REDESIGN U2), plus the current 15m window in ITS final 5 min
 //                             at the same cadence (the site's "same closing minute" panel, ~12K a
 //                             day). BTC's 15m window is sampled for its WHOLE 15 minutes (the
 //                             Polymarket US bot's market; ~7K a day), each row carrying the
@@ -52,6 +53,8 @@ const SPOT_COINS = new Set(['btc', 'eth', 'sol', 'xrp']);
 export const FAST_TAU_MS = 90_000;
 export const SLOW_EVERY_S = 15;
 export const FAST_EVERY_S = 5;
+// Windows sampled at the fast cadence start to finish: the site's Bitcoin 5-Minute board.
+export const FAST_WHOLE = new Set(['btc|5m']);
 // 15 s (was 120 s): the gateway shows the closed event with its settlementPrice ~35 s after the close
 // (measured 2026-10-31 05:10Z), and window N's settlement = N+1's price to beat — the site's Bitcoin
 // 5-Minute tool reads it as the official price to beat (BTC5M_POLY_US_TOOL_2026-10-31 A3). Not resolved
@@ -80,6 +83,7 @@ export function shouldSample(tauMs, horizon, boundaryMs, coin) {
   const from = FULL_WINDOW.has(`${coin}|${horizon}`) ? HORIZON_MS[horizon] : CAPTURE_FROM_TAU_MS[horizon];
   if (tauMs <= 0 || tauMs > from) return false;
   const s = Math.round(boundaryMs / 1000);
+  if (FAST_WHOLE.has(`${coin}|${horizon}`)) return s % FAST_EVERY_S === 0;
   if (tauMs <= FAST_TAU_MS) return s % FAST_EVERY_S === 0;
   return s % SLOW_EVERY_S === 0;
 }
@@ -407,7 +411,7 @@ export function startPolymarketUsUpdown() {
   const sweep = () => sweepMissing().then((n) => n && console.log(`[poly-us-updown] sweep wrote ${n} missing windows`)).catch((e) => noteError('sweep', e));
   setTimeout(sweep, 30_000);
   state.sweepTimer = setInterval(sweep, 60 * 60_000);
-  console.log('[poly-us-updown] started: 5m book 15 s / 5 s final 90 s, 15m final 5 min (BTC whole window + Coinbase spot), 5m+15m ledger roll T+2 min');
+  console.log('[poly-us-updown] started: 5m book 15 s / 5 s final 90 s (BTC 5 s whole window), 15m final 5 min (BTC whole window + Coinbase spot), 5m+15m ledger roll T+2 min');
 }
 
 export function stopPolymarketUsUpdown() {

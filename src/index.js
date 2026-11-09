@@ -38,6 +38,7 @@ import { listAllCommodities, listEnabledCommodities } from './engine/commodities
 import { startFlowAlerts } from './engine/flow-alerts.js';
 import { refreshCalibrationMaps, calibrationStatus } from './engine/calibration.js';
 import { refreshEngineRules, engineRulesStatus } from './engine/engine-rules.js';
+import { applyOilMintGuard } from './engine/mint-guard.js';
 import { EXPIRATION_BURST_WINDOW_MS, BTC_STRIKE_COUNT_WARN } from './engine/thresholds.js';
 import {
   upsertCommodityEdgeRows,
@@ -554,6 +555,15 @@ async function runSnapshotOnceInner(state) {
         console.warn(msg);
         postBotLog(msg).catch(() => {});
       }
+    }
+
+    // Oil mint timing (OIL_EDGE_DEEP_DIVE_2026-11-09 U3; mechanism engine/mint-guard.js).
+    // The mint is the DB trigger on commodity_edge_signals, so the only way to say
+    // "no oil pick before 10:00 ET / on a > 60 s spot" is to upsert no BUY row then.
+    // Rows become PASS (fused_no_edge) in place; every other commodity is untouched.
+    const mintGuard = applyOilMintGuard(config, snap);
+    if (mintGuard.blocked) {
+      console.log(`[${config.commodity}] mint guard: ${mintGuard.blocked} — ${mintGuard.demoted} BUY row(s) held as PASS`);
     }
 
     // ⛔ INSIDE THE NEAR-EXPIRY WINDOW, DO NOT UPSERT THE PRIMARY TABLE.

@@ -2,8 +2,10 @@ name: Metals Variance Clock Weekly Refit
 
 # Refits the gold and silver intraday variance clocks (24 ET-hour weights) from
 # metals_spot_marks and writes a NEW SHADOW row per metal to edge_calibration_maps
-# (method variance_clock_v1). Never activates anything: promotion is manual
-# (site repo handoffs/METALS_EDGE_VARIANCE_CLOCK_2026-10-23.md PART 3).
+# (method variance_clock_v1). The fit never activates anything; the Loop v2
+# decision step below may, under the written bar (site repo
+# handoffs/EDGE_LOOP_V2_2026-11-09.md U8, superseding the manual PART 3 read in
+# METALS_EDGE_VARIANCE_CLOCK_2026-10-23.md).
 # The engine fails open to calendar time when the newest clock row is > 14 days
 # old, so two missed runs in a row turn prob_clock off (null), never wrong.
 
@@ -42,3 +44,16 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
         run: node scripts/fit-variance-clock.js --commodity ${{ matrix.commodity }} ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+
+      # Loop v2 (site repo handoffs/EDGE_LOOP_V2_2026-11-09.md U8): scores the shadow (Brier of
+      # prob_clock vs prob_physical vs the book on settled strikes), stamps it on the newest clock row,
+      # and auto-promotes when brier_cal < brier_raw on the two newest fits AND the settled picks
+      # re-scored under prob_clock clear the §2 PROMOTE bar AND ≥ 10 trading days of clock data exist.
+      # Prints the decision + every number; on PROMOTE flips active=true and writes the
+      # engine_rule_events row (actor calibration-fit). A dry run prints and writes nothing.
+      - name: Loop v2 auto-promote decision
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: node scripts/auto-promote-calibration.js --commodity ${{ matrix.commodity }} --method variance_clock_v1 ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '--promote' }}

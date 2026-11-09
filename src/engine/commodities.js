@@ -356,6 +356,19 @@ export const COMMODITIES = {
     driftMuScale: 0,
     minEdgePpNoSide: 0.1,
     noSideEnabled: true,
+    // Variance clock, LIVE (OIL_EDGE_DEEP_DIVE_2026-11-09 U2; Benny: no shadow).
+    // Measured WTI 15-min variance by ET hour (6 weeks, 1.0 = hour mean): 8h 2.3 ·
+    // 9h 1.8 · 10h 2.0 · 11h 2.6 · 12h 2.7 · 13h 1.1 · 14h 1.2 · 15h 0.7 · 16h 0.3 ·
+    // 17–19h 0.1–0.2. Calendar time priced the 9:36 → 14:30 horizon at weight 1 when
+    // the true weight is ≈ 2 (σ ≈ 30 % too low, morning tails too thin) and the
+    // 2:40 PM next-day mint through the dead overnight at weight 1 (tails too fat).
+    // clockGoverns: when the newest oil clock row is ACTIVE and fresh (≤ 14 d),
+    // prob_physical is priced on T_clock; prob_clock is still written beside it
+    // (equal to prob_physical while governing — the queryable marker). A shadow
+    // or stale row writes prob_clock only, exactly as gold/silver do today.
+    // Oil-only: the metals promotion is the Loop v2 auto-promote's call, not this.
+    varianceClock: true,
+    clockGoverns: true,
     intradayHistory: true,
     intradayBandPct: 0.10,
   },

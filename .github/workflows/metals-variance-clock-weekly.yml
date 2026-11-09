@@ -8,6 +8,12 @@ name: Metals Variance Clock Weekly Refit
 # METALS_EDGE_VARIANCE_CLOCK_2026-10-23.md).
 # The engine fails open to calendar time when the newest clock row is > 14 days
 # old, so two missed runs in a row turn prob_clock off (null), never wrong.
+#
+# Oil (OIL_EDGE_DEEP_DIVE_2026-11-09 U2): the oil clock is LIVE — the fit writes an
+# ACTIVE row (`--live`) from the 15-min WTI settle captures and the oil engine
+# prices prob_physical on it (commodities.js clockGoverns). No auto-promote step for
+# oil: there is nothing to promote, and a missed refit fails open to calendar time
+# after 14 days exactly as for the metals.
 
 on:
   schedule:
@@ -27,7 +33,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        commodity: [gold, silver]
+        commodity: [gold, silver, oil]
+        include:
+          - commodity: oil
+            live: '--live'
     steps:
       - uses: actions/checkout@v7
 
@@ -43,7 +52,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-        run: node scripts/fit-variance-clock.js --commodity ${{ matrix.commodity }} ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+        run: node scripts/fit-variance-clock.js --commodity ${{ matrix.commodity }} ${{ matrix.live || '' }} ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
       # Loop v2 (site repo handoffs/EDGE_LOOP_V2_2026-11-09.md U8): scores the shadow (Brier of
       # prob_clock vs prob_physical vs the book on settled strikes), stamps it on the newest clock row,
@@ -52,6 +61,7 @@ jobs:
       # Prints the decision + every number; on PROMOTE flips active=true and writes the
       # engine_rule_events row (actor calibration-fit). A dry run prints and writes nothing.
       - name: Loop v2 auto-promote decision
+        if: matrix.commodity != 'oil'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

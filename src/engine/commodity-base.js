@@ -929,10 +929,24 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   // prob_clock, written beside prob_physical; direction, edge, tier, alerts and
   // picks keep reading prob_physical exactly as before. No usable clock row
   // (none fitted, stale > 14 d, bad weights) ⇒ T_clock null ⇒ prob_clock null.
+  const clockRow = config.varianceClock === true ? getVarianceClock(config.commodity) : null;
   const clockProfile = config.varianceClock === true
-    ? resolveVarianceClock(getVarianceClock(config.commodity), { nowMs: now.getTime(), commodity: config.commodity })
+    ? resolveVarianceClock(clockRow, { nowMs: now.getTime(), commodity: config.commodity })
     : null;
   const Tclock = clockProfile ? effectiveYearFraction(now.getTime(), closeMs, clockProfile) : null;
+  // LIVE clock (OIL_EDGE_DEEP_DIVE_2026-11-09 U2, oil): with config.clockGoverns and
+  // an ACTIVE, fresh clock row, prob_physical itself is priced on T_clock —
+  // direction, edge, tier, the mint and the alert all read the clock. A shadow
+  // row (active=false) only ever writes prob_clock, so the Loop v2 promotion
+  // semantics (active = owns the decision) hold here too. Fail-open: no usable
+  // clock ⇒ calendar T, exactly the pre-clock engine.
+  const clockGoverns = config.clockGoverns === true && clockRow?.active === true && Tclock != null && Tclock > 0;
+  const Tphysical = clockGoverns ? Tclock : T;
+  if (clockGoverns) {
+    console.log(
+      `[${config.commodity}] variance clock governs: T_clock ${(Tclock * 8760).toFixed(2)}h vs calendar ${(T * 8760).toFixed(2)}h (edge_calibration_maps #${clockRow.id})`,
+    );
+  }
 
   // V2 physical-measure inputs — drift + realized vol estimated once per
   // snapshot, then applied per-strike alongside the legacy risk-neutral path.
@@ -1234,7 +1248,8 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
         );
       } else {
         optProb = probAboveStrike(spotPrice, kSpot, T, RISK_FREE_RATE, q, iv);
-        probPhysical = probAboveStrikePhysical(spotPrice, kSpot, T, muForPhysical, sigmaIvBlend);
+        // Tphysical = T_clock when the clock governs (oil, U2), calendar T otherwise.
+        probPhysical = probAboveStrikePhysical(spotPrice, kSpot, Tphysical, muForPhysical, sigmaIvBlend);
         // Same σ level, same μ, same strike and spot — only the clock differs.
         if (Tclock != null && Tclock > 0) {
           probClock = probAboveStrikePhysical(spotPrice, kSpot, Tclock, muForPhysical, sigmaIvBlend);
@@ -1583,7 +1598,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     // is non-null the iv branch ran, so a σ is always available here.
     // Derivation of the 6·σ√τ form: thresholds.js EDGE_IMPLAUSIBLE_SIGMA_MULT.
     const implausibleSigma = sigmaBlendVal ?? sigmaIvVal ?? iv;
-    const implausibleCeiling = edgeImplausibleThreshold(implausibleSigma, T);
+    // Tphysical: the cap is scaled by the distribution that produced the edge, so on
+    // a governed (U2) oil row the clock's τ applies — calendar τ on every other row.
+    const implausibleCeiling = edgeImplausibleThreshold(implausibleSigma, Tphysical);
     if (
       qualityFlag == null &&
       chosenEdge != null &&
@@ -1992,6 +2009,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       fredObservationDate,
       divergenceWarning,
       smileKalshiCorr,
+      // U2: which clock priced prob_physical this snapshot ('variance_clock' | 'calendar').
+      clockGoverns,
+      clockMapId: clockGoverns ? clockRow.id : null,
       shortHorizon: shStats == null
         ? { source: eventColdBuffer ? 'cold_buffer' : 'disabled', alpha: alphaShortHorizon }
         : {

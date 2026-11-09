@@ -98,18 +98,21 @@ describe('variance clock: golden engine output', () => {
     if (process.env.UPDATE_GOLDEN === '1' || !existsSync(goldenPath)) writeFileSync(goldenPath, JSON.stringify(out, null, 1));
   });
 
-  it('oil and bitcoin rows are byte-identical to the pre-clock engine', () => {
+  it('bitcoin rows are byte-identical to the pre-clock engine', () => {
     const golden = JSON.parse(readFileSync(goldenPath, 'utf8'));
-    for (const c of ['oil', 'bitcoin']) {
+    for (const c of ['bitcoin']) {
       expect(out[c].length).toBeGreaterThan(0);
       expect(JSON.stringify(out[c])).toBe(JSON.stringify(golden[c]));
       for (const r of out[c]) expect(r).not.toHaveProperty('prob_clock');
     }
   });
 
-  it('gold and silver rows differ from the pre-clock engine only by prob_clock', () => {
+  // Oil joined the clock on 2026-11-09 (OIL_EDGE_DEEP_DIVE U2, varianceClock + clockGoverns).
+  // With NO clock row installed its rows must still equal the pre-clock engine apart from
+  // the prob_clock key — the fail-open path is calendar time, byte for byte.
+  it('gold, silver and oil rows differ from the pre-clock engine only by prob_clock', () => {
     const golden = JSON.parse(readFileSync(goldenPath, 'utf8'));
-    for (const c of ['gold', 'silver']) {
+    for (const c of ['gold', 'silver', 'oil']) {
       const stripped = out[c].map(({ prob_clock, ...rest }) => rest);
       expect(JSON.stringify(stripped)).toBe(JSON.stringify(golden[c]));
     }
@@ -119,7 +122,7 @@ describe('variance clock: golden engine output', () => {
     for (const c of ['gold', 'silver', 'oil', 'bitcoin']) {
       for (const r of out[c]) if (r.direction === 'PASS') expect(r.pass_reason, `${c} ${r.strike}`).toBeTruthy();
     }
-    for (const c of ['gold', 'silver']) for (const r of out[c]) expect(r.prob_clock).toBeNull();
+    for (const c of ['gold', 'silver', 'oil']) for (const r of out[c]) expect(r.prob_clock).toBeNull();
   });
 
   it('with a shadow clock installed, gold writes prob_clock beside an unchanged prob_physical', async () => {
@@ -143,10 +146,14 @@ describe('variance clock: golden engine output', () => {
       // The clock tightens a Fri→Mon horizon (weekend at 0): tails move toward 0/1.
       const otm = priced.filter((r) => r.strike > SPOT.gold + 50);
       for (const r of otm) expect(r.prob_clock).toBeLessThan(r.prob_physical);
-      // Oil ignores the clock entirely even if a row existed for it.
+      // Oil (clockGoverns since 2026-11-09, OIL_EDGE_DEEP_DIVE U2): a SHADOW row writes
+      // prob_clock beside UNCHANGED decisions — only an ACTIVE row governs prob_physical
+      // (test/engine.oil-variance-clock.test.js). Everything but prob_clock stays golden.
       __setClocksForTest([['oil', { id: 98, commodity: 'oil', method: CLOCK_METHOD, active: false, shadow: true, fit_at: '2026-10-23T12:00:00Z', knots: { hours_et: w, calendar: CALENDAR_METALS } }]]);
       const oil = await computeSnapshot(COMMODITIES.oil, eventFor('oil', CLOSES.oil), { now: NOW });
-      expect(JSON.stringify(oil.rows)).toBe(JSON.stringify(golden.oil));
+      expect(oil.meta.clockGoverns).toBe(false);
+      expect(JSON.stringify(oil.rows.map(({ prob_clock, ...rest }) => rest))).toBe(JSON.stringify(golden.oil));
+      for (const r of oil.rows.filter((x) => x.prob_physical != null)) expect(r.prob_clock).not.toBeNull();
     } finally {
       __setClocksForTest([]);
     }

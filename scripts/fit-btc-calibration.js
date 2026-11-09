@@ -1,19 +1,27 @@
 #!/usr/bin/env node
-// Fit a pooled Platt calibration map for bitcoin-edge from our own settled record.
-// handoffs/BITCOIN_EDGE_V21_CALIBRATED_RELAUNCH_2026-08-05.md §4.1
+// Fit a pooled Platt calibration map for an edge tool from our own settled record.
+// handoffs/BITCOIN_EDGE_V21_CALIBRATED_RELAUNCH_2026-08-05.md §4.1 (bitcoin)
+// handoffs/OIL_EDGE_DEEP_DIVE_2026-11-09.md §4 U4 (oil — the shrink layer)
 //
 // Usage:
-//   node scripts/fit-btc-calibration.js            # fit + write a shadow row
+//   node scripts/fit-btc-calibration.js            # bitcoin: fit + write a shadow row
 //   node scripts/fit-btc-calibration.js --dry-run  # fit + print, write nothing
+//   node scripts/fit-btc-calibration.js --commodity oil --since 2026-11-24 --dry-run
+//       # oil: only picks minted on/after --since (the post-U1/U2 era); --model-version
+//       # defaults to v2_physical (the oil mint keeps that stamp — see the U2 note).
 //
 // No axios (banned repo-wide). Uses the engine's existing supabase-js client.
 //
 // WHAT IT FITS
 // ------------
-// Every settled bitcoin-edge pick is YES-side and stores predicted_prob =
-// model P(YES) and market_price_at_pick = market P(YES), so this is a single-
-// basis problem: map model P(YES) -> calibrated P(YES) against the realized
-// YES outcome. We fit
+// Every commodity pick stores predicted_prob = model P(YES) and
+// market_price_at_pick = market P(YES) WHATEVER the side taken (the mint trigger
+// writes the YES basis for a NO pick too — verified on oil-edge 2026-11-09:
+// NO pick predicted_prob 0.0498, market 0.195, entry_cost 0.805). So this is a
+// single-basis problem on both sides: map model P(YES) -> calibrated P(YES)
+// against the realized YES outcome, where a NO pick that `won` is a YES outcome
+// of 0 and a NO pick that `lost` is a YES outcome of 1 (yesBasisOutcome below).
+// Bitcoin has no NO picks (noSideEnabled=false), so its fit is unchanged. We fit
 //     p_cal = sigmoid(a * logit(p_model) + b)
 // by Newton-Raphson on the log-loss, then shrink (a,b) toward the identity map
 // (1,0) so a thin sample cannot produce a violent correction.
@@ -38,6 +46,7 @@
 // below — brier_cal is in-sample and is fitted to beat brier_raw by
 // construction, so it is not evidence of anything.
 
+import 'dotenv/config'; // local runs read .env like fit-variance-clock.js; the workflow passes env directly
 import { getClient } from '../src/delivery/supabase.js';
 import { logit, sigmoid } from '../src/engine/calibration.js';
 import { sanitize } from '../src/lib/sanitize.js';
@@ -78,17 +87,58 @@ async function postBotLog(content) {
 // behaves exactly as before. Fitting is safe to run; PROMOTION stays manual and
 // gated on out-of-sample Brier (§9 governance) — this only chooses the target.
 //   node scripts/{script} --commodity gold [--tool-slug gold-edge]
-const argValue = (name) => {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--')
-    ? process.argv[i + 1]
+const argValue = (name, argv = process.argv) => {
+  const i = argv.indexOf(`--${name}`);
+  return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--')
+    ? argv[i + 1]
     : null;
 };
-const COMMODITY = (argValue('commodity') || 'bitcoin').toLowerCase();
-// Slug convention is `<commodity>-edge` across the tool registry; override only
-// if a surface ever breaks it.
-const TOOL_SLUG = argValue('tool-slug') || `${COMMODITY}-edge`;
-const MODEL_VERSION = 'v2_physical';
+
+/** Pure: argv → { commodity, toolSlug, modelVersion, since (ISO date | null), dryRun }. */
+export function parseCalibArgs(argv = process.argv) {
+  const commodity = (argValue('commodity', argv) || 'bitcoin').toLowerCase();
+  const since = argValue('since', argv);
+  if (since != null && !/^\d{4}-\d{2}-\d{2}$/.test(since)) {
+    return { error: `--since must be YYYY-MM-DD (got ${since})` };
+  }
+  return {
+    commodity,
+    // Slug convention is `<commodity>-edge` across the tool registry; override only
+    // if a surface ever breaks it.
+    toolSlug: argValue('tool-slug', argv) || `${commodity}-edge`,
+    // The regime_tags.model_version the mint stamped. Oil's U2 clock keeps
+    // 'v2_physical' on the row (the trigger reads prob_physical only under that
+    // exact string), so the oil era is selected by --since, not by the version.
+    modelVersion: argValue('model-version', argv) || 'v2_physical',
+    since,
+    dryRun: argv.includes('--dry-run'),
+  };
+}
+
+/**
+ * Pure: a settled pick → { p, m, y } on the YES basis, or null when unusable.
+ * predicted_prob / market_price_at_pick are P(YES) on both sides (the mint);
+ * resolution is relative to the side TAKEN, so a NO `won` is y = 0.
+ */
+export function yesBasisOutcome(row) {
+  const res = row?.tool_settles?.resolution ?? row?.tool_settles?.[0]?.resolution;
+  if (res !== 'won' && res !== 'lost') return null;
+  const side = String(row.predicted_side ?? '').toUpperCase();
+  if (side !== 'YES' && side !== 'NO') return null;
+  const p = Number(row.predicted_prob);
+  const m = Number(row.market_price_at_pick);
+  if (!Number.isFinite(p) || p <= 0 || p >= 1) return null;
+  if (!Number.isFinite(m)) return null;
+  const sideWon = res === 'won';
+  const y = side === 'YES' ? (sideWon ? 1 : 0) : (sideWon ? 0 : 1);
+  return { p, m, y };
+}
+
+const ARGS = parseCalibArgs(process.argv);
+const COMMODITY = ARGS.commodity ?? 'bitcoin';
+const TOOL_SLUG = ARGS.toolSlug ?? `${COMMODITY}-edge`;
+const MODEL_VERSION = ARGS.modelVersion ?? 'v2_physical';
+const SINCE = ARGS.since ?? null;
 const SHRINK_PRIOR = 100; // lambda = n_eff / (n_eff + 100)
 const MIN_EVENTS = 8; // below this a 2-parameter fit is not worth writing
 
@@ -185,45 +235,44 @@ function fitPlatt(z, y, { maxIter = 200, ridge = 1e-4, tol = 1e-9 } = {}) {
 }
 
 async function main() {
-  const dryRun = process.argv.includes('--dry-run');
+  const dryRun = ARGS.dryRun === true;
   const sb = getClient();
 
   // tool_picks carries the model prob AND the market price frozen at the
   // crossing moment; tool_settles carries the outcome. Those are immutable —
   // unlike commodity_edge_signals, whose rows are updated in place all day and
   // decay to NO_EDGE (docs/lessons/readiness-probe-must-be-able-to-fail.md #13).
-  const { data, error } = await sb
+  let q = sb
     .from('tool_picks')
     .select(
       'pick_id, picked_at, market_id, predicted_side, predicted_prob, market_price_at_pick, regime_tags, tool_settles!inner(resolution)',
     )
-    .eq('tool_slug', TOOL_SLUG)
-    .order('picked_at', { ascending: true });
+    .eq('tool_slug', TOOL_SLUG);
+  if (SINCE) q = q.gte('picked_at', `${SINCE}T00:00:00Z`);
+  const { data, error } = await q.order('picked_at', { ascending: true });
 
   if (error) throw new Error(`read settled picks: ${error.message}`);
 
   const rows = (data ?? []).filter((r) => r.regime_tags?.model_version === MODEL_VERSION);
+  console.log(`[calib] ${TOOL_SLUG}: ${data?.length ?? 0} settled picks read${SINCE ? ` since ${SINCE}` : ''}, ${rows.length} on model_version ${MODEL_VERSION}`);
 
   const pModel = [];
   const pMarket = [];
   const y = [];
   const events = new Set();
+  const sides = { YES: 0, NO: 0 };
   let firstAt = null;
   let lastAt = null;
 
   for (const r of rows) {
-    const res = r.tool_settles?.resolution ?? r.tool_settles?.[0]?.resolution;
-    if (res !== 'won' && res !== 'lost') continue;
-    const pm = Number(r.predicted_prob);
-    const mk = Number(r.market_price_at_pick);
-    if (!Number.isFinite(pm) || pm <= 0 || pm >= 1) continue;
-    if (!Number.isFinite(mk)) continue;
-    // predicted_prob and market_price_at_pick are both P(YES); every v2 pick is
-    // YES-side. Guard anyway so a future NO pick can't silently invert the fit.
-    if (r.predicted_side !== 'YES') continue;
-    pModel.push(pm);
-    pMarket.push(mk);
-    y.push(res === 'won' ? 1 : 0);
+    // YES basis on both sides — yesBasisOutcome(). Bitcoin has no NO picks, so
+    // its fit is byte-identical to the YES-only form this loop had before U4.
+    const o = yesBasisOutcome(r);
+    if (!o) continue;
+    sides[String(r.predicted_side).toUpperCase()] += 1;
+    pModel.push(o.p);
+    pMarket.push(o.m);
+    y.push(o.y);
     events.add(r.market_id);
     firstAt = firstAt ?? r.picked_at;
     lastAt = r.picked_at;
@@ -260,7 +309,10 @@ async function main() {
     converged: raw.converged,
     n_effective: nEvents,
     basis: 'logit_yes',
-    era: 'pre_v21_reset',
+    // Bitcoin keeps its historical era label; every other tool records the
+    // model_version fitted and the --since floor that selects the era.
+    era: COMMODITY === 'bitcoin' ? 'pre_v21_reset' : `${MODEL_VERSION}${SINCE ? `_since_${SINCE}` : ''}`,
+    sides,
     shrink_prior: SHRINK_PRIOR,
     // Persisted so the shrinkage choice stays auditable rather than being an
     // undocumented constant someone has to re-derive later.
@@ -268,6 +320,11 @@ async function main() {
   };
 
   const report = {
+    commodity: COMMODITY,
+    tool_slug: TOOL_SLUG,
+    model_version: MODEL_VERSION,
+    since: SINCE,
+    sides,
     n_samples: nSamples,
     n_events: nEvents,
     lambda: Number(lambda.toFixed(4)),
@@ -345,14 +402,17 @@ async function main() {
       shadow: true,
       active: false,
       notes:
-        `Pooled Platt on ${nSamples} settled YES picks across ${nEvents} events ` +
-        `(${firstAt?.slice(0, 10)}..${lastAt?.slice(0, 10)}). Shrunk toward identity with ` +
-        `lambda=n_events/(n_events+${SHRINK_PRIOR})=${lambda.toFixed(4)} — EFFECTIVE sample ` +
+        `Pooled Platt on ${nSamples} settled picks (YES basis; ${sides.YES} YES / ${sides.NO} NO) across ${nEvents} events ` +
+        `(${firstAt?.slice(0, 10)}..${lastAt?.slice(0, 10)}, model_version ${MODEL_VERSION}${SINCE ? `, since ${SINCE}` : ''}). ` +
+        `Shrunk toward identity with lambda=n_events/(n_events+${SHRINK_PRIOR})=${lambda.toFixed(4)} — EFFECTIVE sample ` +
         'size, not row count, because a ladder contributes ~4.5 correlated rows. ' +
-        'FITTED ON THE PRE-V2.1 ENGINE (mu 1.0/50): it describes the old model and is ' +
-        'expected to over-correct the new one. brier_cal here is IN-SAMPLE and beats ' +
-        'brier_raw by construction — it is not evidence. Promotion is gated on ' +
-        'out-of-sample Brier over the post-reset era; see promote-btc-calibration.js.',
+        (COMMODITY === 'bitcoin'
+          ? 'FITTED ON THE PRE-V2.1 ENGINE (mu 1.0/50): it describes the old model and is ' +
+            'expected to over-correct the new one. '
+          : '') +
+        'brier_cal here is IN-SAMPLE and beats brier_raw by construction — it is not evidence. ' +
+        'Promotion is the Loop v2 auto-promote decision (scripts/auto-promote-calibration.js, ' +
+        'out-of-sample re-score under the §2 bar), never this fit.',
     })
     .select('id')
     .single();
@@ -369,7 +429,7 @@ async function main() {
       cannotMatchMarket ? "calibrated Brier cannot match the market's" : null,
     ].filter(Boolean);
     await postBotLog(
-      `Bitcoin calibration refit #${written.id} (shadow) — ATTENTION\n` +
+      `${COMMODITY} calibration refit #${written.id} (shadow) — ATTENTION\n` +
         `${flags.join('; ')}\n` +
         `n=${nSamples} over ${nEvents} events | raw ${brierRaw.toFixed(4)} | ` +
         `cal ${brierCal.toFixed(4)} (in-sample) | market ${brierMarket.toFixed(4)}\n` +
@@ -378,8 +438,15 @@ async function main() {
   }
 }
 
-main().catch(async (err) => {
-  console.error(err.message);
-  await postBotLog(`Bitcoin calibration refit FAILED: ${err.message}`);
-  process.exit(1);
-});
+// Only run when invoked directly (the pure helpers above are imported by tests).
+if (process.argv[1] && /fit-btc-calibration\.js$/.test(process.argv[1])) {
+  if (ARGS.error) {
+    console.error(ARGS.error);
+    process.exit(2);
+  }
+  main().catch(async (err) => {
+    console.error(err.message);
+    await postBotLog(`${COMMODITY} calibration refit FAILED: ${err.message}`);
+    process.exit(1);
+  });
+}

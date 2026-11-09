@@ -67,7 +67,10 @@ const PREDICATE_KEYS = new Set([
 // never fire, which is how size_cap rules would silently die.
 //   supersedes   unsuppress: the rule id whose suppress/downgrade this cancels
 //   rung / unit / per_position   size_rung (bots)
-const PARAM_KEYS = new Set(['size_cap_pct', 'supersedes', 'rung', 'unit', 'per_position']);
+//   lift_side_gate   promote (EDGE_LOOP_V2 U5, S8): also lift the post-spread SIDE gate on a row whose
+//                    gross |edge| matched — the September metals publish path (side from the edge
+//                    sign, tier from the gross). Never a quality flag, never the 40¢ entry floor.
+const PARAM_KEYS = new Set(['size_cap_pct', 'supersedes', 'rung', 'unit', 'per_position', 'lift_side_gate']);
 
 const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const ET_PARTS = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', weekday: 'short', hourCycle: 'h23' });
@@ -318,7 +321,7 @@ export function matchingRules(ctx, rules = _rules) {
 /**
  * Apply active rules to one signal.
  *
- * Returns { suppress, downgrade, promote, alert, hotPot, sizeCapPct, matched, ruleIds, note } —
+ * Returns { suppress, downgrade, promote, liftSideGate, alert, hotPot, sizeCapPct, matched, ruleIds, note } —
  * the caller decides how to render them. `note` is an audit string appended to the row's
  * rationale so every suppression is traceable to a rule id; `ruleIds` (full ids of every
  * matched rule) is what the pick carries in regime_tags.rules.
@@ -335,7 +338,7 @@ export function matchingRules(ctx, rules = _rules) {
  * honoured on EVERY pass, not just at boot.
  */
 export function applyEngineRules(ctx, opts = {}) {
-  const none = { suppress: false, downgrade: false, promote: false, alert: false, hotPot: null, sizeCapPct: null, matched: [], ruleIds: [], note: null };
+  const none = { suppress: false, downgrade: false, promote: false, liftSideGate: false, alert: false, hotPot: null, sizeCapPct: null, matched: [], ruleIds: [], note: null };
   const enabled = opts.enabled ?? _enabled;
   if (!enabled) return none;
   const matched = matchingRules(ctx, opts.rules ?? _rules);
@@ -347,6 +350,7 @@ export function applyEngineRules(ctx, opts = {}) {
   let suppress = false;
   let downgrade = false;
   let promote = false;
+  let liftSideGate = false;
   let alert = false;
   let hotPot = null;
   let sizeCapPct = null;
@@ -354,7 +358,10 @@ export function applyEngineRules(ctx, opts = {}) {
     if (superseded.has(String(r.id))) continue;
     if (r.action === 'suppress') suppress = true;
     else if (r.action === 'downgrade') downgrade = true;
-    else if (r.action === 'promote') promote = true;
+    else if (r.action === 'promote') {
+      promote = true;
+      if (r.condition?.lift_side_gate === true) liftSideGate = true;
+    }
     else if (r.action === 'alert') {
       alert = true;
       hotPot = hotPot ?? r.pot_key ?? r.condition?.pot_key ?? String(r.id);
@@ -364,6 +371,7 @@ export function applyEngineRules(ctx, opts = {}) {
     }
   }
   if (suppress) promote = false;
+  if (!promote) liftSideGate = false;
   const ids = matched.map((r) => String(r.id).slice(0, 8)).join(',');
   const actions = [suppress ? 'suppress' : null, downgrade ? 'downgrade' : null, promote ? 'promote' : null, alert ? 'alert' : null]
     .filter(Boolean)
@@ -372,6 +380,7 @@ export function applyEngineRules(ctx, opts = {}) {
     suppress,
     downgrade,
     promote,
+    liftSideGate,
     alert,
     hotPot,
     sizeCapPct,

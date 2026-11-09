@@ -147,6 +147,36 @@ export function passReasonFor({ direction, qualityFlag, entryFloor, gateReason, 
   return 'fused_no_edge';
 }
 
+// Side-gate refusals a `promote` rule with lift_side_gate may lift (EDGE_LOOP_V2 U5, S8). Quality
+// flags, the implausible ceiling and the 40c entry floor are NOT in this set — a rule cannot lift
+// a data fault, and the floor is Benny's 2026-10-02 reset, DB-enforced on the mint as well.
+export const SOFT_SIDE_GATE_REASONS = new Set(['yes_net_below_floor', 'no_net_below_floor', 'yes_longshot', 'no_side_disabled']);
+
+/**
+ * One rule-lifted BUY per event per snapshot — the best gross |edge| strike keeps the side the lift
+ * gave it; every other lifted strike is restored to the state the side gate left it in (its own
+ * pass_reason, never a new one — the pass_reason vocabulary is a DB CHECK). The mint's day key then
+ * makes it one pick per event per ET day. Pure; exported for the test.
+ *   lifted: Map<strikeKey, { prior: { direction, confidence, fused_confidence, pass_reason, rationale } }>
+ */
+export function selectBestLiftedStrike(rows, lifted) {
+  if (!lifted || lifted.size === 0) return rows;
+  const live = rows.filter((r) => lifted.has(String(r.strike)) && (r.direction === 'BUY YES' || r.direction === 'BUY NO'));
+  if (live.length <= 1) return rows;
+  const best = live.reduce((a, b) => (Math.abs(b.fused_edge_pp ?? 0) > Math.abs(a.fused_edge_pp ?? 0) ? b : a));
+  for (const r of live) {
+    if (r === best) continue;
+    const prior = lifted.get(String(r.strike))?.prior;
+    if (!prior) continue;
+    r.direction = prior.direction;
+    r.confidence = prior.confidence;
+    r.fused_confidence = prior.fused_confidence;
+    r.pass_reason = prior.pass_reason;
+    r.rationale = `${prior.rationale ?? ''} (rule lift yielded to the best strike ${best.strike})`.trim();
+  }
+  return rows;
+}
+
 export const HARD_SUPPRESS_FLAGS = new Set([
   'kalshi_no_book',
   'kalshi_stale',
@@ -1010,6 +1040,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   // Loop v2: strike → { rules: [rule ids], hot_pot } for every row a rule touched; the
   // minted pick's regime_tags carries it (index.js postMintedPick). Not an upsert column.
   const ruleTags = {};
+  // Loop v2 U5: strikes a promote rule lifted past the side gate this snapshot, with the state the
+  // gate left them in — selectBestLiftedStrike() keeps one per event. Not an upsert column.
+  const liftedStrikes = new Map();
   for (const rawMarket of snapshotMarkets) {
     if (rawMarket.floorStrike == null) continue;
     const market = mergeLiveQuote(rawMarket);
@@ -1577,6 +1610,29 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
           tierInt = confidenceTierInt(fusedTierStr);
           if (confidence === 'skip') confidence = 'low';
           rationale = `${rationale ?? ''} (promoted by rule — local soft gates lifted)`.trim();
+        } else if (
+          ruleVerdict.promote && ruleVerdict.liftSideGate && !preGate && qualityFlag == null &&
+          chosenEdge != null && SOFT_SIDE_GATE_REASONS.has(gateReason)
+        ) {
+          // EDGE_LOOP_V2 U5 (S8): the September metals publish path, under a rule — the side gate
+          // refused this strike on a NET floor / the longshot band / the NO kill switch, the gross
+          // |edge| matched the rule, so the side comes from the edge sign and the tier from the
+          // gross, exactly as before 2026-08-31. One lifted strike per event survives
+          // (selectBestLiftedStrike); the 40c entry floor and every quality flag still apply.
+          liftedStrikes.set(String(kSpot), {
+            prior: {
+              direction, confidence, fused_confidence: fusedTierStr, rationale,
+              pass_reason: passReasonFor({
+                direction, qualityFlag, entryFloor: false, gateReason, edge: chosenEdge, noMarket: kalshiView === 'no_market',
+              }),
+            },
+          });
+          direction = chosenEdge > 0 ? 'BUY YES' : 'BUY NO';
+          fusedTierStr = fusedTier(Math.abs(chosenEdge));
+          tierInt = confidenceTierInt(fusedTierStr);
+          confidence = Math.abs(chosenEdge) >= 0.10 ? 'medium' : 'low';
+          gateReason = null;
+          rationale = `${rationale ?? ''} (promoted by rule — side gate lifted on ${(Math.abs(chosenEdge) * 100).toFixed(1)}pp gross)`.trim();
         }
         if (ruleVerdict.downgrade) {
           fusedTierStr = downgradeFusedTier(fusedTierStr);
@@ -1670,6 +1726,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       model_version: activeModelVersion,
     });
   }
+
+  // Loop v2 U5: one rule-lifted BUY per event — the best gross strike; the rest go back to the gate.
+  selectBestLiftedStrike(rows, liftedStrikes);
 
   // ---- Event-level smile-vs-Kalshi sanity check (2026-05-22) ----
   // If our prob curve across strikes doesn't even rank-correlate with

@@ -37,18 +37,28 @@ describe('spot staleness gate config', () => {
     }
   });
 
-  it('oil has NO staleness gate — its spot is a delayed Yahoo feed', () => {
-    // yahoo_cl_f is ~15 minutes delayed by construction, so a Pyth-scale
-    // threshold would flag every oil snapshot forever. Oil keeps DCOILWTICO,
-    // which unlike the gold series still resolves.
+  it('oil has a 120 s staleness gate ONLY because its spot is delta-bridged to the live proxy', () => {
+    // Until 2026-11-09 oil had NO gate: yahoo_cl_f is ~15 minutes delayed by
+    // construction, so a Pyth-scale threshold would have flagged every snapshot
+    // forever. OIL_EDGE_DEEP_DIVE_2026-11-09 U1 bridges the Yahoo print to now
+    // with the live WTI proxy's move, so the spot is as-of the proxy's last print
+    // and a 120 s bar means "the bridge fell back to the raw delayed quote". The
+    // two flags are a pair: a gate without the bridge demotes every oil row.
     //
     // NOTE oil DOES carry pythSymbol: 'WTI' — it is "kept for shape parity" and
     // explicitly unused while useYahooSpot is true. So the invariant is the spot
-    // SOURCE, not the presence of a Pyth symbol. Asserting on pythSymbol here is
-    // what a first draft of this test did, and it was wrong.
+    // SOURCE, not the presence of a Pyth symbol.
     expect(COMMODITIES.oil.useYahooSpot).toBe(true);
-    expect(COMMODITIES.oil.maxSpotAgeMs ?? null).toBeNull();
+    expect(COMMODITIES.oil.bridgeSpotWithProxy).toBe(true);
+    expect(COMMODITIES.oil.maxSpotAgeMs).toBe(120_000);
     expect(COMMODITIES.oil.fredSeriesId).toBe('DCOILWTICO');
+  });
+
+  it('no other commodity bridges its spot — the bridge is oil-specific', () => {
+    for (const name of Object.keys(COMMODITIES)) {
+      if (name === 'oil') continue;
+      expect(COMMODITIES[name].bridgeSpotWithProxy ?? false, `${name} must not bridge`).toBe(false);
+    }
   });
 
   it('gold no longer points at the deleted FRED series', () => {

@@ -67,10 +67,63 @@ import { getBrtiSpot } from '../feeds/brti-spot.js';
 // and WRITES `.pub` (the public exchange basket). Never the other way round.
 import { getBtcSpot } from '../feeds/btc-spot.js';
 import { WTI_FRONT_MONTH_SYMBOL } from '../feeds/pyth.js';
+import { WTI_PROXY_SYMBOL, wtiProxyRawAt } from '../feeds/wti-proxy.js';
 
 /** Oil snapshots run on a 5-min cadence, so a Pyth tick older than 10 min means
  *  the feed is dead rather than quiet. Falls through to Yahoo, never publishes. */
 const PYTH_WTI_MAX_AGE_MS = 10 * 60 * 1000;
+
+// ── Oil delta-bridge (OIL_EDGE_DEEP_DIVE_2026-11-09 U1) ──────────────────────
+// The Yahoo named-month print is the right LEVEL (it is the contract KXWTI
+// settles on; mean 0.07 miss vs the settle over 11 settles, 2026-09-28) but it
+// is a 10-minute-delayed quote cached 5 minutes, so the engine priced a live
+// Kalshi book off a 15-minute staircase: mean |spot − live| 27¢, p90 64¢ on a
+// 50¢ strike step (461 paired snapshots, 30 d). The live WTI proxy the 15-min
+// engine already runs (feeds/wti-proxy.js) has the right MOVE but, being a perp
+// that rolls on its own schedule, the wrong level around a roll (index.js
+// liveness note: mean 1.65 miss at the settle 09-11 → 09-25). So: level from
+// Yahoo, move from the proxy —
+//     spot = yahoo(t_q) + (proxy_raw(now) − proxy_raw(t_q)),  t_q = regularMarketTime.
+// Raw (pre-basis) proxy on both legs so a re-anchor step cancels. A proxy that
+// has not printed for OIL_BRIDGE_FROZEN_MS, no raw sample near t_q, or a move
+// larger than OIL_BRIDGE_MAX_DELTA_FRAC (a bad print) ⇒ the raw Yahoo print is
+// used unbridged, and config.maxSpotAgeMs demotes the tier as it does for a
+// dead metals feed. The proxy never leaves the engine: spot_source names Yahoo
+// and the contract, never the proxy's vendor.
+const OIL_BRIDGE_FROZEN_MS = 120_000;
+const OIL_BRIDGE_ANCHOR_GAP_MS = 60_000; // proxy polls every 10 s; tolerate a missed poll
+const OIL_BRIDGE_MAX_DELTA_FRAC = 0.03;
+
+/**
+ * Pure. `anchor` = { price, publishTimeMs, source } (the Yahoo print);
+ * `proxyNow` = getPrice(WTI_PROXY_SYMBOL) ({ price, rawPrice?, publishTimeMs });
+ * `proxyAtAnchor` = the raw proxy read at anchor.publishTimeMs (number | null).
+ * Returns the bridged spot { price, publishTimeMs, source: `${anchor.source}_bridged`,
+ * bridge: { delta, anchorAgeS, proxyAgeS } } or null when the bridge cannot be trusted.
+ */
+export function bridgeOilSpot(anchor, { proxyNow, proxyAtAnchor, nowMs = Date.now(), frozenMs = OIL_BRIDGE_FROZEN_MS, maxDeltaFrac = OIL_BRIDGE_MAX_DELTA_FRAC } = {}) {
+  if (!anchor || !(Number(anchor.price) > 0) || !Number.isFinite(anchor.publishTimeMs)) return null;
+  if (!proxyNow || !Number.isFinite(proxyNow.publishTimeMs)) return null;
+  const pNow = Number.isFinite(proxyNow.rawPrice) ? proxyNow.rawPrice : proxyNow.price;
+  if (!(pNow > 0) || !(proxyAtAnchor > 0)) return null;
+  const proxyAgeMs = nowMs - proxyNow.publishTimeMs;
+  if (!(proxyAgeMs >= 0) || proxyAgeMs > frozenMs) return null;
+  if (anchor.publishTimeMs > nowMs + 5_000) return null; // a print from the future is a clock fault
+  const delta = pNow - proxyAtAnchor;
+  if (!Number.isFinite(delta) || Math.abs(delta) > maxDeltaFrac * anchor.price) return null;
+  const price = Math.round((anchor.price + delta) * 1e4) / 1e4;
+  if (!(price > 0)) return null;
+  return {
+    price,
+    publishTimeMs: proxyNow.publishTimeMs,
+    source: `${anchor.source ?? 'yahoo'}_bridged`,
+    bridge: {
+      delta: Math.round(delta * 1e4) / 1e4,
+      anchorAgeS: Math.round((nowMs - anchor.publishTimeMs) / 1000),
+      proxyAgeS: Math.round(proxyAgeMs / 1000),
+    },
+  };
+}
 
 import { getOilSpot, getContractSpot } from '../feeds/yahoo-oil.js';
 import { synthesizeWtiSpot } from '../feeds/uso-synthetic.js';
@@ -782,6 +835,34 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     }
   }
 
+  // Delta-bridge (oil, config.bridgeSpotWithProxy — see bridgeOilSpot). Applies to
+  // whichever Yahoo rung answered. Falls back to the raw print, which the
+  // maxSpotAgeMs gate below then demotes (a 10–20 min old quote vs a 120 s bar).
+  if (spot && useYahooSpot && config.bridgeSpotWithProxy === true) {
+    const nowMs = Date.now();
+    const proxyNow = getPrice(WTI_PROXY_SYMBOL);
+    const proxyAtAnchor = Number.isFinite(spot.publishTimeMs)
+      ? wtiProxyRawAt(spot.publishTimeMs, OIL_BRIDGE_ANCHOR_GAP_MS)
+      : null;
+    const bridged = bridgeOilSpot(spot, { proxyNow, proxyAtAnchor, nowMs });
+    if (bridged) {
+      console.log(
+        `[${config.commodity}] spot bridged ${spot.source} $${spot.price.toFixed(2)} (${bridged.bridge.anchorAgeS}s old) ` +
+          `${bridged.bridge.delta >= 0 ? '+' : ''}${bridged.bridge.delta.toFixed(2)} → $${bridged.price.toFixed(2)}`,
+      );
+      spot = bridged;
+    } else {
+      const why = !proxyNow
+        ? 'proxy not polled'
+        : !Number.isFinite(proxyNow.publishTimeMs) || nowMs - proxyNow.publishTimeMs > OIL_BRIDGE_FROZEN_MS
+          ? `proxy frozen ${Math.round((nowMs - (proxyNow.publishTimeMs ?? nowMs)) / 1000)}s`
+          : proxyAtAnchor == null
+            ? 'no proxy sample at the print time'
+            : 'move outside the bridge cap';
+      console.warn(`[${config.commodity}] spot NOT bridged (${why}) — raw ${spot.source} print, stale-spot gate applies`);
+    }
+  }
+
   if (!spot) {
     console.warn(
       `[${config.commodity}] no spot price (${
@@ -941,9 +1022,11 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   // publishTimeMs.
   //
   // Opt-in per commodity via config.maxSpotAgeMs — null means no gate, matching
-  // how fredSeriesId opts out. Oil deliberately has none: its spot is Yahoo CL=F
-  // on a ~15-minute delay, so a Pyth-scale threshold would flag it permanently,
-  // and its FRED series (DCOILWTICO) still resolves.
+  // how fredSeriesId opts out. Oil had none while its spot was the delayed Yahoo
+  // print (a Pyth-scale threshold would have flagged it permanently); since the
+  // delta-bridge (U1, 2026-11-09) its spot is as-of the proxy's last print, so a
+  // 120 s bar now means "the bridge fell back to the raw delayed quote" and the
+  // tier is demoted exactly as for a dead metals feed.
   const maxSpotAgeMs = config.maxSpotAgeMs ?? null;
   const spotAgeMs = spot.publishTimeMs ? Date.now() - spot.publishTimeMs : null;
   if (maxSpotAgeMs && spotAgeMs !== null && spotAgeMs > maxSpotAgeMs) {
@@ -1867,6 +1950,11 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
       // below and in src/index.js.
       nearExpiry,
       secondsToClose,
+      // When the spot was last published (bridged oil: the proxy's last print;
+      // metals: the quote's own timestamp). index.js's mint guard reads the age.
+      spotSource: spot.source ?? null,
+      spotPublishTimeMs: Number.isFinite(spot.publishTimeMs) ? spot.publishTimeMs : null,
+      spotAgeS: spotAgeMs != null ? Math.round(spotAgeMs / 1000) : null,
       topEdge,
       topTier: finalTopTier,
       topTierInt: confidenceTierInt(finalTopTier),

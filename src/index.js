@@ -15,6 +15,7 @@ import {
 } from './observability/health.js';
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
 import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts, WTI_FRONT_MONTH_SYMBOL, pythConfidenceRejects } from './feeds/pyth.js';
+import { WTI_PROXY_SYMBOL } from './feeds/wti-proxy.js';
 import { startBrtiSpot, stopBrtiSpot, BRTI_SOURCE_TAG } from './feeds/brti-spot.js';
 import { startCoinbaseWs } from './feeds/coinbase-ws.js';
 import { startKalshiBtc15m, getBook1sHealth } from './feeds/kalshi-btc15m.js';
@@ -255,7 +256,7 @@ for (const config of enabledCommodities) {
     // Oil hybrid: Yahoo spot (CL=F / CLM26.NYM) + provider chain. The 15min
     // Yahoo poll cadence gets a 17min stale window. No Pyth feed for oil.
     //
-    // ⛔ Do NOT move the daily/weekly oil engine onto the xyz:CL perp that
+    // ⛔ Do NOT move the daily/weekly oil engine's LEVEL onto the perp that
     // feeds KXWTI15M (feeds/wti-proxy.js). KXWTI/KXWTIW settle on the ICE daily
     // settlement of a NAMED contract month, and the perp rolls on its own
     // schedule: measured at the 14:30 ET settle, 2026-09-11 → 09-25 (11 settles),
@@ -263,6 +264,9 @@ for (const config of enabledCommodities) {
     // 0.07 (max 0.17); the perp by a mean 1.65 (max 5.17 — it sat on November
     // while Kalshi settled October through 09-16). The 15-min product survives
     // this only because it re-anchors to its own settlement prints every window.
+    // Since 2026-11-09 (U1) the proxy supplies only the MOVE since the Yahoo
+    // print — spot = yahoo(t_q) + proxy_raw(now) − proxy_raw(t_q) — so the level
+    // above still comes from the named contract (commodity-base.js bridgeOilSpot).
     // Off-hours it polls hourly (yahoo-oil.js nextPollDelayMs), so the gate
     // widens to 62min then — still catches a Yahoo that has died overnight.
     markFeedRequired('yahoo_cl_f_spot', { maxStaleMs: 17 * 60 * 1000, offHoursMaxStaleMs: 62 * 60 * 1000 });
@@ -927,6 +931,11 @@ async function bootstrapAll() {
         // the weekly engine the day someone turns them off. That is the same
         // coupling the comment below this one was written about, in reverse.
         ...(enabledCommodities.some((c) => c.usePythWtiSpot) ? [WTI_FRONT_MONTH_SYMBOL] : []),
+        // Oil's delta-bridge (U1, 2026-11-09) reads the live WTI proxy for the MOVE
+        // since the Yahoo print. Subscribed explicitly for the same reason as the
+        // line above: the 15-minute engines are independently toggleable, and the
+        // daily engine must not lose its bridge the day they are turned off.
+        ...(enabledCommodities.some((c) => c.useYahooSpot && c.bridgeSpotWithProxy) ? [WTI_PROXY_SYMBOL] : []),
         // 15-minute engines subscribe INDEPENDENTLY. Deriving this list from
         // enabledCommodities alone silently starved 15m WTI: the weekly oil
         // engine is Yahoo-sourced and therefore filtered out above, so

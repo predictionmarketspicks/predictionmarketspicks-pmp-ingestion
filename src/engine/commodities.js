@@ -244,8 +244,21 @@ export const COMMODITIES = {
     underlyingEtf: 'USO',
     pythSymbol: 'WTI', // not used when useYahooSpot is true; kept for shape parity
     spotUnit: '$/bbl',
-    spotLabel: 'Yahoo CL=F (contract-aware CLM26.NYM primary, CL=F continuous fallback)',
+    spotLabel: 'Yahoo named-month WTI contract, bridged to now (CL=F continuous fallback)',
     enabled: true,
+    // Delta-bridge (OIL_EDGE_DEEP_DIVE_2026-11-09 U1; mechanism commodity-base.js
+    // bridgeOilSpot). The Yahoo named-month print stays the LEVEL anchor; the live
+    // WTI proxy the 15-min engine runs supplies the MOVE since that print. Measured
+    // before: 15-minute staircase vs the live book, mean |diff| 27¢ / p90 64¢ on a
+    // 50¢ strike step (461 paired snapshots, 30 d). spot_source becomes
+    // `yahoo_<contract>_bridged`; the proxy itself is never written or displayed.
+    // Set false to revert to the raw print in one line (the age gate below then
+    // demotes every row, so revert both together).
+    bridgeSpotWithProxy: true,
+    // 120 s: a bridged spot is as-of the proxy's last print (~3 s cadence). Older
+    // means the bridge fell back to the raw 10–20 min delayed quote — demote the
+    // tier like a dead metals feed. Pre-U1 oil deliberately had no gate.
+    maxSpotAgeMs: 120_000,
     // V2 cutover — see commodities.silver.useV2Cutover note.
     useV2Cutover: true,
     // USO-synthetic DISABLED 2026-05-22 (same day it shipped). Databento's

@@ -155,6 +155,26 @@ export function wtiProxyState() {
   };
 }
 
+/**
+ * The RAW (pre-basis) proxy read in effect at instant `tMs`: the last sample at
+ * or before it, within `maxGapMs`; null when the buffer has none (cold start,
+ * or `tMs` older than SAMPLE_KEEP_MS). The daily oil engine's delta-bridge
+ * (commodity-base.js bridgeOilSpot, OIL_EDGE_DEEP_DIVE_2026-11-09 U1) reads
+ * this at the Yahoo print's own timestamp so the LEVEL stays the named CME
+ * contract and only the proxy's MOVE since that print is applied. Raw on
+ * purpose: a basis re-anchor step between the two reads must never become a
+ * price move. Internal-only like everything else in this file.
+ */
+export function wtiProxyRawAt(tMs, maxGapMs = SAMPLE_MAX_GAP_MS) {
+  if (!Number.isFinite(tMs)) return null;
+  return rawAt(state.samples, tMs, maxGapMs);
+}
+
+/** Test hook: seed raw samples [{ t, raw }] without a network read. */
+export function _seedWtiProxySamples(samples) {
+  state.samples = [...samples].sort((a, b) => a.t - b.t);
+}
+
 /** Test hook. */
 export function _resetWtiProxy() {
   state.samples = [];

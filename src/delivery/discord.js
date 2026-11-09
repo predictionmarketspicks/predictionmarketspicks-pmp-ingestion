@@ -142,6 +142,11 @@ export function buildCommodityEmbed(meta, topEdge) {
         : null;
       return text ? [{ name: 'Entry range', value: sanitize(text, 120), inline: false }] : [];
     })(),
+    // Loop v2 hot pot (EDGE_LOOP_V2 §2 "alert god situations"): an `alert` rule matched this
+    // pick. One line, the pot's label only — the numbers live in the register.
+    ...(meta.hotPot
+      ? [{ name: 'HOT POT', value: sanitize(`${String(meta.hotPot).replace(/\|/g, ' · ').replace(/=/g, ' ')} — a pocket the record says is running hot`, 120), inline: false }]
+      : []),
     // meta.publicPrice, NOT meta.spotPrice: for metals that is Kalshi's locked
     // reference (the vendor quote never goes public); null → the field is omitted.
     // Label is plain `Spot` — meta.spotLabel is internal plumbing (it printed

@@ -22,7 +22,7 @@ import { warmVolCache, estimateVol } from './vol.js';
 import { getShortHorizonStats } from './short-horizon-vol.js';
 import { getCalibrationMap, applyCalibration, isCalibrationActive, getVarianceClock } from './calibration.js';
 import { effectiveYearFraction, resolveVarianceClock } from './variance-clock.js';
-import { applyEngineRules } from './engine-rules.js';
+import { applyEngineRules, ruleContext } from './engine-rules.js';
 import { commodityEntryRange } from './max-entry.js';
 import {
   ENTRY_COST_FLOOR,
@@ -1007,6 +1007,9 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
   // for the off-record shadow ledger only (selectNoSideShadow, below). Never a
   // pick, never an alert, never copied: see config.noSideShadow in commodities.js.
   const noSideCandidates = [];
+  // Loop v2: strike → { rules: [rule ids], hot_pot } for every row a rule touched; the
+  // minted pick's regime_tags carries it (index.js postMintedPick). Not an upsert column.
+  const ruleTags = {};
   for (const rawMarket of snapshotMarkets) {
     if (rawMarket.floorStrike == null) continue;
     const market = mergeLiveQuote(rawMarket);
@@ -1210,6 +1213,10 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     let netEdgePp = null;
     // Which side gate stopped this row, for pass_reason (null when none did).
     let gateReason = null;
+    // Loop v2 `promote` (EDGE_LOOP_V2 §2): the side + magnitude that CLEARED the side gate, before
+    // the soft demotions below (liquidity, thin IV, tier ceiling, FRED, engine rules). null when
+    // no side cleared — a promote can never invent a side the gate refused.
+    let preGate = null;
 
     // (The old TWAP hard-guard block was removed 2026-05-22. The graduated
     // tier-ceiling logic further down — `config.tierCeilingByMinutes` —
@@ -1363,6 +1370,7 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
 
       if (buyOk) {
         direction = dirYes ? 'BUY YES' : 'BUY NO';
+        preGate = { dirYes, mag };
         const modelPct = (chosenProb * 100).toFixed(0);
         const kpPct = (kalshiProb * 100).toFixed(0);
         const edgePct = Math.abs(chosenEdge * 100).toFixed(1);
@@ -1538,28 +1546,50 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
     // it can suppress or demote, never create or upgrade. No-op unless the kill
     // switch is on AND an active rule matches every key of its condition.
     // Every application is tagged in the rationale with the rule ids.
-    const ruleVerdict = applyEngineRules({
+    // Loop v2 (EDGE_LOOP_V2_2026-11-09 §2, U4a): the context carries the ET clock, the
+    // side cost, the gross edge in pp and the pre-rules tier; `promote` lifts the SOFT
+    // demotions on a row whose side cleared the gate (never a quality flag, never the
+    // entry floor, which runs after this and is DB-enforced too); `alert` tags a hot pot.
+    const ruleVerdict = applyEngineRules(ruleContext({
       commodity: config.commodity,
-      dow: now.getUTCDay(),
-      hourUtc: now.getUTCHours(),
-      impliedProb: kalshiProb,
+      now,
       // The direction computed above, pre-rules -- lets a rule target one side
       // of a price band (see PREDICATE_KEYS note on 'direction').
       direction,
-    });
+      kalshiYes: kalshiProb,
+      chosenEdge,
+      fusedTier: fusedTierStr,
+    }));
+    let ruleHotPot = null;
     if (ruleVerdict.matched.length > 0) {
       if (ruleVerdict.suppress) {
         direction = 'PASS';
         confidence = 'skip';
         fusedTierStr = 'NO_EDGE';
         tierInt = confidenceTierInt(fusedTierStr);
-      } else if (ruleVerdict.downgrade) {
-        fusedTierStr = downgradeFusedTier(fusedTierStr);
-        tierInt = confidenceTierInt(fusedTierStr);
-        confidence = downgradeLegacyConfidence(confidence);
-        if (fusedTierStr === 'NO_EDGE') direction = 'PASS';
+      } else {
+        if (ruleVerdict.promote && preGate && qualityFlag == null && chosenEdge != null) {
+          // Publish as a PLAY past the local soft gates: side and tier as the side gate left
+          // them. The legacy confidence is raised only out of 'skip' — the mint reads the
+          // fused tier (GATE 1), the board reads confidence as advisory.
+          direction = preGate.dirYes ? 'BUY YES' : 'BUY NO';
+          fusedTierStr = fusedTier(Math.abs(chosenEdge));
+          tierInt = confidenceTierInt(fusedTierStr);
+          if (confidence === 'skip') confidence = 'low';
+          rationale = `${rationale ?? ''} (promoted by rule — local soft gates lifted)`.trim();
+        }
+        if (ruleVerdict.downgrade) {
+          fusedTierStr = downgradeFusedTier(fusedTierStr);
+          tierInt = confidenceTierInt(fusedTierStr);
+          confidence = downgradeLegacyConfidence(confidence);
+          if (fusedTierStr === 'NO_EDGE') direction = 'PASS';
+        }
+        if (ruleVerdict.alert) ruleHotPot = ruleVerdict.hotPot;
       }
       rationale = `${rationale ?? ''} ${ruleVerdict.note}`.trim();
+      // Off-row tags for the minted pick (regime_tags.rules / hot_pot) — keyed by strike so
+      // no extra column rides into the commodity_edge_signals upsert.
+      ruleTags[String(kSpot)] = { rules: ruleVerdict.ruleIds, hot_pot: ruleHotPot };
     }
 
     rows.push({
@@ -1827,6 +1857,8 @@ export async function computeSnapshot(config, event, { now = new Date() } = {}) 
           },
     },
     rows: filteredRows,
+    // Loop v2 rule tags per strike (see ruleTags above); {} when no rule matched.
+    ruleTags,
     // Off-record NO-side shadow rows for commodity_longshot_shadow (reason
     // 'no_side'); [] unless config.noSideShadow. Written by index.js, never
     // upserted into commodity_edge_signals, so the mint can't see them.

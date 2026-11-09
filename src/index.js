@@ -48,6 +48,7 @@ import {
   recordPostedAlerts,
   recordFeedPerformance,
   fetchMintedPickForEvent,
+  tagMintedPick,
   fetchRecentMoverPosts,
 } from './delivery/supabase.js';
 import { postCommodityAlert, postMoversAlert, postBotLog } from './delivery/discord.js';
@@ -354,10 +355,15 @@ async function postMintedPick(config, snap) {
       console.warn(`[${c}] pick ${pick.pick_id} has no strike — alert skipped`);
       return;
     }
+    // Loop v2 register: the rules that touched this strike ride on the pick
+    // (regime_tags.rules / hot_pot). Written once; a hot pot also changes the alert.
+    const tags = row ? snap.ruleTags?.[String(row.strike)] ?? null : null;
+    if (tags) await tagMintedPick(pick, tags);
+    const hotPot = tags?.hot_pot ?? pick.regime_tags?.hot_pot ?? null;
     const topTier = row?.fused_confidence && row.fused_confidence !== 'NO_EDGE'
       ? row.fused_confidence
       : tierFromPick(pick);
-    const metaForPick = { ...snap.meta, topEdge, topTier };
+    const metaForPick = { ...snap.meta, topEdge, topTier, hotPot };
     const sent = await postCommodityAlert(metaForPick);
     if (!sent) return;
     console.log(`[${c}] discord posted pick ${pick.pick_id} ${topTier} $${topEdge.strike.toFixed(2)}`);

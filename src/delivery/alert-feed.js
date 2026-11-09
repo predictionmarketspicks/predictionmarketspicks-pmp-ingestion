@@ -148,6 +148,9 @@ function commodityMetaToRow(meta, alertKey) {
       // Max entry (2026-10-23), in the price of the side taken. null = not stamped.
       max_entry_cents: top.max_entry_cents ?? null,
       min_entry_cents: top.min_entry_cents ?? null,
+      // Loop v2 hot pot: edge_alerts has no `hot` column, so the flag rides in meta
+      // (meta.hot / meta.hot_pot) — readers (push, /edge-alerts, potd) key on meta.hot.
+      ...(meta.hotPot ? { hot: true, hot_pot: String(meta.hotPot) } : {}),
     },
     alert_key: alertKey,
   };

@@ -171,3 +171,125 @@ describe('direction predicate', () => {
     __setRulesForTest([], false);
   });
 });
+
+// Loop v2 (EDGE_LOOP_V2_2026-11-09 §2 / U4a): the new condition keys, pot_key, the ET
+// clock, and the promote / unsuppress / alert actions. Same safety posture: every new key
+// fails toward publishing when the ctx lacks the value; a suppress always beats a promote.
+import { ruleContext, parsePotKey, etClock } from '../src/engine/engine-rules.js';
+
+describe('Loop v2 — ruleContext + ET clock', () => {
+  it('converts the snapshot instant to America/New_York (EST on 11-09: 17:30Z = 12 ET, Mon)', () => {
+    const c = ruleContext({ commodity: 'bitcoin', now: new Date('2026-11-09T17:30:00Z'), direction: 'BUY YES', kalshiYes: 0.52, chosenEdge: 0.083, fusedTier: 'MODERATE' });
+    expect([c.hourEt, c.dowEt, c.hourUtc]).toEqual([12, 'Mon', 17]);
+    expect(c.impliedProb).toBe(0.52);
+    expect(c.edgePp).toBeCloseTo(8.3);
+    expect(c.tier).toBe(2);
+    // EDT (10-09 17:30Z = 13 ET)
+    expect(etClock(new Date('2026-10-09T17:30:00Z')).hourEt).toBe(13);
+  });
+  it('implied_prob is the SIDE cost: a NO at YES 0.30 costs 0.70; PASS rows read the YES price', () => {
+    expect(ruleContext({ commodity: 'oil', now: new Date(), direction: 'BUY NO', kalshiYes: 0.3, chosenEdge: -0.1, fusedTier: 'MODERATE' }).impliedProb).toBe(0.7);
+    expect(ruleContext({ commodity: 'oil', now: new Date(), direction: 'PASS', kalshiYes: 0.3, chosenEdge: 0.02, fusedTier: 'NO_EDGE' }).impliedProb).toBe(0.3);
+    expect(ruleContext({ commodity: 'oil', now: new Date(), direction: 'PASS', kalshiYes: null, chosenEdge: null, fusedTier: 'NO_EDGE' }).impliedProb).toBeNull();
+  });
+});
+
+describe('Loop v2 — condition keys', () => {
+  const v2 = { commodity: 'bitcoin', dow: 1, hourUtc: 17, hourEt: 12, dowEt: 'Mon', impliedProb: 0.52, edgePp: 8.3, tier: 2, direction: 'BUY YES' };
+  it('edge band, tier list, ET hour list, ET dow list', () => {
+    expect(conditionMatches({ edge_pp_min: 7, edge_pp_max: 9 }, v2)).toBe(true);
+    expect(conditionMatches({ edge_pp_min: 9 }, v2)).toBe(false);
+    expect(conditionMatches({ tier_in: [1, 2] }, v2)).toBe(true);
+    expect(conditionMatches({ tier_in: [3] }, v2)).toBe(false);
+    expect(conditionMatches({ hour_et_in: [12] }, v2)).toBe(true);
+    expect(conditionMatches({ hour_et_in: ['12'] }, v2)).toBe(true);
+    expect(conditionMatches({ hour_et_in: [11] }, v2)).toBe(false);
+    expect(conditionMatches({ dow_in: ['Fri'] }, v2)).toBe(false);
+    expect(conditionMatches({ dow_in: ['mon'] }, v2)).toBe(true);
+  });
+  it('fails toward publishing when the ctx lacks the value', () => {
+    expect(conditionMatches({ edge_pp_min: 7 }, { ...v2, edgePp: null })).toBe(false);
+    expect(conditionMatches({ hour_et_in: [12] }, { ...v2, hourEt: undefined })).toBe(false);
+    expect(conditionMatches({ tier_in: 2 }, v2)).toBe(false); // not a list
+  });
+  it('pot_key: a label always matches; a dim=value is a predicate; an unknown dim never matches', () => {
+    expect(parsePotKey('bitcoin-edge|hour=11')).toEqual({ scope: 'bitcoin-edge', dim: 'hour', value: '11' });
+    expect(parsePotKey('metals|reopen')).toEqual({ scope: 'metals', label: 'reopen' });
+    expect(conditionMatches({ pot_key: 'bitcoin-edge|hour=12' }, v2)).toBe(true);
+    expect(conditionMatches({ pot_key: 'bitcoin-edge|hour=11' }, v2)).toBe(false);
+    expect(conditionMatches({ pot_key: 'bitcoin-edge|edge=7-9' }, v2)).toBe(true);
+    expect(conditionMatches({ pot_key: 'bitcoin-edge|edge=12+' }, v2)).toBe(false);
+    expect(conditionMatches({ pot_key: 'bitcoin-edge|entry=35-50' }, { ...v2, impliedProb: 0.42 })).toBe(true);
+    expect(conditionMatches({ pot_key: 'bitcoin-edge|side=BUY YES' }, v2)).toBe(true);
+    expect(conditionMatches({ pot_key: 'bitcoin-edge|dow=Mon' }, v2)).toBe(true);
+    expect(conditionMatches({ pot_key: 'metals|reopen', edge_pp_min: 7 }, v2)).toBe(true);
+    expect(conditionMatches({ pot_key: 'metals|reopen' }, v2)).toBe(false); // a bare label is not a predicate
+    expect(conditionMatches({ pot_key: 'bitcoin-edge|regime=x' }, v2)).toBe(false);
+  });
+});
+
+describe('Loop v2 — S1 synthetic end to end', () => {
+  const S1 = rule({ id: 'ccccccc1-0000-4000-8000-000000000001', scope: 'bitcoin-edge', action: 'suppress', condition: { hour_et_in: [12] } });
+  const pick = (iso) => ruleContext({ commodity: 'bitcoin', now: new Date(iso), direction: 'BUY YES', kalshiYes: 0.55, chosenEdge: 0.09, fusedTier: 'MODERATE' });
+  it('suppresses a noon-ET pick and tags the rule id', () => {
+    __setRulesForTest([S1], true);
+    const v = applyEngineRules(pick('2026-11-09T17:30:00Z'));
+    expect(v.suppress).toBe(true);
+    expect(v.ruleIds).toEqual(['ccccccc1-0000-4000-8000-000000000001']);
+    expect(v.note).toContain('rule:suppress ccccccc1');
+  });
+  it('a non-matching hour passes untouched', () => {
+    __setRulesForTest([S1], true);
+    const v = applyEngineRules(pick('2026-11-09T16:30:00Z')); // 11 ET
+    expect(v.suppress).toBe(false);
+    expect(v.matched).toHaveLength(0);
+    __setRulesForTest([], false);
+  });
+});
+
+describe('Loop v2 — promote / unsuppress / alert', () => {
+  const v2 = { commodity: 'gold', dow: 1, hourUtc: 17, hourEt: 12, dowEt: 'Mon', impliedProb: 0.52, edgePp: 8.3, tier: 2, direction: 'BUY YES' };
+  it('promote is reported; a surviving suppress always beats it', () => {
+    __setRulesForTest([rule({ id: 'p1', scope: 'gold-edge', action: 'promote', condition: { edge_pp_min: 7 } })], true);
+    expect(applyEngineRules(v2).promote).toBe(true);
+    __setRulesForTest([
+      rule({ id: 'p1', scope: 'gold-edge', action: 'promote', condition: { edge_pp_min: 7 } }),
+      rule({ id: 's1', scope: 'gold-edge', action: 'suppress', condition: { hour_et_in: [12] } }),
+    ], true);
+    const v = applyEngineRules(v2);
+    expect(v.suppress).toBe(true);
+    expect(v.promote).toBe(false);
+    expect(v.ruleIds.sort()).toEqual(['p1', 's1']);
+  });
+  it('unsuppress cancels only the rule it supersedes, and is itself recorded', () => {
+    __setRulesForTest([
+      rule({ id: 's1', scope: 'gold-edge', action: 'suppress', condition: { hour_et_in: [12] } }),
+      rule({ id: 'u1', scope: 'gold-edge', action: 'unsuppress', condition: { hour_et_in: [12], supersedes: 's1' } }),
+    ], true);
+    const v = applyEngineRules(v2);
+    expect(v.suppress).toBe(false);
+    expect(v.ruleIds.sort()).toEqual(['s1', 'u1']);
+    // a different suppress still stands
+    __setRulesForTest([
+      rule({ id: 's2', scope: 'gold-edge', action: 'suppress', condition: { tier_in: [2] } }),
+      rule({ id: 'u1', scope: 'gold-edge', action: 'unsuppress', condition: { hour_et_in: [12], supersedes: 's1' } }),
+    ], true);
+    expect(applyEngineRules(v2).suppress).toBe(true);
+  });
+  it('alert names the hot pot (pot_key column, else condition.pot_key, else the id)', () => {
+    __setRulesForTest([rule({ id: 'a1', scope: 'gold-edge', action: 'alert', condition: { pot_key: 'gold-edge|hour=12' } })], true);
+    let v = applyEngineRules(v2);
+    expect([v.alert, v.hotPot, v.suppress]).toEqual([true, 'gold-edge|hour=12', false]);
+    __setRulesForTest([rule({ id: 'a2', scope: 'gold-edge', action: 'alert', condition: { edge_pp_min: 7, edge_pp_max: 9 }, pot_key: 'gold-edge|edge=7-9' })], true);
+    v = applyEngineRules(v2);
+    expect(v.hotPot).toBe('gold-edge|edge=7-9');
+    expect(v.note).toContain('rule:alert');
+  });
+  it('size_rung / retire_lane rows are known (no warning) but never act on an engine row', () => {
+    __setRulesForTest([rule({ id: 'r1', scope: 'all', action: 'size_rung', condition: { rung: 1 } })], true);
+    const v = applyEngineRules(v2);
+    expect(v.matched).toHaveLength(0); // params only — no predicate — never matches
+    expect(v.suppress || v.promote || v.alert).toBe(false);
+    __setRulesForTest([], false);
+  });
+});

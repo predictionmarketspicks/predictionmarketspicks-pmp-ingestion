@@ -317,6 +317,30 @@ export async function fetchMintedPickForEvent(toolSlug, commodity, eventTicker) 
   return data?.[0] ?? null;
 }
 
+/**
+ * Loop v2 (EDGE_LOOP_V2 §2 "register"): write regime_tags.rules / hot_pot onto the minted
+ * pick, merged into whatever the mint already stamped. Idempotent (skips when the tags are
+ * already there); never throws — a tag miss must not stop the alert.
+ */
+export async function tagMintedPick(pick, tags) {
+  if (!pick?.pick_id || !tags) return false;
+  const rules = Array.isArray(tags.rules) ? tags.rules : [];
+  const hotPot = tags.hot_pot ?? null;
+  if (rules.length === 0 && hotPot == null) return false;
+  const existing = pick.regime_tags && typeof pick.regime_tags === 'object' ? pick.regime_tags : {};
+  const same = JSON.stringify(existing.rules ?? []) === JSON.stringify(rules) && (existing.hot_pot ?? null) === hotPot;
+  if (same) return false;
+  const next = { ...existing, rules };
+  if (hotPot != null) next.hot_pot = hotPot;
+  const { error } = await getClient().from('tool_picks').update({ regime_tags: next }).eq('pick_id', pick.pick_id);
+  if (error) {
+    console.warn('[tool_picks] rule tag write failed:', error.message);
+    return false;
+  }
+  pick.regime_tags = next;
+  return true;
+}
+
 // #market-movers repost ledger (F3): the latest feed_performance movers row
 // per EVENT in the window → Map<eventKey, { market_id, alert_price }>.
 // eventKey = market_id minus its last '-' segment (Kalshi's event ticker).

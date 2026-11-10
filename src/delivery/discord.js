@@ -108,7 +108,7 @@ export function buildCommodityEmbed(meta, topEdge) {
 
   // The prob that actually drove this alert: physical when the row's
   // model_version says V2 owns direction/confidence, legacy otherwise.
-  const modelProb = topEdge.model_version === 'v2_physical' && topEdge.prob_physical != null
+  const modelProb = String(topEdge.model_version ?? '').startsWith('v2_physical') && topEdge.prob_physical != null
     ? topEdge.prob_physical
     : topEdge.options_prob;
   const modelPct = (modelProb * 100).toFixed(0);

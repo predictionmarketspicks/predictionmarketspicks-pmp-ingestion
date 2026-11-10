@@ -2126,7 +2126,7 @@ export function stampEntryRange(rows, config) {
     const probYes =
       calActive && r.calibrated_prob != null
         ? r.calibrated_prob
-        : r.model_version === 'v2_physical' && r.prob_physical != null
+        : String(r.model_version ?? '').startsWith('v2_physical') && r.prob_physical != null
           ? r.prob_physical
           : r.options_prob;
     const range = commodityEntryRange(config, {

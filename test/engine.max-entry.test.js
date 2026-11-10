@@ -121,6 +121,19 @@ describe('stampEntryRange + writer tolerance', () => {
     expect(rows[1]).toMatchObject({ max_entry_cents: 56, min_entry_cents: 40 });
     expect('max_entry_cents' in rows[2]).toBe(false);
   });
+  it('reads prob_physical for the whole v2_physical family, options_prob for anything else', () => {
+    // 2026-11-09: the mint trigger accepts LIKE 'v2_physical%'; the engine must agree, or a
+    // 'v2_physical_<era>' row would size its entry range off the risk-neutral prob.
+    const base = { direction: 'BUY YES', prob_physical: 0.6975, options_prob: 0.5, kalshi_yes: 0.615 };
+    const v2 = [{ ...base, model_version: 'v2_physical' }];
+    const era = [{ ...base, model_version: 'v2_physical_clock' }];
+    const v1 = [{ ...base, model_version: 'v1_riskneutral' }];
+    stampEntryRange(v2, COMMODITIES.oil);
+    stampEntryRange(era, COMMODITIES.oil);
+    stampEntryRange(v1, COMMODITIES.oil);
+    expect(era[0].max_entry_cents).toBe(v2[0].max_entry_cents);
+    expect(v1[0].max_entry_cents).not.toBe(v2[0].max_entry_cents);
+  });
   it('strips the columns when the DDL is not applied yet', () => {
     expect(stripEntryCols({ a: 1, max_entry_cents: 5, min_entry_cents: 4 })).toEqual({ a: 1 });
     expect(isMissingEntryColError({ message: "Could not find the 'max_entry_cents' column of 'commodity_edge_signals' in the schema cache" })).toBe(true);

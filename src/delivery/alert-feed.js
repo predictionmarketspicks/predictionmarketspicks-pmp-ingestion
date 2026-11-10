@@ -105,9 +105,9 @@ function commodityMetaToRow(meta, alertKey) {
   const yesProb = Number(top.kalshi_yes) || 0;
   const priceCents = clampCents((side === 'YES' ? yesProb : 1 - yesProb) * 100);
   // Model prob = the one that drove direction/tier: physical under V2
-  // (model_version='v2_physical'), legacy risk-neutral otherwise.
+  // (model_version in the v2_physical family — 'v2_physical' or 'v2_physical_<era>'), legacy risk-neutral otherwise.
   const activeProb =
-    top.model_version === 'v2_physical' && top.prob_physical != null
+    String(top.model_version ?? '').startsWith('v2_physical') && top.prob_physical != null
       ? top.prob_physical
       : top.options_prob;
   const optProb = activeProb == null ? null : Number(activeProb);

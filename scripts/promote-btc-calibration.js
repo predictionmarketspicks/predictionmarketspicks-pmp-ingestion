@@ -93,7 +93,7 @@ async function main() {
   const events = new Set();
 
   for (const r of data ?? []) {
-    if (r.regime_tags?.model_version !== MODEL_VERSION) continue;
+    if (!String(r.regime_tags?.model_version ?? '').startsWith(MODEL_VERSION)) continue; // the v2_physical family (any v2_physical_<era>), as the mint trigger reads it
     if (r.predicted_side !== 'YES') continue;
     const res = r.tool_settles?.resolution ?? r.tool_settles?.[0]?.resolution;
     if (res !== 'won' && res !== 'lost') continue;

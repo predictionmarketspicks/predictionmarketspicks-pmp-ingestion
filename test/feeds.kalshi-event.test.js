@@ -8,6 +8,14 @@ import { pickNextEvent, eventSortKey } from '../src/feeds/kalshi-event.js';
 const ev = (ticker, extra = {}) => ({ event_ticker: ticker, ...extra });
 
 describe('pickNextEvent', () => {
+  // MCP_TRUTH_BUILD_STAMP_AND_CONVERSION_2026-11-10 U5: Kalshi lists KXGOLDD / KXSILVERD Mon–Thu
+  // only, so on a Friday the only open event is Monday's — and that IS the right answer.
+  it('on a Friday with only Monday\'s metals event open, Monday\'s event is the front event (no same-day guard)', () => {
+    const fridayOpen = [ev('KXGOLDD-26NOV16', { close_time: '2026-11-16T22:00:00Z' })]; // Fri Nov 13: Thu settled, Mon listed
+    expect(pickNextEvent(fridayOpen).event_ticker).toBe('KXGOLDD-26NOV16');
+    const both = [ev('KXSILVERD-26NOV16', { close_time: '2026-11-16T22:00:00Z' }), ev('KXSILVERD-26NOV17', { close_time: '2026-11-17T22:00:00Z' })];
+    expect(pickNextEvent(both).event_ticker).toBe('KXSILVERD-26NOV16');
+  });
   it('picks September over October despite lexical inversion (weekly)', () => {
     expect(pickNextEvent([ev('KXGOLDW-26OCT02'), ev('KXGOLDW-26SEP04')]).event_ticker)
       .toBe('KXGOLDW-26SEP04');

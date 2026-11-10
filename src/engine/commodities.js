@@ -65,6 +65,8 @@ export const COMMODITIES = {
     // KXSILVERD -> "Pyth - Silver", identical to the weekly series, so
     // pythSymbol / spotLabel below stay correct.
     // Handoff: handoffs/GOLD_SILVER_WEEKLY_MARKET_DELISTED_2026-09-08.md
+    // Kalshi lists this series Mon–Thu (verified 2026-11-10: no Friday event Jul 23 → Nov 9).
+    // On Friday the front event is Monday's. Correct — do not add a same-day guard.
     seriesTicker: 'KXSILVERD',
     underlyingEtf: 'SLV',
     pythSymbol: 'XAG/USD',
@@ -161,6 +163,8 @@ export const COMMODITIES = {
     // KXSILVERD -> "Pyth - Silver", identical to the weekly series, so
     // pythSymbol / spotLabel below stay correct.
     // Handoff: handoffs/GOLD_SILVER_WEEKLY_MARKET_DELISTED_2026-09-08.md
+    // Kalshi lists this series Mon–Thu (verified 2026-11-10: no Friday event Jul 23 → Nov 9).
+    // On Friday the front event is Monday's. Correct — do not add a same-day guard.
     seriesTicker: 'KXGOLDD',
     underlyingEtf: 'GLD',
     pythSymbol: 'XAU/USD',

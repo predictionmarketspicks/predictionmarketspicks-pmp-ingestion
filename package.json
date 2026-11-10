@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "deploy": "bash scripts/deploy.sh",
     "dev": "node --watch src/index.js",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -173,3 +173,7 @@ Update `~/prediction-marketspicks/CLAUDE.md`:
 
 - `KXGOLDD` / `KXSILVERD` list **Monday–Thursday only** (Kalshi API: 40 settled gold events Jul 23 → Oct 1, none on a Friday). On a Friday the front open event is **Monday's**, so `commodity_edge_daily` carrying next Monday's event on a Friday is correct behaviour — do not add a same-day guard or an `event_day_mismatch` alarm (MCP_TRUTH_BUILD_STAMP_AND_CONVERSION_2026-11-10 §0 A1, retracted). The engine re-discovers the front event every 30 min (`src/index.js` `eventRefreshTimer`); `test/feeds.kalshi-event.test.js` pins the Friday case.
 - `KXWTI` lists daily; `KXBTCD` lists hourly.
+
+## Troubleshooting
+
+- `statement timeout` / `fetch failed` errors on several feeds at once = look at the database, not the engine (Supabase memory/swap chart, `job startup timeout` rows in `cron.job_run_details`). Context: prediction-marketspicks `handoffs/DB_FREEZE_ROOT_CAUSE_AND_HARDENING_2026-11-11.md`.

@@ -227,6 +227,8 @@ export function snapshot() {
       maxStaleMs: requiredFeeds.get(name)?.maxStaleMs ?? null,
       requiredOffHours: requiredFeeds.get(name)?.requiredOffHours ?? true,
       offHoursMaxStaleMs: requiredFeeds.get(name)?.offHoursMaxStaleMs ?? null,
+      // Feed-specific fields (db_heartbeat: state, lastLatencyMs, downSince — DB_FREEZE U1).
+      ...(state.extra || {}),
     };
   }
   return {

@@ -13,6 +13,7 @@ import {
   missingInputAlarmDue,
   noEventAlarmDue,
 } from './observability/health.js';
+import { startDbHeartbeat } from './observability/db-heartbeat.js';
 import { startKalshi, stopKalshi } from './feeds/kalshi.js';
 import { startPyth, stopAllPyth, hasPythFeed, refreshWtiContracts, WTI_FRONT_MONTH_SYMBOL, pythConfidenceRejects } from './feeds/pyth.js';
 import { WTI_PROXY_SYMBOL } from './feeds/wti-proxy.js';
@@ -1435,6 +1436,10 @@ server.listen(PORT, () => {
     `[http] listening on :${PORT} env=${ENGINE_ENV} writer_tag=${process.env.WRITER_TAG || 'delayed_test'} commodities=${enabledCommodities.map((c) => c.commodity).join(',')}`,
   );
 });
+
+// DB_FREEZE U1 (2026-11-12): db_ping every 30 s from outside the database; alarms to #bot-logs.
+// Feed db_heartbeat on /health, never required. Never throws.
+startDbHeartbeat();
 
 startKalshi().catch((err) => {
   console.error('[kalshi] startup failed', err);

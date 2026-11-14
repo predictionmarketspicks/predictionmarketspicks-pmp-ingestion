@@ -99,7 +99,10 @@ describe('Discord footer settle time', () => {
     // block; the footer carries the settle time + the one disclaimer clause.
     const footer = buildCommodityEmbed(meta, t).embeds[0].footer.text;
     expect(footer).toBe('KXBTCD-26SEP2214 • settles 2:00 PM ET • Market analysis, not financial advice');
+    // Gold joined the Why layout 2026-11-14 — same footer shape as bitcoin.
     const gold = buildCommodityEmbed({ ...meta, commodity: 'gold', eventTicker: 'KXGOLDD-26SEP2214' }, t).embeds[0].footer.text;
-    expect(gold).toBe('KXGOLDD-26SEP2214 • settles 2:00 PM ET • closes in 0.9h • 40 strikes scanned');
+    expect(gold).toBe('KXGOLDD-26SEP2214 • settles 2:00 PM ET • Market analysis, not financial advice');
+    const copper = buildCommodityEmbed({ ...meta, commodity: 'copper', eventTicker: 'KXCOPPERD-26SEP2214' }, t).embeds[0].footer.text;
+    expect(copper).toBe('KXCOPPERD-26SEP2214 • settles 2:00 PM ET • closes in 0.9h • 40 strikes scanned');
   });
 });

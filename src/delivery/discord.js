@@ -89,7 +89,7 @@ function probToAmericanOdds(prob) {
 }
 
 // opts.record / opts.now feed the "Why" block (why.js) — only for commodities
-// registered in WHY_BUILDERS (bitcoin today). Everyone else gets today's embed,
+// registered in WHY_BUILDERS (bitcoin, silver, gold, oil since 2026-11-14). Everyone else gets today's embed,
 // byte-for-byte.
 export function buildCommodityEmbed(meta, topEdge, { record = null, now = new Date() } = {}) {
   // V2.1 stopgap: uncalibrated bitcoin cannot render as STRONG (§2.4).
@@ -213,7 +213,7 @@ function entryRangeField(topEdge) {
   return text ? [{ name: 'Entry range', value: sanitize(text, 120), inline: false }] : [];
 }
 
-// The "Why" layout (bitcoin, 2026-11-13): description = the Why lines (setup,
+// The "Why" layout (bitcoin 2026-11-13; silver/gold/oil 2026-11-14): description = the Why lines (setup,
 // volatility, model vs market, what it needs, momentum, track record). The
 // Market price / Our model / Spot fields are dropped only when the Why block
 // states the same number; if a line was omitted for bad inputs, its field stays.
@@ -221,7 +221,7 @@ function buildWhyEmbed(meta, topEdge, tier, { record, now }) {
   const lines = WHY_BUILDERS[meta.commodity]({ meta, edge: topEdge, record, now });
   const said = (re) => lines.some((l) => re.test(l));
   const statesModel = said(/^Our model puts/);
-  const statesSpot = said(/ is \$[\d,.]+ — /);
+  const statesSpot = said(/ is \$[\d,.]+(?: \([^)]*\))? — /);
 
   const modelProb = modelProbOf(topEdge);
   const fields = [

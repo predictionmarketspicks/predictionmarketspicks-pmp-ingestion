@@ -13,6 +13,13 @@
 //   · Volatility is said as a dollar "typical move" derived from sigma_blend — never
 //     "implied volatility", never an IV/option number, never a feed or vendor name.
 //
+//   · Silver / gold / oil (2026-11-14): spot is meta.publicPrice ONLY — Kalshi's locked
+//     15-minute reference on metals, the existing public `Spot` value on oil — with NO
+//     fallback to edge.spot_price (on metals that is the vendor quote). publicPrice null
+//     ⇒ the setup / typical-move / needs lines are omitted. The volatility behind the
+//     typical move is options-derived and internal: it only ever prints as a dollar move.
+//     Settlement is described by what it is (Kalshi's reference), never by vendor name.
+//
 // Adding a commodity: write buildWhy<Name>() on the shared helpers below and register
 // it in WHY_BUILDERS + RECORD_TOOL_SLUG. buildCommodityEmbed only uses the Why layout
 // for commodities registered here; every other commodity keeps today's embed.
@@ -36,6 +43,16 @@ export function usd(x) {
 }
 
 // Strikes print exactly as Kalshi lists them ($71,399.99), whole strikes without cents.
+// Always cents — silver, gold and oil quote to the cent ($52.20, not $52).
+export function usdCents(x) {
+  return `$${Math.abs(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Per-asset money format + the gap under which spot is "at" the strike.
+const fmtOf = (ctx) => (ctx?.cents ? usdCents : usd);
+const roundOf = (ctx) => (ctx?.cents ? (v) => Math.round(v * 100) / 100 : Math.round);
+const atStrikeOf = (ctx) => (isNum(ctx?.atStrike) ? ctx.atStrike : 1);
+
 export function strikeUsd(k) {
   const whole = Number.isInteger(k);
   return `$${k.toLocaleString('en-US', { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 })}`;
@@ -76,11 +93,12 @@ export function sidePriceOf(edge) {
   return sideOf(edge) === 'NO' ? 1 - yes : yes;
 }
 
-function inputs({ meta, edge, now }) {
+function inputs({ meta, edge, now }, { publicOnly = false } = {}) {
   const strike = num(edge?.strike);
-  // Public price only — see the header. Row spot_price is the same public basket.
+  // Public price only — see the header. On bitcoin the row spot_price is the same public
+  // basket; on metals it is the vendor quote, so publicOnly never falls back to it.
   let spot = num(meta?.publicPrice);
-  if (!isNum(spot) || spot <= 0) spot = num(edge?.spot_price);
+  if (!publicOnly && (!isNum(spot) || spot <= 0)) spot = num(edge?.spot_price);
   const closeMs = new Date(edge?.event_close_at ?? meta?.eventCloseAt ?? NaN).getTime();
   const nowMs = (now instanceof Date ? now : new Date(now ?? Date.now())).getTime();
   const leftMs = isNum(closeMs) ? closeMs - nowMs : NaN;
@@ -102,19 +120,23 @@ function inputs({ meta, edge, now }) {
 
 // ---------- lines ----------
 
-function setupLine(x, { asset, settleOn }) {
+function setupLine(x, ctx) {
+  const { asset, settleOn, spotNote } = ctx;
   if (x.spot == null || x.strike == null) return null;
+  const f = fmtOf(ctx);
   const d = x.spot - x.strike;
-  const where = Math.abs(d) < 1
+  const where = Math.abs(d) < atStrikeOf(ctx)
     ? `right at the ${strikeUsd(x.strike)} strike`
-    : `${usd(d)} (${pct(d / x.spot)}) ${d > 0 ? 'above' : 'below'} the ${strikeUsd(x.strike)} strike`;
+    : `${f(d)} (${pct(d / x.spot)}) ${d > 0 ? 'above' : 'below'} the ${strikeUsd(x.strike)} strike`;
   const time = x.leftMs != null ? `, with ${duration(x.leftMs)} until it settles on ${settleOn}` : '';
-  return `${asset} is ${usd(x.spot)} — ${where}${time}.`;
+  return `${asset} is ${f(x.spot)}${spotNote ? ` (${spotNote})` : ''} — ${where}${time}.`;
 }
 
-function volLine(x, { asset }) {
+function volLine(x, ctx) {
   if (x.typical == null) return null;
-  return `At current volatility a typical ${asset} move over that window is about ±${usd(Math.round(x.typical))}.`;
+  const move = roundOf(ctx)(x.typical);
+  if (!(move > 0)) return null;
+  return `At current volatility a typical ${ctx.noun ?? ctx.asset} move over that window is about ±${fmtOf(ctx)(move)}.`;
 }
 
 function disagreementLine(x, edge, { asset }) {
@@ -159,32 +181,34 @@ function calibrationLine(x, edge) {
   return `${head}; on that read the edge is ${cal - k} pts, not ${m - k}.`;
 }
 
-function needsLine(x, { asset }) {
+function needsLine(x, ctx) {
+  const { asset } = ctx;
   if (x.spot == null || x.strike == null) return null;
   const d = x.spot - x.strike; // > 0: spot above the strike
-  if (Math.abs(d) < 1) return `${asset} is sitting on the strike — the next move decides it.`;
+  if (Math.abs(d) < atStrikeOf(ctx)) return `${asset} is sitting on the strike — the next move decides it.`;
   const wantUp = x.side === 'YES';
   const favorable = wantUp ? d > 0 : d < 0;
-  const gap = `${usd(d)} (${pct(d / x.spot)})`;
+  const gap = `${fmtOf(ctx)(d)} (${pct(d / x.spot)})`;
   const r = x.typical != null ? Math.abs(d) / x.typical : null;
   if (favorable) {
-    const tail = r != null ? `, ${moves(r)}` : '';
+    // Under 0.05× a typical move the ratio prints as 0.0× — say nothing instead.
+    const tail = r != null && r >= 0.05 ? `, ${moves(r)}` : '';
     return `Holds if ${asset} stays ${wantUp ? 'above' : 'below'} ${strikeUsd(x.strike)} — a ${gap} ${wantUp ? 'drop' : 'rise'} flips it${tail}.`;
   }
   const when = x.leftMs != null ? ` in ${duration(x.leftMs)}` : '';
-  const tail = r != null ? ` — ${moves(r)}` : '';
+  const tail = r != null && r >= 0.05 ? ` — ${moves(r)}` : '';
   return `Needs a ${gap} ${wantUp ? 'rise' : 'drop'}${when}${tail}.`;
 }
 
 // mu_used is the annualized drift that actually moved this row's prob. Bitcoin runs it at
 // 0 today (BTC_MU_SCALE), so this line is normally absent — by design.
-function momentumLine(x, edge) {
+function momentumLine(x, edge, ctx = {}) {
   const mu = num(edge?.mu_used);
   if (!isNum(mu) || mu === 0 || Math.abs(mu) > 50 || x.spot == null || x.leftMs == null) return null;
   const shift = x.spot * (Math.exp(mu * (x.leftMs / YEAR_MS)) - 1);
-  const floor = Math.max(1, x.typical != null ? 0.1 * x.typical : 0.0005 * x.spot);
+  const floor = Math.max(atStrikeOf(ctx), x.typical != null ? 0.1 * x.typical : 0.0005 * x.spot);
   if (!isNum(shift) || Math.abs(shift) < floor) return null;
-  return `Recent momentum points ${shift > 0 ? 'up' : 'down'} — the model leans about ${usd(Math.round(shift))} ${shift > 0 ? 'higher' : 'lower'} by the settle.`;
+  return `Recent momentum points ${shift > 0 ? 'up' : 'down'} — the model leans about ${fmtOf(ctx)(roundOf(ctx)(shift))} ${shift > 0 ? 'higher' : 'lower'} by the settle.`;
 }
 
 // ---------- track record ----------
@@ -201,6 +225,7 @@ export function bandOf(sidePrice) {
  */
 export function summarizeBands(rows, days = RECORD_DAYS) {
   const bands = {};
+  const total = { n: 0, wins: 0, netCents: 0 };
   for (const r of rows ?? []) {
     if (r?.resolution !== 'won' && r?.resolution !== 'lost') continue;
     const px = num(r.market_price_at_pick);
@@ -213,22 +238,60 @@ export function summarizeBands(rows, days = RECORD_DAYS) {
     s.n += 1;
     s.wins += r.resolution === 'won' ? 1 : 0;
     s.netCents += net;
+    total.n += 1;
+    total.wins += r.resolution === 'won' ? 1 : 0;
+    total.netCents += net;
   }
-  return { days, bands };
+  return { days, bands, total };
 }
 
-/** One sentence on how this tool did at this alert's entry price. Pure; null when unknown. */
-export function bandRecordLine({ record, sidePrice, label = 'Bitcoin' }) {
+const perContract = (per) => `${per > 0 ? '+' : '−'}$${Math.abs(per).toFixed(2)} per contract`;
+// Slightly negative but within 5¢ a contract: "near break-even", and it still says negative.
+export const NEAR_BREAK_EVEN = 0.05;
+
+/**
+ * Tool-wide sentence for when this alert's band is too thin to judge (commodities only).
+ * Honest about the sign: a small loss reads "near break-even … but slightly negative".
+ */
+function overallRecordLine(record, label, days) {
+  const t = record?.total;
+  if (!t || !isNum(t.n) || !isNum(t.wins) || !isNum(t.netCents) || t.n < MIN_RECORD_N) return null;
+  const per = t.netCents / t.n / 100;
+  // Judge on the cents we print, so "−$0.05" never reads "lost money" on a hair's difference.
+  const shown = Math.round(per * 100) / 100;
+  const verdict = shown === 0
+    ? 'are about break-even after fees'
+    : shown > 0
+      ? 'made money after fees'
+      : shown >= -NEAR_BREAK_EVEN
+        ? 'are near break-even after fees but slightly negative'
+        : 'lost money after fees';
+  return `Across all prices, ${label.toLowerCase()} picks over the last ${days} days ${verdict}: ${t.wins} of ${t.n} won (${Math.round((t.wins / t.n) * 100)}%), ${perContract(per)}.`;
+}
+
+/**
+ * One sentence on how this tool did at this alert's entry price. Pure; null when unknown.
+ * withOverall (silver/gold/oil): a thin band also says whether it lost money and adds the
+ * tool-wide record, so a thin band never hides a losing tool.
+ */
+export function bandRecordLine({ record, sidePrice, label = 'Bitcoin', withOverall = false }) {
   const b = bandOf(sidePrice);
   if (b == null || !record || typeof record !== 'object' || !record.bands) return null;
   const s = record.bands[b] ?? { n: 0, wins: 0, netCents: 0 };
   if (!isNum(s.n) || !isNum(s.wins) || !isNum(s.netCents) || s.n < 0) return null;
-  if (s.n < MIN_RECORD_N) return `Thin history at this price (n=${s.n}).`;
   const days = isNum(record.days) ? record.days : RECORD_DAYS;
+  if (s.n < MIN_RECORD_N) {
+    if (!withOverall) return `Thin history at this price (n=${s.n}).`;
+    const detail = s.n > 0
+      ? `n=${s.n}, ${s.wins} won, ${s.netCents < 0 ? 'lost money' : s.netCents > 0 ? 'made money' : 'break-even'} after fees`
+      : 'n=0';
+    const overall = overallRecordLine(record, label, days);
+    return `Thin history at this price (${detail}).${overall ? ` ${overall}` : ''}`;
+  }
   const per = s.netCents / s.n / 100;
   const perText = Math.abs(per) < 0.005
     ? 'about break-even per contract after fees'
-    : `${per > 0 ? '+' : '−'}$${Math.abs(per).toFixed(2)} per contract after fees`;
+    : `${perContract(per)} after fees`;
   const body = `${label} picks entered at ${b * 10}–${b * 10 + 10}¢ won ${Math.round((s.wins / s.n) * 100)}% (${s.wins} of ${s.n}) over the last ${days} days, ${perText}.`;
   return s.netCents < 0 ? `This price range has lost money: ${body.charAt(0).toLowerCase()}${body.slice(1)}` : body;
 }
@@ -267,8 +330,58 @@ export function buildWhyBitcoin({ meta, edge, record = null, now = new Date() })
   return fitBudget(lines, [5, 1]);
 }
 
-export const WHY_BUILDERS = { bitcoin: buildWhyBitcoin };
-export const RECORD_TOOL_SLUG = { bitcoin: 'bitcoin-edge' };
+// Per-asset context for silver / gold / oil. Settlement is named by what it is, never by
+// vendor (Kalshi settles metals on a third-party index; oil on the front-month WTI settle).
+const COMMODITY_WHY = {
+  silver: {
+    asset: 'Silver',
+    noun: 'silver',
+    label: 'Silver',
+    spotNote: "Kalshi's 15-min reference",
+    settleOn: "Kalshi's silver reference price",
+  },
+  gold: {
+    asset: 'Gold',
+    noun: 'gold',
+    label: 'Gold',
+    spotNote: "Kalshi's 15-min reference",
+    settleOn: "Kalshi's gold reference price",
+  },
+  oil: {
+    asset: 'WTI',
+    label: 'Oil',
+    spotNote: null,
+    settleOn: 'the front-month WTI settle Kalshi uses',
+  },
+};
+
+/**
+ * Silver / gold / oil "Why" lines, same order and budget rules as bitcoin. Pure.
+ * Spot = meta.publicPrice only (null ⇒ setup / typical move / needs omitted).
+ */
+export function buildWhyCommodity(commodity, { meta, edge, record = null, now = new Date() }) {
+  const base = COMMODITY_WHY[commodity];
+  if (!base) return [];
+  const ctx = { ...base, cents: true, atStrike: 0.005 };
+  const x = inputs({ meta, edge, now }, { publicOnly: true });
+  const lines = [
+    setupLine(x, ctx),
+    volLine(x, ctx),
+    disagreementLine(x, edge, ctx),
+    calibrationLine(x, edge),
+    needsLine(x, ctx),
+    momentumLine(x, edge, ctx),
+    bandRecordLine({ record, sidePrice: sidePriceOf(edge), label: ctx.label, withOverall: true }),
+  ];
+  return fitBudget(lines, [5, 1]);
+}
+
+export const buildWhySilver = (args) => buildWhyCommodity('silver', args);
+export const buildWhyGold = (args) => buildWhyCommodity('gold', args);
+export const buildWhyOil = (args) => buildWhyCommodity('oil', args);
+
+export const WHY_BUILDERS = { bitcoin: buildWhyBitcoin, silver: buildWhySilver, gold: buildWhyGold, oil: buildWhyOil };
+export const RECORD_TOOL_SLUG = { bitcoin: 'bitcoin-edge', silver: 'silver-edge', gold: 'gold-edge', oil: 'oil-edge' };
 
 export function hasWhy(commodity) {
   return Object.hasOwn(WHY_BUILDERS, String(commodity ?? ''));

@@ -91,14 +91,18 @@ describe('buildCommodityEmbed', () => {
 
   it('labels the spot field plain `Spot` — the internal spotLabel never prints (F4)', () => {
     const label = 'Yahoo CL=F (contract-aware CLM26.NYM primary, CL=F continuous fallback)';
-    const payload = buildCommodityEmbed(makeMeta('oil', { spotLabel: label }), TOP_EDGE);
+    // copper keeps the legacy fields; oil states its public price in the Why block.
+    const payload = buildCommodityEmbed(makeMeta('copper', { spotLabel: label }), TOP_EDGE);
     const spotField = payload.embeds[0].fields.find((f) => f.name.includes('Spot'));
     expect(spotField.name).toBe('Spot');
     expect(JSON.stringify(payload)).not.toMatch(/Yahoo|CLM26|CL=F/);
+    const oil = buildCommodityEmbed(makeMeta('oil', { spotLabel: label }), TOP_EDGE);
+    expect(oil.embeds[0].description).toMatch(/^WTI is \$35\.40 — /);
+    expect(JSON.stringify(oil)).not.toMatch(/Yahoo|CLM26|CL=F/);
   });
 
   it('labels the model field `Our model`, never `Options model` (F4)', () => {
-    const payload = buildCommodityEmbed(makeMeta('gold'), TOP_EDGE);
+    const payload = buildCommodityEmbed(makeMeta('copper'), TOP_EDGE);
     const names = payload.embeds[0].fields.map((f) => f.name);
     expect(names).toContain('Our model');
     expect(names).not.toContain('Options model');
@@ -112,7 +116,7 @@ describe('buildCommodityEmbed', () => {
     };
     const payload = buildCommodityEmbed(makeMeta('gold'), edge);
     const d = payload.embeds[0].description;
-    expect(d).toBe('Our model 45% vs market 31% that gold is above $35.99 at settle · YES underpriced by 14.2 pts');
+    expect(d).toMatch(/Our model puts the chance Gold finishes above \$35\.99 at 45%; Kalshi prices it at 31% — YES is underpriced by 14 pts\./);
     const blob = JSON.stringify(payload);
     expect(blob).not.toMatch(/\bIV\b|implied vol|options chain|bid|ask|NBBO|Databento|OPRA|Tradier|Massive|Yahoo|Pyth/i);
     expect(blob).not.toContain('rule:R12');
@@ -120,14 +124,16 @@ describe('buildCommodityEmbed', () => {
 
   it('prints the PUBLIC price, never the engine spot (vendor quote / licensed index)', () => {
     const payload = buildCommodityEmbed(makeMeta('gold', { spotPrice: 4289.08, publicPrice: 4285.46 }), TOP_EDGE);
-    const spotField = payload.embeds[0].fields.find((f) => f.name.includes('Spot'));
-    expect(spotField.value).toBe('$4285.46');
-    expect(JSON.stringify(payload)).not.toContain('4289.08');
+    // Gold's Why block states the public price; the vendor quote never appears.
+    expect(payload.embeds[0].description).toMatch(/^Gold is \$4,285\.46 \(Kalshi's 15-min reference\) — /);
+    expect(JSON.stringify(payload)).not.toMatch(/4289\.08|4,289\.08/);
+    const copper = buildCommodityEmbed(makeMeta('copper', { spotPrice: 4289.08, publicPrice: 4285.46 }), TOP_EDGE);
+    expect(copper.embeds[0].fields.find((f) => f.name.includes('Spot')).value).toBe('$4285.46');
   });
 
   it('omits the spot field when there is no public price (no open window)', () => {
     const payload = buildCommodityEmbed(makeMeta('gold', { spotPrice: 4289.08, publicPrice: null }), TOP_EDGE);
     expect(payload.embeds[0].fields.find((f) => f.name.includes('Spot'))).toBeUndefined();
-    expect(JSON.stringify(payload)).not.toContain('4289.08');
+    expect(JSON.stringify(payload)).not.toMatch(/4289\.08|4,289\.08/);
   });
 });

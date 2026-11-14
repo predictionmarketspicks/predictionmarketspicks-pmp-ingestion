@@ -127,6 +127,10 @@ describe('postCommodityAlert — budget contract', () => {
     await postCommodityAlert(meta({ topEdge: { ...edge, rationale: 'IV 31.2% from the USO chain (Databento)' } }), { sb, post, now: NOW });
     const blob = JSON.stringify(payload);
     expect(blob).not.toMatch(/Databento|OPRA|Tradier|Massive|Yahoo|CLM26|USO chain|IV 31/);
-    expect(payload.embeds[0].fields.map((f) => f.name)).toEqual(expect.arrayContaining(['Market price', 'Our model', 'Spot']));
+    // Why layout (2026-11-14): model / market / spot move into the description when stated.
+    const e = payload.embeds[0];
+    const text = [e.description, ...e.fields.map((f) => `${f.name} ${f.value}`)].join('\n');
+    expect(text).toMatch(/Our model/);
+    expect(text).toMatch(/Kalshi prices|Market price/);
   });
 });

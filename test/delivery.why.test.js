@@ -293,3 +293,36 @@ describe('routing + record fetch', () => {
     expect(sb.calls.settlesReads).toBe(0);
   });
 });
+
+// Benny 2026-11-14 ("yes on 3"): disclose when calibration is more cautious than the model.
+describe('calibration line', () => {
+  const why = (o) => buildWhyBitcoin({ meta: meta(), edge: edge(o), now: NOW }).join('\n');
+  it('says there is no edge when calibration lands below the market', () => {
+    const t = why({ calibrated_prob: 0.27 });
+    expect(t).toMatch(/more cautious at 27%, below Kalshi's price: on that read there is no edge here\./);
+  });
+  it('says unconfirmed when calibration sits on the market', () => {
+    expect(why({ calibrated_prob: 0.3 })).toMatch(/more cautious at 30%, about where Kalshi is, so treat this edge as unconfirmed\./);
+  });
+  it('states the smaller edge when calibration lands between market and model', () => {
+    expect(why({ calibrated_prob: 0.35 })).toMatch(/more cautious at 35%; on that read the edge is 6 pts, not 12\./);
+  });
+  it('is silent when calibration agrees (within 3 pts) or is more bullish', () => {
+    expect(why({ calibrated_prob: 0.39 })).not.toMatch(/calibration/);
+    expect(why({ calibrated_prob: 0.5 })).not.toMatch(/calibration/);
+    expect(why({ calibrated_prob: null })).not.toMatch(/calibration/);
+  });
+  it('mirrors for BUY NO', () => {
+    // model YES 0.41 → NO 59; market YES 0.55 → NO 45; calibrated YES 0.53 → NO 47 (12 pts more cautious)
+    const t = buildWhyBitcoin({ meta: meta(), edge: edge({ direction: 'BUY NO', kalshi_yes: 0.55, calibrated_prob: 0.53 }), now: NOW }).join('\n');
+    expect(t).toMatch(/more cautious at 47%; on that read the edge is 2 pts, not 14\.|more cautious at 47%, about where Kalshi is/);
+  });
+  it('survives the char budget with a full record line and stays brand-safe', () => {
+    const record = summarizeBands([{ predicted_side: 'YES', market_price_at_pick: 0.29, resolution: 'lost', net_pnl_cents: -30 }]);
+    const lines = buildWhyBitcoin({ meta: meta(), edge: edge({ calibrated_prob: 0.27 }), record, now: NOW });
+    const t = lines.join('\n');
+    expect(t).toMatch(/calibration/);
+    expect(t.length).toBeLessThanOrEqual(WHY_CHAR_BUDGET);
+    expect(() => assertBrandSafe({ embeds: [{ description: t }] })).not.toThrow();
+  });
+});

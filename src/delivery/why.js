@@ -20,7 +20,7 @@
 const YEAR_MS = 365 * 24 * 3600 * 1000; // the engine's year (yearFraction / T_hours use 365)
 export const RECORD_DAYS = 90;
 export const MIN_RECORD_N = 20;
-export const WHY_CHAR_BUDGET = 700;
+export const WHY_CHAR_BUDGET = 900; // 700 → 900 (2026-11-14): room for the calibration line; the embed caps the description at 1000
 export const DISCLAIMER = 'Market analysis, not financial advice';
 
 // ---------- formatting (prices may carry commas; American ODDS never do) ----------
@@ -136,6 +136,29 @@ function disagreementLine(x, edge, { asset }) {
     : `Our model puts the chance ${asset} finishes above ${k} at ${modelPct}%; Kalshi prices it at ${mktPct}% — YES is underpriced by ${pts} pts.`;
 }
 
+/**
+ * Benny 2026-11-14 ("yes on 3"): when the calibrated probability (the model adjusted for its own
+ * past accuracy — shadow mode, so it never drove this alert) is at least 3 pts MORE CAUTIOUS
+ * than the model, say so. Silence when it agrees or is more bullish: there is no doubt to disclose.
+ */
+export const CALIBRATION_GAP_PTS = 3;
+function calibrationLine(x, edge) {
+  const p = modelProbOf(edge);
+  const c = num(edge?.calibrated_prob);
+  const yes = num(edge?.kalshi_yes);
+  if (![p, c, yes].every((v) => isNum(v) && v > 0 && v < 1)) return null;
+  const no = x.side === 'NO';
+  const side = (v) => (no ? 100 - Math.round(v * 100) : Math.round(v * 100));
+  const m = side(p);
+  const k = side(yes);
+  const cal = side(c);
+  if (m - cal < CALIBRATION_GAP_PTS) return null;
+  const head = `Our calibration — the model adjusted for its own track record — is more cautious at ${cal}%`;
+  if (cal < k) return `${head}, below Kalshi's price: on that read there is no edge here.`;
+  if (cal - k <= 2) return `${head}, about where Kalshi is, so treat this edge as unconfirmed.`;
+  return `${head}; on that read the edge is ${cal - k} pts, not ${m - k}.`;
+}
+
 function needsLine(x, { asset }) {
   if (x.spot == null || x.strike == null) return null;
   const d = x.spot - x.strike; // > 0: spot above the strike
@@ -224,7 +247,7 @@ function fitBudget(lines, dropOrder, budget = WHY_CHAR_BUDGET) {
 
 /**
  * Lines of the bitcoin "Why" block, in order: setup, volatility, disagreement,
- * what it needs / what breaks it, momentum, track record. Pure.
+ * calibration (only when more cautious), what it needs / what breaks it, momentum, track record. Pure.
  * record: summarizeBands() output, or null (line omitted).
  */
 export function buildWhyBitcoin({ meta, edge, record = null, now = new Date() }) {
@@ -234,12 +257,14 @@ export function buildWhyBitcoin({ meta, edge, record = null, now = new Date() })
     setupLine(x, ctx),
     volLine(x, ctx),
     disagreementLine(x, edge, ctx),
+    calibrationLine(x, edge),
     needsLine(x, ctx),
     momentumLine(x, edge),
     bandRecordLine({ record, sidePrice: sidePriceOf(edge), label: 'Bitcoin' }),
   ];
-  // Over budget: momentum goes first, then the volatility sentence.
-  return fitBudget(lines, [4, 1]);
+  // Over budget: momentum goes first, then the volatility sentence. The calibration and
+  // track-record lines are never dropped — they are the honesty.
+  return fitBudget(lines, [5, 1]);
 }
 
 export const WHY_BUILDERS = { bitcoin: buildWhyBitcoin };

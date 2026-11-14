@@ -49,8 +49,11 @@ export function findPickRow(rows, pick) {
 
 // Rebuild a topEdge-shaped object from the pick itself, for a pick minted on an
 // earlier pass whose post failed (its strike may be gone from this snapshot).
-// tool_picks units: market_price_at_pick + predicted_prob in dollars/0–1 for the
-// PICKED side; edge_pp in percentage points.
+// tool_picks units (mint trigger, migration 20261030210000 in the site repo):
+// market_price_at_pick = kalshi_yes and predicted_prob = the model's P(YES), on
+// the YES basis for BOTH sides; edge_pp = signed percentage points. The snapshot
+// row this mirrors is YES-basis too (kalshi_yes, prob_physical), so nothing is
+// complemented for a NO pick — doing so reported the NO price as kalshi_yes.
 export function topEdgeFromPick(pick) {
   const strike = pickStrike(pick);
   if (strike == null) return null;
@@ -63,9 +66,9 @@ export function topEdgeFromPick(pick) {
   return {
     direction: yesSide ? 'BUY YES' : 'BUY NO',
     strike,
-    kalshi_yes: yesSide ? price : 1 - price,
-    prob_physical: yesSide ? prob : 1 - prob,
-    options_prob: yesSide ? prob : 1 - prob,
+    kalshi_yes: price,
+    prob_physical: prob,
+    options_prob: prob,
     model_version: 'v2_physical',
     edge_pp: signed,
     fused_edge_pp: signed,

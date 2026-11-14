@@ -67,6 +67,28 @@ describe('pick → alert', () => {
     expect(tierFromPick(pick)).toBe('MODERATE');
   });
 
+  // Real shape: tool_picks row for gold-edge NO, 2026-11-05 (YES-basis price + prob).
+  it('keeps a NO pick on the YES basis, like the snapshot row it stands in for', () => {
+    const t = topEdgeFromPick({
+      pick_id: 'no-pick',
+      source_row_id: 'gold:KXGOLDD-26NOV0517:4114.00:2026-11-05',
+      predicted_side: 'NO',
+      predicted_prob: '0.1158',
+      market_price_at_pick: '0.2450',
+      edge_pp: '-12.9200',
+      confidence_tier: 2,
+      regime_tags: { strike: 4114 },
+    });
+    expect(t.direction).toBe('BUY NO');
+    expect(t.strike).toBeCloseTo(4114);
+    expect(t.kalshi_yes).toBeCloseTo(0.245); // not 0.755
+    expect(t.prob_physical).toBeCloseTo(0.1158); // not 0.8842
+    expect(t.options_prob).toBeCloseTo(0.1158);
+    expect(t.edge_pp).toBeCloseTo(-0.1292);
+    // Same basis as a commodity_edge_signals row: NO cost = 1 - kalshi_yes.
+    expect(1 - t.kalshi_yes).toBeCloseTo(0.755);
+  });
+
   it('falls back to the strike in source_row_id', () => {
     const t = topEdgeFromPick({ ...pick, regime_tags: null });
     expect(t.strike).toBeCloseTo(86699.99);

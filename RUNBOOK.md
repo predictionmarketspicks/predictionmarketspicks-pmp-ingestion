@@ -114,7 +114,7 @@ vercel env add COMMODITY_EDGE_MODEL_VERSION production
 fly secrets set COMMODITY_EDGE_MODEL_VERSION=v2 -a pmp-ingestion
 
 # Trigger redeploy on both sides — Vercel auto, Fly via:
-npm run deploy   # scripts/deploy.sh — stamps GIT_SHA and waits for /health to report it; a bare `fly deploy` ships build: unknown
+npm run deploy   # scripts/deploy.sh — stamps GIT_SHA and waits for /health to report it. A bare `fly deploy` now fails at build with BUILD REFUSED. That is intended.
 ```
 
 Monitor for 48 hours:
@@ -139,7 +139,7 @@ vercel env add COMMODITY_EDGE_MODEL_VERSION production
 # Enter value: v1
 
 fly secrets set COMMODITY_EDGE_MODEL_VERSION=v1 -a pmp-ingestion
-npm run deploy   # scripts/deploy.sh — stamps GIT_SHA and waits for /health to report it; a bare `fly deploy` ships build: unknown
+npm run deploy   # scripts/deploy.sh — stamps GIT_SHA and waits for /health to report it. A bare `fly deploy` now fails at build with BUILD REFUSED. That is intended.
 ```
 
 Both v1 and v2 keep writing in parallel forever, so a rollback is just a flag flip. Zero data loss.

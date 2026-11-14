@@ -41,8 +41,11 @@ USER node
 # ⛔ ITS ABSENCE IS WHY A METALS-15M STALL COST A LIVE PROBE ON 2026-09-10:
 # /health exposed no way to tell WHICH commit was running, so "is prod actually
 # on c1ec14d?" had to be inferred from uptime against a commit timestamp.
-# `fly deploy` passes this automatically when the arg exists.
+# GIT_SHA has NO usable default: a build without it fails. Deploy with `npm run deploy`
+# (scripts/deploy.sh passes --build-arg GIT_SHA=<short sha>). `fly deploy` does NOT pass it.
 ARG GIT_SHA=unknown
+RUN test "$GIT_SHA" != "unknown" && test -n "$GIT_SHA" || \
+    (echo "BUILD REFUSED: GIT_SHA not set. Deploy with: npm run deploy" >&2; exit 1)
 ENV GIT_SHA=$GIT_SHA
 
 ENV NODE_ENV=production

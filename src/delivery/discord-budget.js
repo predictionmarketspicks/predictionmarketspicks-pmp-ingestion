@@ -24,9 +24,13 @@ import { etDateKey, etDayStart } from '../lib/et-time.js';
 
 export const EDGE_FEED_CHANNEL_ID = '1487857830391451750';
 export const ORACLE_PICKS_CHANNEL_ID = '1487857828084584528';
+// #btc-edge (Pro, 2026-11-13): bitcoin's MODERATE/SPECULATIVE alerts. Same cap as
+// #edge-feed; the per-underlying cap below (2/day) binds long before it does.
+export const BTC_EDGE_CHANNEL_ID = '1570990980239462421';
 // Daily caps per channel — mirror _shared/discord.ts CHANNEL_CAPS.
 export const CHANNEL_DAILY_CAP = {
   [EDGE_FEED_CHANNEL_ID]: 12,
+  [BTC_EDGE_CHANNEL_ID]: 12,
   [ORACLE_PICKS_CHANNEL_ID]: 5,
 };
 export const COMMODITY_FEED = 'commodity';

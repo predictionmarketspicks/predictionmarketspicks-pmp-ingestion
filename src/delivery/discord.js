@@ -6,6 +6,7 @@
 //   STRONG  (≥12pp)     → #oracle-picks 1487857828084584528  (conviction only)
 //   MODERATE (7-12pp)   → #edge-feed     1487857830391451750
 //   SPECULATIVE (4-7pp) → #edge-feed     1487857830391451750  (consolidated 2026-08-01)
+//   bitcoin MODERATE/SPECULATIVE → #btc-edge 1570990980239462421 (Pro, 2026-11-13)
 //   Movers (gain/loss)  → #market-movers  1487857819482063049
 //
 // Embed link convention (superseded 2026-10-25, DISCORD_CLEANUP_AUTOPILOT F8):
@@ -33,6 +34,7 @@ import {
   logCommodityPost,
 } from './discord-budget.js';
 import { etDateKey } from '../lib/et-time.js';
+import { WHY_BUILDERS, DISCLAIMER, hasWhy, modelProbOf, fetchBandRecord } from './why.js';
 
 // Plain sign-up since 2026-10-27: Kalshi rejects our old referral code and has
 // referrals off on our account (main repo handoffs/OFFERS_AUDIT_2026-10-27.md §2).
@@ -43,6 +45,7 @@ const CHANNEL_ID = {
   STRONG: '1487857828084584528',
   MODERATE: '1487857830391451750',   // #edge-feed
   SPECULATIVE: '1487857830391451750', // #edge-feed (was #commodity-edge) — §4.2 SoT: STRONG→#oracle-picks, everything else→#edge-feed
+  BTC_EDGE: '1570990980239462421',   // #btc-edge (Pro) — bitcoin MODERATE/SPECULATIVE since 2026-11-13
   MOVERS: '1487857819482063049',
   BOT_LOGS: '1487857846111567952',
 };
@@ -85,11 +88,15 @@ function probToAmericanOdds(prob) {
   return Math.round(100 / prob - 100);
 }
 
-export function buildCommodityEmbed(meta, topEdge) {
+// opts.record / opts.now feed the "Why" block (why.js) — only for commodities
+// registered in WHY_BUILDERS (bitcoin today). Everyone else gets today's embed,
+// byte-for-byte.
+export function buildCommodityEmbed(meta, topEdge, { record = null, now = new Date() } = {}) {
   // V2.1 stopgap: uncalibrated bitcoin cannot render as STRONG (§2.4).
   // Applied here AND in postCommodityAlert so the embed's tier label can
   // never disagree with the channel it routes to.
   const tier = applyCalibrationTierCeiling(meta.commodity, meta.topTier, meta);
+  if (hasWhy(meta.commodity)) return buildWhyEmbed(meta, topEdge, tier, { record, now });
   const direction = topEdge.direction;
   const edgePct = (topEdge.edge_pp * 100).toFixed(1);
   const sign = topEdge.edge_pp > 0 ? '+' : '−';
@@ -186,6 +193,78 @@ export function buildCommodityEmbed(meta, topEdge) {
   };
 }
 
+// Title parts shared by both layouts. The title format is load-bearing: the evening
+// digest buckets discord_posts_log rows by subject_key, then title
+// (site supabase/functions/discord-evening-digest/teaser.ts bucketOf).
+function commodityTitle(meta, topEdge, tier) {
+  const edgePct = (topEdge.edge_pp * 100).toFixed(1);
+  const sign = topEdge.edge_pp > 0 ? '+' : '−';
+  const prefix = TITLE_PREFIX[meta.commodity] || `${meta.commodity} Edge`;
+  return [prefix, `${topEdge.direction} $${topEdge.strike.toFixed(2)}`, `${sign}${Math.abs(Number(edgePct))}pp`, tier].join(' • ');
+}
+
+function entryRangeField(topEdge) {
+  const side = topEdge.direction === 'BUY NO' ? 'NO' : 'YES';
+  const yes = Number(topEdge.kalshi_yes);
+  const cur = Number.isFinite(yes) ? Math.round((side === 'YES' ? yes : 1 - yes) * 100) : null;
+  const text = topEdge.max_entry_cents != null
+    ? entryRangeText(side, { maxCents: topEdge.max_entry_cents, minCents: topEdge.min_entry_cents ?? null }, cur)
+    : null;
+  return text ? [{ name: 'Entry range', value: sanitize(text, 120), inline: false }] : [];
+}
+
+// The "Why" layout (bitcoin, 2026-11-13): description = the Why lines (setup,
+// volatility, model vs market, what it needs, momentum, track record). The
+// Market price / Our model / Spot fields are dropped only when the Why block
+// states the same number; if a line was omitted for bad inputs, its field stays.
+function buildWhyEmbed(meta, topEdge, tier, { record, now }) {
+  const lines = WHY_BUILDERS[meta.commodity]({ meta, edge: topEdge, record, now });
+  const said = (re) => lines.some((l) => re.test(l));
+  const statesModel = said(/^Our model puts/);
+  const statesSpot = said(/ is \$[\d,.]+ — /);
+
+  const modelProb = modelProbOf(topEdge);
+  const fields = [
+    ...(!statesModel && Number.isFinite(Number(topEdge.kalshi_yes))
+      ? [{ name: 'Market price', value: sanitize(`${(topEdge.kalshi_yes * 100).toFixed(0)}%`, 80), inline: true }]
+      : []),
+    ...(!statesModel && Number.isFinite(modelProb)
+      ? [{ name: 'Our model', value: sanitize(`${(modelProb * 100).toFixed(0)}%`, 80), inline: true }]
+      : []),
+    ...entryRangeField(topEdge),
+    ...(meta.hotPot
+      ? [{ name: 'HOT POT', value: sanitize(`${String(meta.hotPot).replace(/\|/g, ' · ').replace(/=/g, ' ')} — a pocket the record says is running hot`, 120), inline: false }]
+      : []),
+    ...(!statesSpot && meta.publicPrice != null && Number.isFinite(meta.publicPrice)
+      ? [{ name: 'Spot', value: sanitize(`$${meta.publicPrice.toFixed(2)}`, 80), inline: true }]
+      : []),
+  ];
+  const settle = settleTimeEt(meta.eventCloseAt);
+  return {
+    embeds: [
+      {
+        title: sanitize(commodityTitle(meta, topEdge, tier), 256),
+        url: commodityPageUrl(meta.commodity),
+        color: COLOR_BY_TIER[tier] ?? 0xc9a243,
+        description: sanitize(lines.join('\n'), 1000),
+        fields,
+        footer: {
+          text: sanitize([meta.eventTicker, settle ? `settles ${settle}` : null, DISCLAIMER].filter(Boolean).join(' • '), 160),
+        },
+        timestamp: meta.generatedAt,
+      },
+    ],
+    allowed_mentions: { parse: [] },
+  };
+}
+
+// Channel for a published tier. Bitcoin's non-STRONG alerts have their own Pro
+// channel (#btc-edge, 2026-11-13); everything else is unchanged.
+export function commodityChannelFor(commodity, tier) {
+  if (commodity === 'bitcoin' && (tier === 'MODERATE' || tier === 'SPECULATIVE')) return CHANNEL_ID.BTC_EDGE;
+  return CHANNEL_ID[tier] ?? null;
+}
+
 async function postToChannel(channelId, payload) {
   const token = process.env.DISCORD_BOT_TOKEN;
   if (!token) {
@@ -234,11 +313,8 @@ export async function postCommodityAlert(meta, { sb, post = postToChannel, now =
   // not #oracle-picks (§2.4).
   const tier = applyCalibrationTierCeiling(meta.commodity, meta.topTier, meta);
   if (tier === 'NO_EDGE') return false;
-  const channelId = CHANNEL_ID[tier];
+  const channelId = commodityChannelFor(meta.commodity, tier);
   if (!channelId) return false;
-
-  const payload = buildCommodityEmbed(meta, top);
-  assertBrandSafe(payload);
 
   const today = etDateKey(now);
   if (_sessionDate !== today) {
@@ -246,12 +322,17 @@ export async function postCommodityAlert(meta, { sb, post = postToChannel, now =
     _sessionDate = today;
   }
   const client = sb === undefined ? supabaseOrNull() : sb;
-  const [budgetLeft, todayKeys] = client
+  // The band record (Why block) rides the same round-trip; it never throws and is
+  // cached for an hour, so a dead read only omits its line.
+  const [budgetLeft, todayKeys, record] = client
     ? await Promise.all([
         fetchBudgetRemaining(client, channelId),
         fetchUnderlyingKeysToday(client, meta.commodity, now),
+        hasWhy(meta.commodity) ? fetchBandRecord(client, meta.commodity, { now }) : null,
       ])
-    : [null, null];
+    : [null, null, null];
+  const payload = buildCommodityEmbed(meta, top, { record, now });
+  assertBrandSafe(payload);
   const subjectKey = commoditySubjectKey(meta.commodity, top);
   const gate = commodityGate({ meta, edge: top, todayKeys, budgetLeft, sessionKeys: _sessionSent, now });
   if (!gate.ok) {

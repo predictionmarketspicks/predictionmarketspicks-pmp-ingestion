@@ -95,7 +95,11 @@ describe('Discord footer settle time', () => {
       predicted_side: 'YES', predicted_prob: 0.37, market_price_at_pick: 0.27, edge_pp: 10,
       regime_tags: { strike: 86699.99 },
     });
+    // Bitcoin uses the Why layout (2026-11-13): time-to-settle moved into the Why
+    // block; the footer carries the settle time + the one disclaimer clause.
     const footer = buildCommodityEmbed(meta, t).embeds[0].footer.text;
-    expect(footer).toBe('KXBTCD-26SEP2214 • settles 2:00 PM ET • closes in 0.9h • 40 strikes scanned');
+    expect(footer).toBe('KXBTCD-26SEP2214 • settles 2:00 PM ET • Market analysis, not financial advice');
+    const gold = buildCommodityEmbed({ ...meta, commodity: 'gold', eventTicker: 'KXGOLDD-26SEP2214' }, t).embeds[0].footer.text;
+    expect(gold).toBe('KXGOLDD-26SEP2214 • settles 2:00 PM ET • closes in 0.9h • 40 strikes scanned');
   });
 });

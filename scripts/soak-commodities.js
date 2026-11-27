@@ -26,6 +26,7 @@
 import 'dotenv/config';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
+import { isUsMarketHoliday } from '../src/feeds/massive.js';
 
 const COMMODITIES_TO_CHECK = (process.env.SOAK_COMMODITIES || 'silver,gold,oil,bitcoin')
   .split(',')
@@ -216,6 +217,21 @@ function sb() {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
+/**
+ * True when `snapshotDate` (YYYY-MM-DD) is a full US market closure. All four
+ * engines price off US-listed options (SLV, GLD, USO, IBIT) and sit out those
+ * days by design (isOptionsMarketOpen in src/feeds/massive.js), so zero
+ * snapshots is the correct result and the soak must not go red. Added after
+ * the 2026-11-26 Thanksgiving run failed on four "snapshots=0" lines.
+ * Half days (1 PM ET close) are NOT skipped: the engines run those sessions.
+ */
+export function isMarketClosedDate(snapshotDate) {
+  // 17:00 UTC is midday in New York in both EST and EDT, so the ET calendar
+  // date the holiday table is keyed by equals snapshotDate.
+  const d = new Date(`${snapshotDate}T17:00:00Z`);
+  return Number.isFinite(d.getTime()) && isUsMarketHoliday(d);
+}
+
 function todayUtcISO() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -334,6 +350,12 @@ async function postBotLog(content) {
 async function main() {
   const client = sb();
   const snapshotDate = process.env.SOAK_DATE || todayUtcISO();
+  if (isMarketClosedDate(snapshotDate)) {
+    const line = `Commodity engine soak — ${snapshotDate} — SKIPPED (US market holiday; the engines do not run, so no snapshots are expected)`;
+    console.log(line);
+    await postBotLog(line);
+    process.exit(0);
+  }
   console.log(`[soak] checking ${COMMODITIES_TO_CHECK.join(', ')} for ${snapshotDate}`);
 
   const results = [];

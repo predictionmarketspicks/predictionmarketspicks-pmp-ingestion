@@ -5,7 +5,7 @@
 // future "just nudge the number" change can't silently restore the cry-wolf.
 
 import { describe, it, expect } from 'vitest';
-import { evaluateSmile, minSmileRatio, classifyFlagCounts } from '../scripts/soak-commodities.js';
+import { evaluateSmile, minSmileRatio, classifyFlagCounts, isMarketClosedDate } from '../scripts/soak-commodities.js';
 
 describe('evaluateSmile', () => {
   it('skips when fewer than 3 strikes have usable IV', () => {
@@ -142,5 +142,23 @@ describe('classifyFlagCounts', () => {
       smile_kalshi_diverged: 11,               // FAIL
     });
     expect(v.map((x) => x.flag).sort()).toEqual(['kalshi_no_book', 'smile_kalshi_diverged']);
+  });
+});
+
+describe('isMarketClosedDate', () => {
+  it('skips full US market closures (the 2026-11-26 Thanksgiving false alarm)', () => {
+    expect(isMarketClosedDate('2026-11-26')).toBe(true);
+    expect(isMarketClosedDate('2026-12-25')).toBe(true);
+  });
+
+  it('does not skip ordinary trading days or half days', () => {
+    expect(isMarketClosedDate('2026-11-25')).toBe(false);
+    expect(isMarketClosedDate('2026-11-27')).toBe(false); // 1 PM ET close: the engines still run
+    expect(isMarketClosedDate('2026-12-24')).toBe(false);
+  });
+
+  it('does not skip on a malformed date (the checks then run and report)', () => {
+    expect(isMarketClosedDate('')).toBe(false);
+    expect(isMarketClosedDate('not-a-date')).toBe(false);
   });
 });
